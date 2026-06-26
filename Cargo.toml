@@ -1,0 +1,32 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Brandon LeBlanc <brandon@leblanc.codes>"]
+repository = "https://github.com/demosdemon/arity-arrays.git"
+homepage = "https://github.com/demosdemon/arity-arrays"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+publish = false
+
+[workspace.dependencies]
+
+[workspace.lints.rust]
+let_underscore_drop = "warn"
+non_ascii_idents = "deny"
+
+[workspace.lints.clippy]
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo_common_metadata = "warn"
+negative_feature_names = "warn"
+redundant_feature_names = "warn"
+unwrap_used = "warn"
+undocumented_unsafe_blocks = "warn"

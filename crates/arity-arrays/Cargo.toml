@@ -1,0 +1,16 @@
+[package]
+name = "arity-arrays"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+hybrid-array = "0.4.12"
+
+[lints]
+workspace = true

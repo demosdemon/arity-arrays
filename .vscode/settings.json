@@ -1,0 +1,13 @@
+{
+  "rust-analyzer.cargo.features": [],
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.overrideCommand": [
+    "cargo",
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--keep-going",
+    "--message-format=json-diagnostic-rendered-ansi",
+    // "--features=",
+  ],
+}
