@@ -1,0 +1,22 @@
+[alias]
+__vendored = [
+    "--config",
+    "source.crates-io.replace-with = \"vendored-sources\"",
+    "--frozen",
+    "--offline",
+]
+
+v-check = "__vendored check"
+v-clippy = "__vendored clippy"
+v-build = "__vendored build"
+v-run = "__vendored run"
+v-test = "__vendored test"
+v-install = "__vendored install"
+
+v = "vendor --verbose --versioned-dirs"
+
+build-xtask = "build --package xtask --release --bin xtask"
+xtask = "run --package xtask --release --bin xtask --"
+
+[source.vendored-sources]
+directory = "vendor"
