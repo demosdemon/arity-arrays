@@ -1,8 +1,8 @@
 //! Niche integer index types `U3`–`U7`, the [`Niche`] trait, and the `u8`
 //! arity-256 index.
 
+use crate::Sealed;
 use crate::range::NicheRangeInclusive;
-use crate::sealed::Sealed;
 
 /// The error returned by `TryFrom<u8>` for a niche integer when the value is
 /// out of range. Mirrors [`core::num::TryFromIntError`], which has no public
@@ -22,6 +22,11 @@ impl core::error::Error for TryFromIntError {}
 /// A fixed-domain integer index whose value is always `< COUNT`.
 ///
 /// Sealed: implemented only by `U3`–`U7` and `u8` (the arity-256 index).
+#[expect(
+    private_bounds,
+    reason = "Sealed is an intentionally private supertrait that seals Niche \
+              against downstream implementations"
+)]
 pub trait Niche: Copy + Ord + Sized + Sealed {
     /// Number of valid values (`2^BITS`): 8, 16, 32, 64, 128, or 256.
     const COUNT: usize;
