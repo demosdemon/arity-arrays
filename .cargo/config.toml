@@ -15,8 +15,5 @@ v-install = "__vendored install"
 
 v = "vendor --verbose --versioned-dirs"
 
-build-xtask = "build --package xtask --release --bin xtask"
-xtask = "run --package xtask --release --bin xtask --"
-
 [source.vendored-sources]
 directory = "vendor"
