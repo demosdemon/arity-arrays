@@ -10,12 +10,11 @@
 > to 256.
 >
 > **Supersedes the initial scaffold.** The repository starts with a single
-> `arity-arrays` crate whose modules are `bitmap` / `dense` / `sparse`, plus an
-> `xtask` whose only command (`generate-niche-repr`) emits niche `Repr` enums as
-> text. This design replaces that scaffold: three crates (below), modules named
-> `fixed` / `packed`, and compile-time `seq-macro` codegen in place of the xtask
-> command. The empty scaffold files are restructured before any code is written;
-> the `xtask` `generate-niche-repr` command is removed (see [Codegen](#the-niche-trick)).
+> `arity-arrays` crate whose modules are `bitmap` / `dense` / `sparse`. This
+> design replaces that scaffold: three crates (below), modules named `fixed` /
+> `packed`, and compile-time `seq-macro` codegen for the niche `Repr` enums (see
+> [Codegen](#the-niche-trick)). The empty scaffold files are restructured before
+> any code is written.
 
 ## Motivation
 
@@ -151,17 +150,11 @@ as **niches**, which earns both payoffs:
 the `0..2ⁿ` match arms. The single declarative macro is invoked five times
 (`niche_int!(U3, Repr3, 3); … niche_int!(U7, Repr7, 7);`).
 
-This replaces the scaffold's `xtask generate-niche-repr` text-codegen command.
 Compile-time expansion keeps a single source of truth (no committed generated
 `.rs` to drift), at the cost of one build dependency (`seq-macro`) and generated
 code that is visible only via `cargo expand`. Both the inner `Repr` enum and the
 outer `U{n}` struct derive `Default` (`#[default]` on variant 0, so
-`U{n}::default() == U{n}::MIN`). With `generate-niche-repr` gone, the `xtask`
-crate has no remaining commands and is removed from the workspace. If it is later
-reinstated for other dev tasks it pins its own `rust-version`: this workspace
-applies a higher MSRV to CLI/dev tooling (currently `1.96`) than to library
-crates (`1.92`, see [Dependencies and toolchain](#dependencies-and-toolchain)),
-so the libraries never inherit a floor raised by a dev-only binary.
+`U{n}::default() == U{n}::MIN`).
 
 ### Generated surface (per `U{n}`)
 
@@ -490,11 +483,11 @@ arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
   (dev: `proptest`).
 - Edition 2024 (workspace default). Bump workspace `rust-version` **1.85 → 1.92**
   (`&raw` needs 1.82, edition 2024 needs 1.85; 1.92 comfortably covers both). The
-  floor is set by workspace policy: library crates pin a recent stable a few
-  releases behind the bleeding edge (1.92) so downstream consumers are not forced
-  onto the newest toolchain, while CLI/dev tooling may track current stable
-  (1.96). `&raw` and edition 2024 are the only features that hard-require ≥ 1.85;
-  the remaining headroom is the policy margin, not a technical requirement.
+  floor reflects a library policy of pinning a recent stable a few releases behind
+  the bleeding edge so downstream consumers are not forced onto the newest
+  toolchain: `&raw` and edition 2024 are the only features that hard-require
+  ≥ 1.85, and the remaining headroom to 1.92 is the policy margin, not a technical
+  requirement. (All three crates are libraries; the workspace has no binary.)
 
 ## Continuous integration
 
