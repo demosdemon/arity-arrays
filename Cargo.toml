@@ -21,6 +21,7 @@ arity-index = { path = "crates/arity-index", version = "0.1.0" }
 [workspace.lints.rust]
 let_underscore_drop = "warn"
 non_ascii_idents = "deny"
+unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 missing_panics_doc = "allow"
@@ -32,4 +33,3 @@ negative_feature_names = "warn"
 redundant_feature_names = "warn"
 unwrap_used = "warn"
 undocumented_unsafe_blocks = "deny"
-unsafe_op_in_unsafe_fn = "deny"
