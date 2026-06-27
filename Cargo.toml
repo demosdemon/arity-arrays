@@ -10,8 +10,7 @@ repository = "https://github.com/demosdemon/arity-arrays.git"
 homepage = "https://github.com/demosdemon/arity-arrays"
 edition = "2024"
 license = "MIT"
-rust-version = "1.85"
-publish = false
+rust-version = "1.92"
 
 [workspace.dependencies]
 arity-arrays = { path = "crates/arity-arrays", version = "0.1.0" }

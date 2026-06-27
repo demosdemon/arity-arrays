@@ -7,7 +7,10 @@ homepage.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+description = "Fixed-width bitmaps (u8-u128, U256) indexed by niche integers, with a double-ended set-bit iterator"
+readme = "README.md"
+keywords = ["bitmap", "bitset", "niche", "no-std", "u256"]
+categories = ["no-std", "data-structures"]
 
 [dependencies]
 arity-index.workspace = true
