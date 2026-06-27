@@ -4,8 +4,8 @@
 use crate::range::NicheRangeInclusive;
 use crate::sealed::Sealed;
 
-/// The error returned by `TryFrom<u8>` for a niche integer when the value is out
-/// of range. Mirrors [`core::num::TryFromIntError`], which has no public
+/// The error returned by `TryFrom<u8>` for a niche integer when the value is
+/// out of range. Mirrors [`core::num::TryFromIntError`], which has no public
 /// constructor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

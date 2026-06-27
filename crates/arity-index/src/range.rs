@@ -5,9 +5,10 @@
 //! bounds as `usize` and reconstruct each value at yield time; the cursor is
 //! always `< COUNT` by construction, so the reconstruction is sound.
 
-use crate::Niche;
 use core::iter::FusedIterator;
 use core::marker::PhantomData;
+
+use crate::Niche;
 
 /// A half-open range `[start, end)` over the values of a [`Niche`] type.
 #[derive(Clone, Debug)]
@@ -89,7 +90,8 @@ impl<N: Niche> NicheRangeInclusive<N> {
         }
     }
 
-    /// The whole domain `[0, COUNT - 1]`. Backs [`Niche::all`](crate::Niche::all).
+    /// The whole domain `[0, COUNT - 1]`. Backs
+    /// [`Niche::all`](crate::Niche::all).
     pub(crate) const fn full() -> Self {
         Self {
             lo: 0,
@@ -141,11 +143,7 @@ impl<N: Niche> DoubleEndedIterator for NicheRangeInclusive<N> {
 
 impl<N: Niche> ExactSizeIterator for NicheRangeInclusive<N> {
     fn len(&self) -> usize {
-        if self.done {
-            0
-        } else {
-            self.hi - self.lo + 1
-        }
+        if self.done { 0 } else { self.hi - self.lo + 1 }
     }
 }
 
@@ -154,7 +152,8 @@ impl<N: Niche> FusedIterator for NicheRangeInclusive<N> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{U3, U4};
+    use crate::U3;
+    use crate::U4;
 
     extern crate alloc;
     use alloc::vec::Vec;
