@@ -6,6 +6,25 @@
 //! [`PackedArray`] is a pointer-sized, heap-packed representation that stores
 //! only the present elements. Both are generic over the [`Arity`] trait, which
 //! pairs an index type with a bitmap backing and a `hybrid-array` size.
+//!
+//! ```
+//! use arity_arrays::{Arity16, FixedArray, PackedArray};
+//! use arity_arrays::index::{Niche, U4};
+//!
+//! let mut full = FixedArray::<Option<u32>, Arity16>::new();
+//! full[U4::new_masked(1)] = Some(10);
+//! full[U4::new_masked(9)] = Some(90);
+//!
+//! // Pack: pointer-sized handle, two elements on the heap.
+//! let packed = PackedArray::from(&full);
+//! assert_eq!(packed.count(), 2);
+//! assert_eq!(packed.get(U4::new_masked(9)), Some(&90));
+//!
+//! let present: alloc::vec::Vec<(u8, u32)> =
+//!     packed.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+//! assert_eq!(present, alloc::vec![(1, 10), (9, 90)]);
+//! # extern crate alloc;
+//! ```
 
 extern crate alloc;
 
@@ -13,12 +32,17 @@ pub mod arity;
 pub mod fixed;
 pub mod packed;
 
-pub use arity::{Arity, Arity8, Arity16, Arity32, Arity64, Arity128, Arity256};
-pub use fixed::FixedArray;
-pub use packed::PackedArray;
-
+pub use arity::Arity;
+pub use arity::Arity8;
+pub use arity::Arity16;
+pub use arity::Arity32;
+pub use arity::Arity64;
+pub use arity::Arity128;
+pub use arity::Arity256;
 pub use arity_bitmap as bitmap;
 pub use arity_index as index;
+pub use fixed::FixedArray;
+pub use packed::PackedArray;
 
 /// Prevents downstream crates from implementing [`Arity`](crate::Arity).
 trait Sealed {}

@@ -1,23 +1,26 @@
 //! [`PackedArray`]: a pointer-sized, heap-packed array storing only present
 //! elements, addressed by bitmap rank-select.
 
+use alloc::alloc::alloc;
+use alloc::alloc::dealloc;
+use alloc::alloc::handle_alloc_error;
 use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-use alloc::alloc::{alloc, dealloc, handle_alloc_error};
-
 use arity_bitmap::Bitmap;
 
-use crate::{Arity, FixedArray};
+use crate::Arity;
+use crate::FixedArray;
 
-/// Header of the heap block: the bitmap followed (after alignment padding) by the
-/// element array. `#[repr(C)]` makes `data` the canonical element-array address.
+/// Header of the heap block: the bitmap followed (after alignment padding) by
+/// the element array. `#[repr(C)]` makes `data` the canonical element-array
+/// address.
 #[repr(C)]
 struct Inner<A: Arity, T> {
     bitmap: A::Bitmap,
-    /// Zero-sized address anchor for the trailing element array; obtain the base
-    /// with `&raw mut (*p).data` (RFC 2582).
+    /// Zero-sized address anchor for the trailing element array; obtain the
+    /// base with `&raw mut (*p).data` (RFC 2582).
     data: [T; 0],
 }
 
@@ -26,7 +29,10 @@ struct Inner<A: Arity, T> {
 /// `None` ↔ empty (no allocation). `Some(ptr)` ↔ a heap block sized to exactly
 /// the present elements. The `NonNull` null-pointer niche makes this type the
 /// size of a pointer for every `A`.
-pub struct PackedArray<T, A: Arity>(Option<NonNull<Inner<A, T>>>, PhantomData<alloc::boxed::Box<T>>);
+pub struct PackedArray<T, A: Arity>(
+    Option<NonNull<Inner<A, T>>>,
+    PhantomData<alloc::boxed::Box<T>>,
+);
 
 // Compile-time guarantee: pointer-sized.
 const _: () = assert!(
@@ -99,7 +105,8 @@ impl<T, A: Arity> PackedArray<T, A> {
         Some(unsafe { &*data_ptr(ptr).add(rank) })
     }
 
-    /// Iterates over present elements as `(A::Index, &T)`, ascending. Double-ended.
+    /// Iterates over present elements as `(A::Index, &T)`, ascending.
+    /// Double-ended.
     #[must_use]
     pub fn iter_present(&self) -> PackedPresentIter<'_, T, A> {
         self.0.map_or_else(
@@ -139,8 +146,8 @@ impl<T, A: Arity> Default for PackedArray<T, A> {
     }
 }
 
-/// Moves each `Some` element of a `FixedArray<Option<T>, A>` into a packed block;
-/// `None` slots are dropped.
+/// Moves each `Some` element of a `FixedArray<Option<T>, A>` into a packed
+/// block; `None` slots are dropped.
 impl<T, A: Arity> From<FixedArray<Option<T>, A>> for PackedArray<T, A> {
     fn from(src: FixedArray<Option<T>, A>) -> Self {
         // Pass 1 (by ref): compute the bitmap.
@@ -180,7 +187,8 @@ impl<T, A: Arity> From<FixedArray<Option<T>, A>> for PackedArray<T, A> {
     }
 }
 
-/// Clones each present element of a `&FixedArray<Option<T>, A>` into a packed block.
+/// Clones each present element of a `&FixedArray<Option<T>, A>` into a packed
+/// block.
 impl<T: Clone, A: Arity> From<&FixedArray<Option<T>, A>> for PackedArray<T, A> {
     fn from(src: &FixedArray<Option<T>, A>) -> Self {
         // Drop guard for panic safety while cloning into the new block.
@@ -194,8 +202,14 @@ impl<T: Clone, A: Arity> From<&FixedArray<Option<T>, A>> for PackedArray<T, A> {
                 // SAFETY: `initialized` leading elements of a live `capacity`-sized block.
                 unsafe {
                     let dp = data_ptr(self.inner);
-                    core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(dp, self.initialized));
-                    dealloc(self.inner.as_ptr().cast(), alloc_layout::<A, T>(self.capacity));
+                    core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(
+                        dp,
+                        self.initialized,
+                    ));
+                    dealloc(
+                        self.inner.as_ptr().cast(),
+                        alloc_layout::<A, T>(self.capacity),
+                    );
                 }
             }
         }
@@ -220,7 +234,11 @@ impl<T: Clone, A: Arity> From<&FixedArray<Option<T>, A>> for PackedArray<T, A> {
         unsafe { (&raw mut (*inner.as_ptr()).bitmap).write(bitmap) };
         // SAFETY: `inner` valid; `data_ptr` is the base of `count` element slots.
         let dp = unsafe { data_ptr(inner) };
-        let mut guard = InitGuard { inner, initialized: 0, capacity: count };
+        let mut guard = InitGuard {
+            inner,
+            initialized: 0,
+            capacity: count,
+        };
         for (_i, v) in src.iter_present() {
             // SAFETY: at most `count` present elements; `dp.add(initialized)` is an
             // uninitialised in-bounds slot; `write` initialises it.
@@ -261,7 +279,8 @@ impl<T, A: Arity> From<PackedArray<T, A>> for FixedArray<Option<T>, A> {
     }
 }
 
-/// Clones each present element of a `&PackedArray` into a `FixedArray<Option<T>, A>`.
+/// Clones each present element of a `&PackedArray` into a
+/// `FixedArray<Option<T>, A>`.
 impl<T: Clone, A: Arity> From<&PackedArray<T, A>> for FixedArray<Option<T>, A> {
     fn from(src: &PackedArray<T, A>) -> Self {
         let mut out = Self::new();
@@ -386,13 +405,21 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
                 // `initialized` leading elements are initialised.
                 unsafe {
                     let dp = data_ptr(self.inner);
-                    core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(dp, self.initialized));
-                    dealloc(self.inner.as_ptr().cast(), alloc_layout::<A, T>(self.capacity));
+                    core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(
+                        dp,
+                        self.initialized,
+                    ));
+                    dealloc(
+                        self.inner.as_ptr().cast(),
+                        alloc_layout::<A, T>(self.capacity),
+                    );
                 }
             }
         }
 
-        let Some(ptr) = self.0 else { return Self::new() };
+        let Some(ptr) = self.0 else {
+            return Self::new();
+        };
         // SAFETY: `ptr` valid per the invariant.
         let bitmap = unsafe { ptr.as_ref().bitmap };
         let count = bitmap.count_ones() as usize;
@@ -409,7 +436,11 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
         // SAFETY: `new_inner` was just allocated; `data_ptr` gives the element base.
         let dst = unsafe { data_ptr(new_inner) };
 
-        let mut guard = CloneGuard { inner: new_inner, initialized: 0, capacity: count };
+        let mut guard = CloneGuard {
+            inner: new_inner,
+            initialized: 0,
+            capacity: count,
+        };
         for i in 0..count {
             // SAFETY: `i < count`; `src.add(i)` is initialised; `dst.add(i)` is an
             // uninitialised slot; `write` initialises it.
@@ -424,7 +455,10 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
 impl<T: PartialEq, A: Arity> PartialEq for PackedArray<T, A> {
     fn eq(&self, other: &Self) -> bool {
         self.bitmap() == other.bitmap()
-            && self.iter_present().map(|(_, v)| v).eq(other.iter_present().map(|(_, v)| v))
+            && self
+                .iter_present()
+                .map(|(_, v)| v)
+                .eq(other.iter_present().map(|(_, v)| v))
     }
 }
 
@@ -460,9 +494,10 @@ impl<T: core::panic::UnwindSafe, A: Arity> core::panic::UnwindSafe for PackedArr
 impl<T: core::panic::RefUnwindSafe, A: Arity> core::panic::RefUnwindSafe for PackedArray<T, A> {}
 
 // `PackedPresentIter` holds a `*const T` (which suppresses the auto-impls) but
-// only ever yields `&T` — it behaves like a `slice::Iter`, so it is `Send`/`Sync`
-// exactly when `T: Sync`. (`PackedAllIter` borrows `&PackedArray`, so it derives
-// `Send`/`Sync` automatically once `PackedArray: Sync`.)
+// only ever yields `&T` — it behaves like a `slice::Iter`, so it is
+// `Send`/`Sync` exactly when `T: Sync`. (`PackedAllIter` borrows
+// `&PackedArray`, so it derives `Send`/`Sync` automatically once `PackedArray:
+// Sync`.)
 #[expect(
     clippy::non_send_fields_in_send_ty,
     reason = "`bits` iterates over `A::Bitmap`, a primitive type that is always Send; \
@@ -477,9 +512,12 @@ unsafe impl<T: Sync, A: Arity> Sync for PackedPresentIter<'_, T, A> {}
 mod tests {
     extern crate std;
 
-    use super::*;
-    use crate::{Arity16, Arity256, FixedArray};
     use arity_index::U4;
+
+    use super::*;
+    use crate::Arity16;
+    use crate::Arity256;
+    use crate::FixedArray;
 
     #[test]
     fn pointer_sized_and_empty() {
@@ -573,7 +611,8 @@ mod tests {
     #[test]
     fn drop_runs_once_per_element() {
         use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
 
         struct Counted(Arc<AtomicUsize>);
         impl Drop for Counted {
@@ -595,7 +634,8 @@ mod tests {
     #[test]
     fn clone_is_independent() {
         use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
 
         struct Counted(Arc<AtomicUsize>);
         impl Clone for Counted {
@@ -626,7 +666,8 @@ mod tests {
     fn clone_panic_frees_partial() {
         use std::panic;
         use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
 
         struct Panicky {
             drops: Arc<AtomicUsize>,
@@ -635,7 +676,10 @@ mod tests {
         impl Clone for Panicky {
             fn clone(&self) -> Self {
                 assert!(self.clones.fetch_add(1, Ordering::SeqCst) < 2, "boom");
-                Self { drops: self.drops.clone(), clones: self.clones.clone() }
+                Self {
+                    drops: self.drops.clone(),
+                    clones: self.clones.clone(),
+                }
             }
         }
         impl Drop for Panicky {
@@ -648,7 +692,10 @@ mod tests {
         let clones = Arc::new(AtomicUsize::new(0));
         let mut src = FixedArray::<Option<Panicky>, Arity16>::new();
         for i in 0..4u8 {
-            src[U4::new_masked(i)] = Some(Panicky { drops: drops.clone(), clones: clones.clone() });
+            src[U4::new_masked(i)] = Some(Panicky {
+                drops: drops.clone(),
+                clones: clones.clone(),
+            });
         }
         let p = PackedArray::from(src);
         let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {

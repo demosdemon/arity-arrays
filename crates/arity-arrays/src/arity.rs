@@ -4,7 +4,13 @@
 use arity_bitmap::Bitmap;
 use arity_index::Niche;
 use hybrid_array::ArraySize;
-use hybrid_array::typenum::{U8, U16, U32, U64, U128, U256, Unsigned};
+use hybrid_array::typenum::U8;
+use hybrid_array::typenum::U16;
+use hybrid_array::typenum::U32;
+use hybrid_array::typenum::U64;
+use hybrid_array::typenum::U128;
+use hybrid_array::typenum::U256;
+use hybrid_array::typenum::Unsigned;
 
 /// A power-of-two arity (8, 16, 32, 64, 128, or 256) that ties together a niche
 /// index type, a bitmap backing, and a `hybrid-array` size.

@@ -1,14 +1,17 @@
 //! [`FixedArray`]: full-width inline storage, one `T` per slot.
 
-use core::ops::{Deref, DerefMut, Index, IndexMut};
+use core::ops::Deref;
+use core::ops::DerefMut;
+use core::ops::Index;
+use core::ops::IndexMut;
 
 use arity_index::Niche;
 use hybrid_array::Array;
 
 use crate::Arity;
 
-/// A full-width array with one `T` per slot, indexed by `A::Index` without bounds
-/// checks.
+/// A full-width array with one `T` per slot, indexed by `A::Index` without
+/// bounds checks.
 ///
 /// `hybrid_array::Array` is an implementation detail — it never appears in a
 /// public signature (the type exposes `Deref<Target = [T]>` / `AsRef<[T]>`), so
@@ -103,7 +106,8 @@ impl<'a, T, A: Arity> IntoIterator for &'a FixedArray<T, A> {
     type Item = (A::Index, &'a T);
     // Route through the slice so the iterator is the std `slice::Iter` (not
     // `Array::iter`'s inherent `hybrid_array::Iter`), matching the named type.
-    type IntoIter = core::iter::Zip<arity_index::NicheRangeInclusive<A::Index>, core::slice::Iter<'a, T>>;
+    type IntoIter =
+        core::iter::Zip<arity_index::NicheRangeInclusive<A::Index>, core::slice::Iter<'a, T>>;
     fn into_iter(self) -> Self::IntoIter {
         A::Index::all().zip(self.0.as_slice().iter())
     }
@@ -111,7 +115,8 @@ impl<'a, T, A: Arity> IntoIterator for &'a FixedArray<T, A> {
 
 impl<'a, T, A: Arity> IntoIterator for &'a mut FixedArray<T, A> {
     type Item = (A::Index, &'a mut T);
-    type IntoIter = core::iter::Zip<arity_index::NicheRangeInclusive<A::Index>, core::slice::IterMut<'a, T>>;
+    type IntoIter =
+        core::iter::Zip<arity_index::NicheRangeInclusive<A::Index>, core::slice::IterMut<'a, T>>;
     fn into_iter(self) -> Self::IntoIter {
         A::Index::all().zip(self.0.as_mut_slice().iter_mut())
     }
@@ -162,9 +167,12 @@ impl<T, A: Arity> Default for FixedArray<Option<T>, A> {
 
 #[cfg(test)]
 mod tests {
+    use arity_index::U3;
+    use arity_index::U4;
+
     use super::*;
-    use crate::{Arity16, Arity8};
-    use arity_index::{U3, U4};
+    use crate::Arity8;
+    use crate::Arity16;
 
     extern crate alloc;
     use alloc::vec::Vec;
@@ -201,7 +209,16 @@ mod tests {
     fn into_iter_pairs_with_index() {
         let a = FixedArray::<u8, Arity8>::from_fn(|i| i.as_u8() * 2);
         let pairs: Vec<(u8, u8)> = (&a).into_iter().map(|(i, &v)| (i.as_u8(), v)).collect();
-        assert_eq!(pairs, alloc::vec![(0, 0), (1, 2), (2, 4), (3, 6), (4, 8), (5, 10), (6, 12), (7, 14)]);
+        assert_eq!(pairs, alloc::vec![
+            (0, 0),
+            (1, 2),
+            (2, 4),
+            (3, 6),
+            (4, 8),
+            (5, 10),
+            (6, 12),
+            (7, 14)
+        ]);
         // value iterator is double-ended
         let last = a.into_iter().next_back().map(|(i, v)| (i.as_u8(), v));
         assert_eq!(last, Some((7, 14)));
@@ -241,7 +258,10 @@ mod tests {
         let mut a = FixedArray::<Option<u8>, Arity16>::new();
         assert_eq!(a.take_only_child(), None);
         a[U4::new_masked(5)] = Some(50);
-        assert_eq!(a.take_only_child().map(|(i, v)| (i.as_u8(), v)), Some((5, 50)));
+        assert_eq!(
+            a.take_only_child().map(|(i, v)| (i.as_u8(), v)),
+            Some((5, 50))
+        );
         assert_eq!(a.count(), 0);
         a[U4::new_masked(2)] = Some(20);
         a[U4::new_masked(6)] = Some(60);
