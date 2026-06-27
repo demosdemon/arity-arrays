@@ -1601,7 +1601,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo +nightly fmt --all --check
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo +stable clippy --workspace --all-targets --all-features -- -D warnings
 
   miri:
     runs-on: ubuntu-26.04
