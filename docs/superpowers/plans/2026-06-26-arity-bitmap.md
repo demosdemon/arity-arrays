@@ -13,9 +13,11 @@ This is **plan 2 of 3** (`arity-index` ✓ → **`arity-bitmap`** → `arity-arr
 - `arity_index::Niche`: `const COUNT: usize`, `fn as_usize(self) -> usize`, `fn try_from_usize(i: usize) -> Option<Self>`, `fn all() -> NicheRangeInclusive<Self>` (sealed; `Copy + Ord`).
 - Index types `arity_index::{U3, U4, U5, U6, U7}` and native `u8` all implement `Niche` with `COUNT` = 8/16/32/64/128/256 respectively.
 
-## Key design decision (please confirm during plan review)
+## Key design decision
 
-The bit-scanning primitives (`lowest set bit`, `highest set bit`, `clear bit`) are kept **off** the public `Bitmap` trait, per the spec ("`trailing_zeros`/`clear_lowest` are internal details of `BitIter`"). They live on a crate-private `Raw` trait. The chosen mechanism — `pub struct BitIter<B: Raw>` with a private-trait bound, and `Bitmap::bits()` returning `BitIter<Self> where Self: Raw<…>` — has been verified to compile cleanly (private trait in a generic bound / where-clause is permitted; only signature *types* and supertraits are restricted). The alternative (a per-backing associated iterator type) needs ~6 iterator definitions; the alternative (`#[doc(hidden)]` methods on `Bitmap`) leaves them technically public. The `Raw` split is the cleanest of the three.
+The bit-scanning primitives (`lowest set bit`, `highest set bit`, `clear bit`) are kept **out of the rendered docs and unimplementable externally**, per the spec ("`trailing_zeros`/`clear_lowest` are internal details of `BitIter`"). They live on a separate `Raw` trait that `BitIter<B: Raw>` is generic over.
+
+`Raw` is **`#[doc(hidden)] pub` and sealed** (`Raw: Copy + Eq + sealed::Sealed`) — NOT `pub(crate)`. On **edition 2024** a `pub(crate)` `Raw` does not work: `BitIter`'s public `Iterator::Item = B::Index` leaks the private `Raw::Index` (E0446, hard error), and the public `Bitmap::bits()`'s `where Self: Raw` bound trips `private_bounds` (a denied warning). Making `Raw` `#[doc(hidden)] pub` removes both — there is no privacy mismatch, the trait is absent from docs, and the `Sealed` supertrait means no downstream crate can implement it. External code could still *name* `Raw`/call the `raw_*` methods, but they are doc-hidden and `raw_`-prefixed: this is the standard pragmatic pattern under edition 2024's stricter private-in-public rules. (Both alternatives were tested and rejected: a per-backing associated iterator type needs ~6 iterator definitions; a `pub(crate)` `Raw` cannot compile on edition 2024.)
 
 ## Global Constraints
 
@@ -65,16 +67,22 @@ mod sealed {
     pub trait Sealed {}
 }
 
-/// Crate-private bit-scanning mechanics used by [`BitIter`]. Kept off the public
-/// [`Bitmap`] surface deliberately. The `raw_lowest`/`raw_highest` methods have
-/// the precondition `!self.raw_is_zero()`.
-pub(crate) trait Raw: Copy + Eq {
+/// Bit-scanning mechanics used by [`BitIter`]. `#[doc(hidden)]` and sealed so it
+/// stays out of the docs and cannot be implemented downstream; it is `pub` (not
+/// `pub(crate)`) only because edition 2024 forbids a private trait from leaking
+/// through `BitIter`'s public `Iterator::Item` and `Bitmap::bits`'s bound (see
+/// the "Key design decision" section). The `raw_lowest`/`raw_highest` methods
+/// have the precondition `!self.raw_is_zero()`.
+#[doc(hidden)]
+pub trait Raw: Copy + Eq + sealed::Sealed {
     type Index: Niche;
     fn raw_is_zero(self) -> bool;
     fn raw_popcount(self) -> u32;
     fn raw_lowest(self) -> Self::Index;
     fn raw_highest(self) -> Self::Index;
+    #[must_use]
     fn raw_clear_lowest(self) -> Self;
+    #[must_use]
     fn raw_clear_highest(self) -> Self;
 }
 
@@ -128,7 +136,7 @@ pub struct BitIter<B: Raw> {
 }
 
 impl<B: Raw> BitIter<B> {
-    pub(crate) fn new(remaining: B) -> Self {
+    pub(crate) const fn new(remaining: B) -> Self {
         Self { remaining }
     }
 }

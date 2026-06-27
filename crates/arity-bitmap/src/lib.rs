@@ -36,7 +36,9 @@ pub trait Raw: Copy + Eq + sealed::Sealed {
     fn raw_popcount(self) -> u32;
     fn raw_lowest(self) -> Self::Index;
     fn raw_highest(self) -> Self::Index;
+    #[must_use]
     fn raw_clear_lowest(self) -> Self;
+    #[must_use]
     fn raw_clear_highest(self) -> Self;
 }
 
