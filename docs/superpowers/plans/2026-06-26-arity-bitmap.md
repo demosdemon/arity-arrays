@@ -15,9 +15,11 @@ This is **plan 2 of 3** (`arity-index` ✓ → **`arity-bitmap`** → `arity-arr
 
 ## Key design decision
 
-The bit-scanning primitives (`lowest set bit`, `highest set bit`, `clear bit`) are kept **out of the rendered docs and unimplementable externally**, per the spec ("`trailing_zeros`/`clear_lowest` are internal details of `BitIter`"). They live on a separate `Raw` trait that `BitIter<B: Raw>` is generic over.
+The bit-scanning primitives (`raw_lowest`/`raw_highest`/`raw_clear_lowest`/`raw_clear_highest`/`raw_is_zero`/`raw_popcount`) are **truly crate-private** — unnameable and uncallable outside the crate, per the spec ("`trailing_zeros`/`clear_lowest` are internal details of `BitIter`"). They live on a `Raw` trait declared **inside the private `mod sealed`** (the same module that holds the `Sealed` seal). `Raw` **extends `Bitmap`** (`pub trait Raw: super::Bitmap`) so its methods can name the public `Bitmap::Index` without re-declaring it.
 
-`Raw` is **`#[doc(hidden)] pub` and sealed** (`Raw: Copy + Eq + sealed::Sealed`) — NOT `pub(crate)`. On **edition 2024** a `pub(crate)` `Raw` does not work: `BitIter`'s public `Iterator::Item = B::Index` leaks the private `Raw::Index` (E0446, hard error), and the public `Bitmap::bits()`'s `where Self: Raw` bound trips `private_bounds` (a denied warning). Making `Raw` `#[doc(hidden)] pub` removes both — there is no privacy mismatch, the trait is absent from docs, and the `Sealed` supertrait means no downstream crate can implement it. External code could still *name* `Raw`/call the `raw_*` methods, but they are doc-hidden and `raw_`-prefixed: this is the standard pragmatic pattern under edition 2024's stricter private-in-public rules. (Both alternatives were tested and rejected: a per-backing associated iterator type needs ~6 iterator definitions; a `pub(crate)` `Raw` cannot compile on edition 2024.)
+`BitIter<B: Bitmap>` is generic over the **public** `Bitmap` (so its `Iterator::Item = <B as Bitmap>::Index` is a public type — no leak), and its `Iterator`/`DoubleEndedIterator`/`ExactSizeIterator`/`FusedIterator` impls are bounded on the private `Raw`. `Bitmap::bits()` has a `where Self: sealed::Raw` clause.
+
+This was verified to compile **clean on edition 2024** — no errors, no warnings, **no `#[doc(hidden)]` and no `#[expect]`** — and to be callable from an external crate (which can also name `<B as Bitmap>::Index` in a bound, as plan 3's `Arity` requires). The key is that a `pub trait` inside a *private module* (the standard sealed-trait shape) does not trip `private_bounds`, whereas an explicit `pub(crate) trait Raw` would (and a `pub(crate)` `Raw` whose `Index` leaks through `BitIter`'s public `Item` is an outright `E0446` on edition 2024). Rejected alternatives: a per-backing associated iterator type (~6 iterator definitions); `#[doc(hidden)] pub trait Raw` (leaves the scan methods technically public).
 
 ## Global Constraints
 
@@ -40,8 +42,8 @@ Define the trait/iterator structure so the crate compiles with no backing impls 
 - Create: `crates/arity-bitmap/src/iter.rs`
 
 **Interfaces:**
-- Produces (public): `trait Bitmap: Copy + Eq + sealed::Sealed { type Index: Niche; const WIDTH: usize; const ZERO: Self; fn is_zero(self) -> bool; fn count_ones(self) -> u32; fn test(self, i: Self::Index) -> bool; fn with_bit(self, i: Self::Index) -> Self; fn rank(self, i: Self::Index) -> u32; fn bits(self) -> BitIter<Self> where Self: Raw<Index = <Self as Bitmap>::Index>; }`; `struct BitIter<B: Raw>`.
-- Produces (crate-private): `trait Raw: Copy + Eq { type Index: Niche; fn raw_is_zero(self) -> bool; fn raw_popcount(self) -> u32; fn raw_lowest(self) -> Self::Index; fn raw_highest(self) -> Self::Index; fn raw_clear_lowest(self) -> Self; fn raw_clear_highest(self) -> Self; }`.
+- Produces (public): `trait Bitmap: Copy + Eq + sealed::Sealed { type Index: Niche; const WIDTH: usize; const ZERO: Self; fn is_zero(self) -> bool; fn count_ones(self) -> u32; fn test(self, i: Self::Index) -> bool; fn with_bit(self, i: Self::Index) -> Self; fn rank(self, i: Self::Index) -> u32; fn bits(self) -> BitIter<Self> where Self: sealed::Raw; }`; `struct BitIter<B: Bitmap>` (its `Iterator`/`DoubleEndedIterator`/`ExactSizeIterator`/`FusedIterator` impls are bounded on `sealed::Raw`).
+- Produces (crate-private, inside `mod sealed`): `trait Raw: Bitmap { fn raw_is_zero(self) -> bool; fn raw_popcount(self) -> u32; fn raw_lowest(self) -> <Self as Bitmap>::Index; fn raw_highest(self) -> <Self as Bitmap>::Index; fn raw_clear_lowest(self) -> Self; fn raw_clear_highest(self) -> Self; }` (extends `Bitmap`; declares no `Index` of its own).
 
 - [ ] **Step 1: Write `lib.rs`**
 
@@ -63,27 +65,25 @@ pub use iter::BitIter;
 use arity_index::Niche;
 
 mod sealed {
-    /// Prevents downstream crates from implementing [`Bitmap`](crate::Bitmap).
+    /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
     pub trait Sealed {}
-}
 
-/// Bit-scanning mechanics used by [`BitIter`]. `#[doc(hidden)]` and sealed so it
-/// stays out of the docs and cannot be implemented downstream; it is `pub` (not
-/// `pub(crate)`) only because edition 2024 forbids a private trait from leaking
-/// through `BitIter`'s public `Iterator::Item` and `Bitmap::bits`'s bound (see
-/// the "Key design decision" section). The `raw_lowest`/`raw_highest` methods
-/// have the precondition `!self.raw_is_zero()`.
-#[doc(hidden)]
-pub trait Raw: Copy + Eq + sealed::Sealed {
-    type Index: Niche;
-    fn raw_is_zero(self) -> bool;
-    fn raw_popcount(self) -> u32;
-    fn raw_lowest(self) -> Self::Index;
-    fn raw_highest(self) -> Self::Index;
-    #[must_use]
-    fn raw_clear_lowest(self) -> Self;
-    #[must_use]
-    fn raw_clear_highest(self) -> Self;
+    /// Crate-internal bit-scanning mechanics used by [`BitIter`](crate::BitIter).
+    ///
+    /// Lives in this private module (so it is unnameable and uncallable outside
+    /// the crate) and extends [`Bitmap`](crate::Bitmap) so its methods can name
+    /// the public `Bitmap::Index`. `raw_lowest`/`raw_highest` have the
+    /// precondition `!self.raw_is_zero()`.
+    pub trait Raw: super::Bitmap {
+        fn raw_is_zero(self) -> bool;
+        fn raw_popcount(self) -> u32;
+        fn raw_lowest(self) -> <Self as super::Bitmap>::Index;
+        fn raw_highest(self) -> <Self as super::Bitmap>::Index;
+        #[must_use]
+        fn raw_clear_lowest(self) -> Self;
+        #[must_use]
+        fn raw_clear_highest(self) -> Self;
+    }
 }
 
 /// A fixed-width bitmap addressed by a [`Niche`] index type.
@@ -111,7 +111,7 @@ pub trait Bitmap: Copy + Eq + sealed::Sealed {
     /// Iterates over the set bits, ascending, as a double-ended iterator.
     fn bits(self) -> BitIter<Self>
     where
-        Self: Raw<Index = <Self as Bitmap>::Index>,
+        Self: sealed::Raw,
     {
         BitIter::new(self)
     }
@@ -123,7 +123,8 @@ pub trait Bitmap: Copy + Eq + sealed::Sealed {
 ```rust
 //! The double-ended set-bit iterator.
 
-use crate::Raw;
+use crate::Bitmap;
+use crate::sealed::Raw;
 use core::iter::FusedIterator;
 
 /// Yields the set bits of a bitmap, ascending, as the bitmap's [`Niche`] index.
@@ -131,20 +132,20 @@ use core::iter::FusedIterator;
 /// Holds a `Copy` snapshot of the bitmap and drains it from both ends.
 ///
 /// [`Niche`]: arity_index::Niche
-pub struct BitIter<B: Raw> {
+pub struct BitIter<B: Bitmap> {
     remaining: B,
 }
 
-impl<B: Raw> BitIter<B> {
+impl<B: Bitmap> BitIter<B> {
     pub(crate) const fn new(remaining: B) -> Self {
         Self { remaining }
     }
 }
 
 impl<B: Raw> Iterator for BitIter<B> {
-    type Item = B::Index;
+    type Item = <B as Bitmap>::Index;
 
-    fn next(&mut self) -> Option<B::Index> {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.remaining.raw_is_zero() {
             return None;
         }
@@ -160,7 +161,7 @@ impl<B: Raw> Iterator for BitIter<B> {
 }
 
 impl<B: Raw> DoubleEndedIterator for BitIter<B> {
-    fn next_back(&mut self) -> Option<B::Index> {
+    fn next_back(&mut self) -> Option<Self::Item> {
         if self.remaining.raw_is_zero() {
             return None;
         }
@@ -212,7 +213,8 @@ Create `crates/arity-bitmap/src/native.rs` with the test module first (the impls
 ```rust
 //! `Bitmap`/`Raw` impls for the native unsigned integers `u8`..`u128`.
 
-use crate::{sealed::Sealed, Bitmap, Raw};
+use crate::sealed::{Raw, Sealed};
+use crate::Bitmap;
 use arity_index::{Niche, U3, U4, U5, U6, U7};
 
 // (impl macro + invocations inserted here in Step 3)
@@ -316,8 +318,6 @@ macro_rules! impl_native_bitmap {
         impl Sealed for $ty {}
 
         impl Raw for $ty {
-            type Index = $idx;
-
             fn raw_is_zero(self) -> bool {
                 self == 0
             }
@@ -432,7 +432,8 @@ Create `crates/arity-bitmap/src/u256.rs` with the test module first:
 ```rust
 //! The 256-bit bitmap backing (`Bitmap::Index == u8`). Pure safe code.
 
-use crate::{sealed::Sealed, Bitmap, Raw};
+use crate::sealed::{Raw, Sealed};
+use crate::Bitmap;
 use arity_index::Niche;
 
 // (struct + impls inserted in Step 3)
@@ -530,8 +531,6 @@ impl U256 {
 impl Sealed for U256 {}
 
 impl Raw for U256 {
-    type Index = u8;
-
     fn raw_is_zero(self) -> bool {
         self.lo == 0 && self.hi == 0
     }
@@ -829,14 +828,21 @@ Expected: PASS.
 Run: `RUSTDOCFLAGS="-D warnings" cargo doc -p arity-bitmap --no-deps`
 Expected: builds with no warnings (`Raw`/`BitIter::new` are crate-private, so no broken public intra-doc links).
 
-- [ ] **Step 4: Run the suite under Miri**
+- [ ] **Step 4: Run the unit tests under Miri**
 
-Run: `cargo +nightly miri test -p arity-bitmap`
-Expected: PASS. (No `unsafe` in this crate, but Miri still validates the bit arithmetic and catches any accidental overflow/UB in the shift/`ilog2` paths.)
+Run: `cargo +nightly miri test -p arity-bitmap --lib`
+Expected: PASS. (No `unsafe` in this crate, but Miri still validates the bit
+arithmetic and catches any accidental overflow/UB in the shift/`ilog2` paths.)
 
+> **Scope Miri to `--lib`.** The `proptests` integration test runs 256 cases ×
+> three properties; under Miri's interpreter that is impractically slow (it does
+> not finish in a reasonable time). The crate has no `unsafe`, so the `--lib` unit
+> tests fully exercise the bit-math paths Miri cares about; the proptests already
+> run natively in Step 1. Do **not** run `cargo +nightly miri test` without
+> `--lib` here.
+>
 > If Miri is not installed: `rustup +nightly component add miri`, then if prompted
-> `cargo +nightly miri setup`. The `proptests` integration test runs many cases
-> under Miri and may be slow; that is expected — let it finish.
+> `cargo +nightly miri setup`.
 
 - [ ] **Step 5: Final clippy + fmt gate**
 
