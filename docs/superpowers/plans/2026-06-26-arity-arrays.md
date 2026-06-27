@@ -1207,7 +1207,19 @@ unsafe impl<T: Sync, A: Arity> Sync for PackedArray<T, A> {}
 // state, so these hold whenever `T` does.
 impl<T: core::panic::UnwindSafe, A: Arity> core::panic::UnwindSafe for PackedArray<T, A> {}
 impl<T: core::panic::RefUnwindSafe, A: Arity> core::panic::RefUnwindSafe for PackedArray<T, A> {}
+
+// `PackedPresentIter` holds a `*const T` (which suppresses the auto-impls) but
+// only ever yields `&T` — it behaves like a `slice::Iter`, so it is `Send`/`Sync`
+// exactly when `T: Sync`. (`PackedAllIter` borrows `&PackedArray`, so it derives
+// `Send`/`Sync` automatically once `PackedArray: Sync`.)
+// SAFETY: the raw pointer is used only for shared reads bounded by `&'a self`.
+unsafe impl<T: Sync, A: Arity> Send for crate::packed::PackedPresentIter<'_, T, A> {}
+// SAFETY: as above — shared, read-only access; no interior mutability.
+unsafe impl<T: Sync, A: Arity> Sync for crate::packed::PackedPresentIter<'_, T, A> {}
 ```
+
+(`PackedPresentIter` is defined in this same `packed.rs`, so reference it as
+`PackedPresentIter<'_, T, A>` directly rather than via `crate::packed::`.)
 
 > `eq` compares `bitmap()` then element streams via `Iterator::eq` (avoids needing
 > a slice). `Hash` mixes count + (index, value) pairs. If clippy's `nursery`
