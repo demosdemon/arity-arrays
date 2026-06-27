@@ -10,8 +10,10 @@
 
 mod iter;
 mod native;
+mod u256;
 
 pub use iter::BitIter;
+pub use u256::U256;
 
 use arity_index::Niche;
 
