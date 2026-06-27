@@ -14,8 +14,8 @@ pub mod fixed;
 pub mod packed;
 
 pub use arity::{Arity, Arity8, Arity16, Arity32, Arity64, Arity128, Arity256};
-// TODO(task 2/4): re-enable
-// pub use fixed::FixedArray;
+pub use fixed::FixedArray;
+// TODO(task 4): re-enable
 // pub use packed::PackedArray;
 
 pub use arity_bitmap as bitmap;
