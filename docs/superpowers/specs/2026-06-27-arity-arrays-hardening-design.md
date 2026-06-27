@@ -143,12 +143,15 @@ pub trait Bitmap: /* … existing … */ {
 - `impl From<U{n}> for u8` and `impl From<U{n}> for usize` — infallible (the value
   is provably in range), so the index types satisfy `Into<u8>`/`Into<usize>`
   bounds. The native `u8` (arity-256 index) already has these.
-- `const fn` on the inherent *operation* methods whose bodies are const-eligible
-  (`with_bit`, `test`, `rank`, `count_ones`, `is_zero`, `without_bit`, `select`).
-  The index constructors (`try_new`, `new_masked`, `as_u8`, `as_usize`) are
-  already `const`; this fills in the operations. Trait methods cannot be `const`
-  on stable Rust, so this applies to the **inherent** impls, enabling
-  const-context construction and lookup tables.
+- `const fn` where it is both feasible and useful. The niche index constructors
+  (`try_new`, `new_masked`, `as_u8`, `as_usize`) are already `const`. The bitmap
+  *operations* are exposed through the `Bitmap` trait, and trait methods cannot be
+  `const` on stable Rust — nor can inherent `const fn` wrappers be added to the
+  native primitive backings (`u8`–`u128`), which are foreign types. The one
+  backing defined in this workspace, `U256`, therefore gains inherent `const fn`
+  construction (`from_limbs`, and const `from_le_bytes`/`with_bit`) so 256-bit
+  masks can be built in const context; const-context users of the native widths
+  operate on the primitive directly (whose operators are already `const`).
 
 ### `U256` — custom backing only (`#[cfg(not(feature = "ethnum"))]`)
 
