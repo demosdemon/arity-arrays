@@ -515,8 +515,10 @@ pub struct U256 {
 const _: () = assert!(<u8 as Niche>::COUNT == 256);
 
 impl U256 {
-    /// Splits a bit index `i` (`< 256`) into `(limb_is_hi, bit_within_limb)`.
-    const fn split(i: usize) -> (bool, u32) {
+    /// Splits a bit index `i` into `(limb_is_hi, bit_within_limb)`. Takes `u8`
+    /// (the index type) directly, so the limb-offset conversion is a lossless
+    /// `u8 -> u32` widening — avoids a `usize -> u32` truncation cast.
+    const fn split(i: u8) -> (bool, u32) {
         if i < 128 {
             (false, i as u32)
         } else {
@@ -603,13 +605,13 @@ impl Bitmap for U256 {
     }
 
     fn test(self, i: u8) -> bool {
-        let (is_hi, bit) = Self::split(i as usize);
+        let (is_hi, bit) = Self::split(i);
         let limb = if is_hi { self.hi } else { self.lo };
         limb & (1u128 << bit) != 0
     }
 
     fn with_bit(self, i: u8) -> Self {
-        let (is_hi, bit) = Self::split(i as usize);
+        let (is_hi, bit) = Self::split(i);
         if is_hi {
             Self {
                 lo: self.lo,
@@ -624,7 +626,7 @@ impl Bitmap for U256 {
     }
 
     fn rank(self, i: u8) -> u32 {
-        let (is_hi, bit) = Self::split(i as usize);
+        let (is_hi, bit) = Self::split(i);
         if is_hi {
             // all of lo, plus the bits of hi below `bit`
             let hi_mask = (1u128 << bit) - 1;
