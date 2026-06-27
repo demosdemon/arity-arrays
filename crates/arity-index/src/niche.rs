@@ -37,7 +37,7 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
 macro_rules! niche_int {
     ($name:ident, $repr:ident, $bits:literal, $count:literal) => {
         ::seq_macro::seq!(N in 0..$count {
-            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             enum $repr {
                 #( V~N, )*
             }
@@ -47,7 +47,7 @@ macro_rules! niche_int {
         ///
         /// Backed by a fieldless enum, so `Option<Self>` is one byte and indexing
         #[doc = concat!("a ", stringify!($count), "-element array can elide the bounds check.")]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name($repr);
 
         impl $name {
@@ -121,6 +121,14 @@ macro_rules! niche_int {
         impl Default for $name {
             fn default() -> Self {
                 Self::MIN
+            }
+        }
+
+        // `Debug` forwards to the integer value (prints `15`, not `U4(V15)`).
+        // The `$repr` enum is deliberately not `Debug`.
+        impl ::core::fmt::Debug for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::Debug::fmt(&self.as_u8(), f)
             }
         }
 
