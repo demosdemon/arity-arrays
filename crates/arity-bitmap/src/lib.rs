@@ -7,47 +7,61 @@
 //! (indexed by `U3`–`U7`) and the 256-bit [`U256`] (indexed by `u8`). The crate
 //! contains no `unsafe` code: every bit position is reconstructed through the
 //! statically-bounded [`arity_index::Niche`] index.
+//!
+//! ```
+//! # extern crate alloc;
+//! use arity_bitmap::Bitmap;
+//! use arity_index::{Niche, U4};
+//!
+//! let bm = u16::ZERO
+//!     .with_bit(U4::new_masked(1))
+//!     .with_bit(U4::new_masked(4))
+//!     .with_bit(U4::new_masked(9));
+//!
+//! assert_eq!(bm.count_ones(), 3);
+//! assert!(bm.test(U4::new_masked(4)));
+//! assert_eq!(bm.rank(U4::new_masked(4)), 1); // one set bit below index 4
+//!
+//! let set: alloc::vec::Vec<u8> = bm.bits().map(U4::as_u8).collect();
+//! assert_eq!(set, alloc::vec![1, 4, 9]);
+//! ```
 
 mod iter;
 mod native;
 mod u256;
 
+use arity_index::Niche;
 pub use iter::BitIter;
 pub use u256::U256;
 
-use arity_index::Niche;
-
 mod sealed {
-    /// Prevents downstream crates from implementing [`Bitmap`](crate::Bitmap).
+    /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
     pub trait Sealed {}
-}
 
-/// Bit-scanning mechanics used by [`BitIter`]. Kept off the public [`Bitmap`]
-/// surface deliberately. The `raw_lowest`/`raw_highest` methods have the
-/// precondition `!self.raw_is_zero()`.
-///
-/// `Raw` is sealed (requires [`sealed::Sealed`]) so it cannot be implemented
-/// outside this crate. It is `pub` rather than `pub(crate)` only to satisfy the
-/// Rust privacy checker: [`BitIter`]`<B: Raw>` implementing the standard
-/// [`Iterator`] trait requires its `Item` type to be reachable, which forces
-/// `Raw` (and `Raw::Index`) to be nameable. The `#[doc(hidden)]` attribute keeps
-/// it off the public documentation surface.
-#[doc(hidden)]
-pub trait Raw: Copy + Eq + sealed::Sealed {
-    type Index: Niche;
-    fn raw_is_zero(self) -> bool;
-    fn raw_popcount(self) -> u32;
-    fn raw_lowest(self) -> Self::Index;
-    fn raw_highest(self) -> Self::Index;
-    #[must_use]
-    fn raw_clear_lowest(self) -> Self;
-    #[must_use]
-    fn raw_clear_highest(self) -> Self;
+    /// Crate-internal bit-scanning mechanics used by
+    /// [`BitIter`](crate::BitIter).
+    ///
+    /// Lives in this private module (so it is unnameable and uncallable outside
+    /// the crate) and extends [`Bitmap`](crate::Bitmap) so its methods can name
+    /// the public `Bitmap::Index`. `raw_lowest`/`raw_highest` have the
+    /// precondition `!self.raw_is_zero()`.
+    pub trait Raw: super::Bitmap {
+        fn raw_is_zero(self) -> bool;
+        fn raw_popcount(self) -> u32;
+        fn raw_lowest(self) -> <Self as super::Bitmap>::Index;
+        fn raw_highest(self) -> <Self as super::Bitmap>::Index;
+        #[must_use]
+        fn raw_clear_lowest(self) -> Self;
+        #[must_use]
+        fn raw_clear_highest(self) -> Self;
+    }
 }
 
 /// A fixed-width bitmap addressed by a [`Niche`] index type.
 ///
 /// Sealed: implemented only by `u8`/`u16`/`u32`/`u64`/`u128` and [`U256`].
+///
+/// [`Niche`]: arity_index::Niche
 pub trait Bitmap: Copy + Eq + sealed::Sealed {
     /// The niche index type; `Index::COUNT == WIDTH`.
     type Index: Niche;
@@ -65,12 +79,13 @@ pub trait Bitmap: Copy + Eq + sealed::Sealed {
     /// Returns `self` with the bit at `i` set.
     #[must_use]
     fn with_bit(self, i: Self::Index) -> Self;
-    /// Returns the number of set bits strictly below `i` (the dense rank of `i`).
+    /// Returns the number of set bits strictly below `i` (the dense rank of
+    /// `i`).
     fn rank(self, i: Self::Index) -> u32;
     /// Iterates over the set bits, ascending, as a double-ended iterator.
     fn bits(self) -> BitIter<Self>
     where
-        Self: Raw<Index = <Self as Bitmap>::Index>,
+        Self: sealed::Raw,
     {
         BitIter::new(self)
     }

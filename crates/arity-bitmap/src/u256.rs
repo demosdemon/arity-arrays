@@ -1,7 +1,10 @@
 //! The 256-bit bitmap backing (`Bitmap::Index == u8`). Pure safe code.
 
-use crate::{sealed::Sealed, Bitmap, Raw};
 use arity_index::Niche;
+
+use crate::Bitmap;
+use crate::sealed::Raw;
+use crate::sealed::Sealed;
 
 /// A 256-bit bitmap: bit `i` lives in `lo` for `i < 128`, else in `hi` at
 /// `i - 128`. Only the [`Bitmap`] surface is implemented (no arithmetic).
@@ -30,8 +33,6 @@ impl U256 {
 impl Sealed for U256 {}
 
 impl Raw for U256 {
-    type Index = u8;
-
     fn raw_is_zero(self) -> bool {
         self.lo == 0 && self.hi == 0
     }
@@ -165,7 +166,11 @@ mod tests {
 
     #[test]
     fn rank_across_the_limb_boundary() {
-        let bm = U256::ZERO.with_bit(0).with_bit(127).with_bit(128).with_bit(255);
+        let bm = U256::ZERO
+            .with_bit(0)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(255);
         assert_eq!(bm.rank(0), 0);
         assert_eq!(bm.rank(127), 1);
         assert_eq!(bm.rank(128), 2); // bits 0 and 127 are below 128
@@ -175,7 +180,11 @@ mod tests {
 
     #[test]
     fn bits_forward_and_back_span_limbs() {
-        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        let bm = U256::ZERO
+            .with_bit(3)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(254);
         let fwd: alloc::vec::Vec<u8> = bm.bits().collect();
         assert_eq!(fwd, alloc::vec![3u8, 127, 128, 254]);
         let back: alloc::vec::Vec<u8> = bm.bits().rev().collect();
