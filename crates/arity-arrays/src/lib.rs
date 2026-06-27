@@ -8,6 +8,7 @@
 //! pairs an index type with a bitmap backing and a `hybrid-array` size.
 //!
 //! ```
+//! # extern crate alloc;
 //! use arity_arrays::{Arity16, FixedArray, PackedArray};
 //! use arity_arrays::index::{Niche, U4};
 //!
@@ -23,7 +24,6 @@
 //! let present: alloc::vec::Vec<(u8, u32)> =
 //!     packed.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
 //! assert_eq!(present, alloc::vec![(1, 10), (9, 90)]);
-//! # extern crate alloc;
 //! ```
 
 extern crate alloc;
