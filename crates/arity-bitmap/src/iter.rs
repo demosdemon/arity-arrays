@@ -2,8 +2,9 @@
 
 use core::iter::FusedIterator;
 
+use arity_index::Niche;
+
 use crate::Bitmap;
-use crate::sealed::Raw;
 
 /// Yields the set bits of a bitmap, ascending, as the bitmap's [`Niche`] index.
 ///
@@ -20,16 +21,17 @@ impl<B: Bitmap> BitIter<B> {
     }
 }
 
-impl<B: Raw> Iterator for BitIter<B> {
+impl<B: Bitmap> Iterator for BitIter<B> {
     type Item = <B as Bitmap>::Index;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining.raw_is_zero() {
             return None;
         }
-        let i = self.remaining.raw_lowest();
+        let pos = self.remaining.raw_lowest_pos();
         self.remaining = self.remaining.raw_clear_lowest();
-        Some(i)
+        // `pos < WIDTH == Index::COUNT`, so this never returns `None`.
+        Some(<B as Bitmap>::Index::try_from_usize(pos).expect("set-bit position < WIDTH"))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -38,21 +40,21 @@ impl<B: Raw> Iterator for BitIter<B> {
     }
 }
 
-impl<B: Raw> DoubleEndedIterator for BitIter<B> {
+impl<B: Bitmap> DoubleEndedIterator for BitIter<B> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.remaining.raw_is_zero() {
             return None;
         }
-        let i = self.remaining.raw_highest();
+        let pos = self.remaining.raw_highest_pos();
         self.remaining = self.remaining.raw_clear_highest();
-        Some(i)
+        Some(<B as Bitmap>::Index::try_from_usize(pos).expect("set-bit position < WIDTH"))
     }
 }
 
-impl<B: Raw> ExactSizeIterator for BitIter<B> {
+impl<B: Bitmap> ExactSizeIterator for BitIter<B> {
     fn len(&self) -> usize {
         self.remaining.raw_popcount() as usize
     }
 }
 
-impl<B: Raw> FusedIterator for BitIter<B> {}
+impl<B: Bitmap> FusedIterator for BitIter<B> {}
