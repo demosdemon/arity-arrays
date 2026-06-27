@@ -7,7 +7,10 @@ homepage.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+description = "Bounds-check-free niche integer index types (U3-U7) with double-ended range iterators"
+readme = "README.md"
+keywords = ["niche", "integer", "index", "no-std", "bitfield"]
+categories = ["no-std", "data-structures", "rust-patterns"]
 
 [dependencies]
 seq-macro = "0.3.6"
