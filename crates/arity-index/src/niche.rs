@@ -132,6 +132,38 @@ macro_rules! niche_int {
             }
         }
 
+        impl ::core::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::Display::fmt(&self.as_u8(), f)
+            }
+        }
+
+        impl ::core::fmt::LowerHex for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::LowerHex::fmt(&self.as_u8(), f)
+            }
+        }
+
+        impl ::core::fmt::UpperHex for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::UpperHex::fmt(&self.as_u8(), f)
+            }
+        }
+
+        impl ::core::fmt::Binary for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::Binary::fmt(&self.as_u8(), f)
+            }
+        }
+
+        impl ::core::convert::TryFrom<u8> for $name {
+            type Error = crate::TryFromIntError;
+
+            fn try_from(v: u8) -> ::core::result::Result<Self, Self::Error> {
+                Self::try_new(v).ok_or(crate::TryFromIntError)
+            }
+        }
+
         impl Sealed for $name {}
 
         impl Niche for $name {
@@ -234,6 +266,21 @@ mod tests {
         round_trip::<U3>(8);
         round_trip::<U4>(16);
         round_trip::<U7>(128);
+    }
+
+    #[test]
+    fn formatting_and_tryfrom() {
+        extern crate alloc;
+        use alloc::format;
+
+        assert_eq!(format!("{:?}", U4::MAX), "15");
+        assert_eq!(format!("{}", U4::MAX), "15");
+        assert_eq!(format!("{:x}", U4::new_masked(10)), "a");
+        assert_eq!(format!("{:X}", U4::new_masked(10)), "A");
+        assert_eq!(format!("{:b}", U4::new_masked(5)), "101");
+
+        assert_eq!(U4::try_from(7u8), Ok(U4::new_masked(7)));
+        assert_eq!(U4::try_from(16u8), Err(TryFromIntError));
     }
 
     #[test]
