@@ -304,6 +304,16 @@ macro_rules! niche_int {
             }
         }
 
+        // `Debug` forwards to the integer value (prints `15`, not `U4(V15)`). It
+        // lives here, not in Task 4, because this task's `assert_eq!` tests
+        // require `Debug`. The `$repr` enum is deliberately NOT `Debug` (nothing
+        // prints it), so the struct cannot derive `Debug`.
+        impl ::core::fmt::Debug for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::Debug::fmt(&self.as_u8(), f)
+            }
+        }
+
         impl Sealed for $name {}
 
         impl Niche for $name {
@@ -429,7 +439,7 @@ Add `Debug`, `Display`, `LowerHex`, `UpperHex`, `Binary`, and `TryFrom<u8>` to e
 - Modify: `crates/arity-index/src/niche.rs`
 
 **Interfaces:**
-- Produces: `impl core::fmt::{Debug, Display, LowerHex, UpperHex, Binary}` and `impl TryFrom<u8, Error = TryFromIntError>` for each `U{n}`.
+- Produces: `impl core::fmt::{Display, LowerHex, UpperHex, Binary}` and `impl TryFrom<u8, Error = TryFromIntError>` for each `U{n}` (`Debug` is already provided by Task 2).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -464,15 +474,10 @@ Expected: FAIL — `Display`/`LowerHex`/etc. and `TryFrom<u8>` not implemented.
 
 - [ ] **Step 3: Extend the macro with fmt + `TryFrom`**
 
-Inside `macro_rules! niche_int!`, after the `impl Niche for $name` block, add:
+Inside `macro_rules! niche_int!`, after the `impl Niche for $name` block, add
+(`Debug` is already implemented in Task 2 — do **not** re-add it here):
 
 ```rust
-        impl ::core::fmt::Debug for $name {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                ::core::fmt::Debug::fmt(&self.as_u8(), f)
-            }
-        }
-
         impl ::core::fmt::Display for $name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 ::core::fmt::Display::fmt(&self.as_u8(), f)
