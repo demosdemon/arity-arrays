@@ -13,7 +13,7 @@ pub struct BitIter<B: Raw> {
 }
 
 impl<B: Raw> BitIter<B> {
-    pub(crate) fn new(remaining: B) -> Self {
+    pub(crate) const fn new(remaining: B) -> Self {
         Self { remaining }
     }
 }
