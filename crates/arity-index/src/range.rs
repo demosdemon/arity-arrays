@@ -11,6 +11,15 @@ use core::marker::PhantomData;
 use crate::Niche;
 
 /// A half-open range `[start, end)` over the values of a [`Niche`] type.
+///
+/// # Safety
+///
+/// Internal invariant upheld by every method: the cursors `lo` and `hi` never
+/// exceed `N::COUNT`, and a value is only reconstructed from a cursor proven
+/// strictly `< N::COUNT` (`lo` when `lo < hi`, or `hi - 1` after a guarded
+/// decrement). The `unsafe { N::try_from_usize(..).unwrap_unchecked() }` in the
+/// iterator impls depends on this; any new method that mutates `lo`/`hi` must
+/// preserve it.
 #[derive(Clone, Debug)]
 pub struct NicheRange<N: Niche> {
     lo: usize,
@@ -71,6 +80,15 @@ impl<N: Niche> ExactSizeIterator for NicheRange<N> {
 impl<N: Niche> FusedIterator for NicheRange<N> {}
 
 /// A closed range `[start, end]` over the values of a [`Niche`] type.
+///
+/// # Safety
+///
+/// Internal invariant upheld by every method: the cursors `lo` and `hi` stay in
+/// `[0, N::COUNT - 1]`, and `done` is `true` whenever the range is empty, so a
+/// value is only reconstructed from a cursor proven `< N::COUNT`. The
+/// `unsafe { N::try_from_usize(..).unwrap_unchecked() }` in the iterator impls
+/// depends on this; any new method that mutates `lo`/`hi`/`done` must preserve
+/// it.
 #[derive(Clone, Debug)]
 pub struct NicheRangeInclusive<N: Niche> {
     lo: usize,
