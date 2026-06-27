@@ -15,11 +15,20 @@ This is **plan 2 of 3** (`arity-index` ✓ → **`arity-bitmap`** → `arity-arr
 
 ## Key design decision
 
-The bit-scanning primitives (`raw_lowest`/`raw_highest`/`raw_clear_lowest`/`raw_clear_highest`/`raw_is_zero`/`raw_popcount`) are **truly crate-private** — unnameable and uncallable outside the crate, per the spec ("`trailing_zeros`/`clear_lowest` are internal details of `BitIter`"). They live on a `Raw` trait declared **inside the private `mod sealed`** (the same module that holds the `Sealed` seal). `Raw` **extends `Bitmap`** (`pub trait Raw: super::Bitmap`) so its methods can name the public `Bitmap::Index` without re-declaring it.
+The bit-scanning primitives are **truly crate-private** — unnameable and uncallable outside the crate, per the spec ("`trailing_zeros`/`clear_lowest` are internal details of `BitIter`"). They live on a `Raw` trait declared **inside the private `mod sealed`** (alongside the `Sealed` seal).
 
-`BitIter<B: Bitmap>` is generic over the **public** `Bitmap` (so its `Iterator::Item = <B as Bitmap>::Index` is a public type — no leak), and its `Iterator`/`DoubleEndedIterator`/`ExactSizeIterator`/`FusedIterator` impls are bounded on the private `Raw`. `Bitmap::bits()` has a `where Self: sealed::Raw` clause.
+`Raw` is a **supertrait of `Bitmap`** (`pub trait Bitmap: Copy + Eq + sealed::Sealed + sealed::Raw`). This is the load-bearing choice: because every `Bitmap` *implies* `Raw`, `Bitmap::bits()` is callable from **generic** downstream code (`fn f<B: Bitmap>(b: B) { b.bits() }`) — which is exactly how `arity-arrays`'s `PackedArray<A: Arity>::iter_present` consumes it over the abstract `A::Bitmap`. (An earlier shape with `bits(self) -> … where Self: sealed::Raw` compiled for *concrete* receivers but failed in generic context — the downstream crate cannot name the private `Raw` to satisfy the bound. A whole-branch review caught this; a regression test, `tests/generic_use.rs`, locks in the generic-callability guarantee.)
 
-This was verified to compile **clean on edition 2024** — no errors, no warnings, **no `#[doc(hidden)]` and no `#[expect]`** — and to be callable from an external crate (which can also name `<B as Bitmap>::Index` in a bound, as plan 3's `Arity` requires). The key is that a `pub trait` inside a *private module* (the standard sealed-trait shape) does not trip `private_bounds`, whereas an explicit `pub(crate) trait Raw` would (and a `pub(crate)` `Raw` whose `Index` leaks through `BitIter`'s public `Item` is an outright `E0446` on edition 2024). Rejected alternatives: a per-backing associated iterator type (~6 iterator definitions); `#[doc(hidden)] pub trait Raw` (leaves the scan methods technically public).
+To avoid a `Raw`/`Bitmap` cycle, `Raw` does **not** reference `Bitmap::Index`: its `raw_lowest_pos`/`raw_highest_pos` return raw `usize` bit positions, and `BitIter<B: Bitmap>` reconstructs the typed index via `<B as Bitmap>::Index::try_from_usize(pos).expect(..)` (safe; `pos < WIDTH == Index::COUNT`). `BitIter`'s iterator impls are bounded on `B: Bitmap` (which carries `Raw`).
+
+Verified to compile **clean on edition 2024** — no errors, no warnings, **no `#[doc(hidden)]`, no `#[expect]`** — with a `pub trait` inside a *private module* (the standard sealed shape), which does not trip `private_bounds`. Rejected alternatives: `bits()` gated on a nameable `where Self: sealed::Raw` (breaks generic callers); `#[doc(hidden)] pub trait Raw` (leaves scan methods technically public); a `pub(crate) Raw` whose `Index` leaks through `BitIter`'s public `Item` (outright `E0446` on edition 2024); a per-backing associated iterator type (~6 iterator definitions).
+
+> [!NOTE]
+> This decision is the as-built design. The Task 1/2/3 code blocks below retain
+> the earlier-iteration shapes from the development sequence; where they differ
+> from this section, **the committed source in `crates/arity-bitmap/src/` is
+> authoritative** (`Bitmap: …+ sealed::Raw`; `Raw` returns `usize` positions;
+> `bits()` has no `where` clause; `BitIter<B: Bitmap>` reconstructs the index).
 
 ## Global Constraints
 
