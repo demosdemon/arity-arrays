@@ -157,6 +157,21 @@ niche_int!(U5, Repr5, 5, 32);
 niche_int!(U6, Repr6, 6, 64);
 niche_int!(U7, Repr7, 7, 128);
 
+impl Sealed for u8 {}
+
+impl Niche for u8 {
+    const COUNT: usize = 256;
+
+    fn as_usize(self) -> usize {
+        usize::from(self)
+    }
+
+    fn try_from_usize(i: usize) -> Option<Self> {
+        // `Self::try_from` succeeds iff `i <= 255`, i.e. `i < COUNT`. No cast.
+        Self::try_from(i).ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +234,14 @@ mod tests {
         round_trip::<U3>(8);
         round_trip::<U4>(16);
         round_trip::<U7>(128);
+    }
+
+    #[test]
+    fn u8_is_arity_256_index() {
+        assert_eq!(<u8 as Niche>::COUNT, 256);
+        assert_eq!(Niche::as_usize(255u8), 255);
+        assert_eq!(<u8 as Niche>::try_from_usize(0), Some(0u8));
+        assert_eq!(<u8 as Niche>::try_from_usize(255), Some(255u8));
+        assert_eq!(<u8 as Niche>::try_from_usize(256), None);
     }
 }
