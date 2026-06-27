@@ -19,14 +19,14 @@
 
 ## Motivation
 
-A 16-ary hexary trie stores each branch node's children in a fixed array indexed
+A hexary (16-ary) trie stores each branch node's children in a fixed array indexed
 by a 4-bit nibble. Two representations are useful:
 
 - A **full-width** array — one slot per index, every slot materialized. Cheap
   random access, fixed size regardless of occupancy.
 - A **packed** array — only present entries stored, addressed by a bitmap.
   Pointer-sized when empty; heap cost proportional to occupancy. This is the
-  memory-amplification defense from firewood#2100: a 16-slot
+  memory-amplification mitigation from firewood#2100: a 16-slot
   `Children<Option<HashType>>` costs ~528 bytes even when empty, while the packed
   form costs one pointer plus `bitmap + occupancy × size_of::<T>()`.
 
@@ -52,7 +52,7 @@ a matching niche index type and bitmap backing:
 type; `Option<u8>` is 2 bytes, but no `Option<index>` is stored on a hot path, so
 this costs nothing in practice.
 
-## Goals & non-goals
+## Goals and non-goals
 
 **Goals**
 
@@ -62,7 +62,7 @@ this costs nothing in practice.
 - `FixedArray<T, A>` (full-width) and `PackedArray<T, A>` (heap-packed), both
   generic over a single `Arity` trait.
 - `PackedArray` is **pointer-sized** for every arity and zero-heap when empty.
-- A strict `unsafe` quality bar: every `unsafe` block documented, Miri-clean,
+- A strict `unsafe` quality bar: every `unsafe` block documented, Miri-clean, and
   property-tested.
 
 **Non-goals (deferred — see [Future work](#future-work))**
@@ -87,9 +87,11 @@ crates/
   arity-index/         # no_std, no alloc — integer index primitives
     src/lib.rs
     src/niche.rs       # `Niche` trait + macro generating U3..U7; `u8` impl
-  arity-bitmap/        # no_std, no alloc — bitmap primitives
+    src/range.rs       # NicheRange / NicheRangeInclusive double-ended iterators
+  arity-bitmap/        # no_std, no alloc — bitmap primitives (depends on arity-index)
     src/lib.rs         # `Bitmap` trait + impls for u8/u16/u32/u64/u128
     src/u256.rs        # `U256([u128; 2])` bitmap backing (safe code)
+    src/iter.rs        # `BitIter<B>` double-ended iterator over set bits
   arity-array/         # no_std + alloc — the arrays
     src/lib.rs
     src/arity.rs       # `Arity` trait + markers Arity8..Arity256
@@ -105,15 +107,21 @@ graph TD
     arity_bitmap["arity-bitmap"]
     hybrid["hybrid-array"]
     arity_array["arity-array"]
+    arity_index --> arity_bitmap
     arity_index --> arity_array
     arity_bitmap --> arity_array
     hybrid --> arity_array
 ```
 
-`arity-index` and `arity-bitmap` are independent leaves — neither depends on the
-other. `arity-array` is the only crate that needs `alloc`, and the only one with
-heavy `unsafe`. Splitting this way keeps the primitive types reusable and lets
-their tests run without touching the allocator.
+`arity-index` is the sole leaf. `arity-bitmap` depends on it so the `Bitmap`
+trait can speak in the typed index (`Niche`) rather than raw `usize` — which
+makes every bit position statically `< WIDTH`, eliminating the shift-UB
+precondition entirely. `arity-array` is the only crate that needs `alloc`, and
+the only one with heavy `unsafe`. Splitting this way keeps the primitive types
+reusable and lets their tests run without touching the allocator. `hybrid-array`
+is a third-party crate (`RustCrypto/hybrid-array`) that bridges `typenum` and
+const generics; `arity-array` depends on it solely to express `[T; A::LEN]`
+storage on stable Rust (see the [`typenum` note](#the-arity-trait)).
 
 ## `arity-index`
 
@@ -143,14 +151,17 @@ as **niches**, which earns both payoffs:
 the `0..2ⁿ` match arms. The single declarative macro is invoked five times
 (`niche_int!(U3, Repr3, 3); … niche_int!(U7, Repr7, 7);`).
 
-This replaces the scaffold's `xtask generate-niche-repr` text-codegen command,
-which is removed. Compile-time expansion keeps a single source of truth (no
-committed generated `.rs` to drift), at the cost of one build dependency
-(`seq-macro`) and generated code that is visible only via `cargo expand`. Both the inner `Repr`
-enum and the outer `U{n}` struct derive `Default` (`#[default]` on variant 0, so
-`U{n}::default() == U{n}::MIN`), following the scaffold's existing convention. With `generate-niche-repr` gone, the `xtask` crate has no remaining
-commands and is removed from the workspace; if it is later reinstated for other
-dev tasks it must set its own `rust-version = "1.96"` (CLI MSRV, per repo rules).
+This replaces the scaffold's `xtask generate-niche-repr` text-codegen command.
+Compile-time expansion keeps a single source of truth (no committed generated
+`.rs` to drift), at the cost of one build dependency (`seq-macro`) and generated
+code that is visible only via `cargo expand`. Both the inner `Repr` enum and the
+outer `U{n}` struct derive `Default` (`#[default]` on variant 0, so
+`U{n}::default() == U{n}::MIN`). With `generate-niche-repr` gone, the `xtask`
+crate has no remaining commands and is removed from the workspace. If it is later
+reinstated for other dev tasks it pins its own `rust-version`: this workspace
+applies a higher MSRV to CLI/dev tooling (currently `1.96`) than to library
+crates (`1.92`, see [Dependencies and toolchain](#dependencies-and-toolchain)),
+so the libraries never inherit a floor raised by a dev-only binary.
 
 ### Generated surface (per `U{n}`)
 
@@ -160,7 +171,6 @@ impl U{n} {
     pub const COUNT: usize = 1 << n;       // number of valid values
     pub const MIN: Self;                    // 0
     pub const MAX: Self;                    // COUNT - 1
-    pub const ALL: [Self; Self::COUNT];     // every value, ascending
 
     pub const fn try_new(v: u8) -> Option<Self>;
     pub const unsafe fn new_unchecked(v: u8) -> Self;  // SAFETY: v < COUNT
@@ -173,38 +183,63 @@ impl U{n} {
 ```
 
 `new_unchecked` is the sole `unsafe` entry point; `new_masked` calls it after
-masking, so it is always sound. `ALL` is the analogue of firewood's
-`PathComponent::ALL` and is the canonical iteration order.
+masking, so it is always sound. There is **no `ALL` constant** — iteration is via
+the range iterators below, so nothing has to materialize a `2ⁿ`-element table
+(an `[U7; 128]`/`[u8; 256]` const would otherwise sit in the binary).
+
+### Range iterators (`NicheRange`, `NicheRangeInclusive`)
+
+The std `Range<T>`/`RangeInclusive<T>` cannot iterate over a `U{n}`: that needs
+`impl Step for U{n}`, and `Step` is unstable on stable Rust. So `arity-index`
+ships two custom, generic, **double-ended** range iterators (replacing the `ALL`
+table as the canonical iteration order):
+
+```rust
+pub struct NicheRange<N: Niche>          { lo: usize, hi: usize, _marker: PhantomData<N> } // [lo, hi)
+pub struct NicheRangeInclusive<N: Niche> { lo: usize, hi: usize, done: bool, _marker: … }  // [lo, hi]
+
+impl<N: Niche> Iterator for NicheRange<N> { type Item = N; /* … */ }
+// + DoubleEndedIterator + ExactSizeIterator + FusedIterator for both
+```
+
+They store the bounds as `usize` (so the inclusive form can represent an empty
+range and avoid `MAX + 1` overflow) and reconstruct each `N` at yield time via
+`N::try_from_usize(i).unwrap_unchecked()` — sound because the cursor is always
+within `[0, COUNT)` by construction. This is *the* single place an index is
+reconstructed from a raw integer; concentrating it here keeps `new_unchecked` off
+the `Niche` trait (see below). `next`/`next_back` advance `lo`/`hi` from opposite
+ends, giving exact-size double-ended iteration for free — which `FixedArray` and
+`PackedArray` inherit. The two `len` formulas differ because the bounds carry
+different semantics: `NicheRange` (`[lo, hi)`) reports `hi - lo`, while
+`NicheRangeInclusive` (`[lo, hi]`) reports `if done { 0 } else { hi - lo + 1 }`.
+So `Niche::all()` (= `0..=COUNT-1`) has `len() == COUNT`, exactly matching the
+domain size.
 
 ### The `Niche` trait
 
 A **sealed** trait unifies the index types so `arity-array` can be generic:
 
 ```rust
-pub trait Niche: Copy + Ord + sealed::Sealed {
+pub trait Niche: Copy + Ord + Sized + sealed::Sealed {
     const COUNT: usize;                       // 2^BITS (8,16,32,64,128,256)
-    const ALL: &'static [Self];               // length == COUNT, ascending
     fn as_usize(self) -> usize;               // always < COUNT
     fn try_from_usize(i: usize) -> Option<Self>;
+
+    /// All values ascending, as a double-ended exact-size iterator (`MIN..=MAX`).
+    /// Replaces the old `ALL` table.
+    fn all() -> NicheRangeInclusive<Self> { /* provided: indices 0..=COUNT-1 */ }
 }
 ```
 
-The trait deliberately has **no `new_unchecked`**. The one internal place that
-reconstructs an index from a known-valid value (a bitmap `trailing_zeros()`
-result) calls `Self::try_from_usize(i).unwrap_unchecked()` with a `// SAFETY:`
-note, keeping the only `unsafe` constructor (`new_unchecked`) an *inherent*
-method on the concrete types rather than trait surface every future implementor
-must uphold. This also sidesteps a parameter-type mismatch: the inherent
-`U{n}::new_unchecked` takes `u8` (matching firewood), while the trait works in
-`usize`.
+`all()` is a provided method built from `COUNT`, so every implementor gets
+double-ended iteration over its whole domain with no per-type table. The trait
+deliberately has **no `new_unchecked`**: the only `unsafe` reconstruction lives in
+the range iterators, keeping `new_unchecked` an *inherent* method on the concrete
+types (and sidestepping a parameter-type mismatch — the inherent constructor
+takes `u8`, the trait works in `usize`).
 
-`ALL` is a `&'static [Self]`; each impl supplies it as `&Self::ALL_ARRAY` (a
-reference to the inherent `const ALL: [Self; COUNT]`, promoted to `'static` and
-coerced array→slice — valid in `const` on stable).
-
-Implemented for `U3..U7` (generated) and for **`u8`** (`COUNT = 256`, `ALL` is
-the 256-byte ascending table, `try_from_usize` is `(i < 256).then(|| i as u8)`).
-`u8` is the arity-256 index.
+Implemented for `U3..U7` (generated) and for **`u8`** (`COUNT = 256`,
+`try_from_usize` is `(i < 256).then(|| i as u8)`). `u8` is the arity-256 index.
 
 `arity-index` is `#![no_std]` and does **not** use `alloc`.
 
@@ -212,39 +247,51 @@ the 256-byte ascending table, `try_from_usize` is `(i < 256).then(|| i as u8)`).
 
 ### The `Bitmap` trait
 
-A **sealed** trait over the bitmap backings, exposing only what the arrays need —
-no arithmetic:
+A **sealed** trait over the bitmap backings, parameterized by its index type so
+that **every bit position is the statically-bounded `Niche`**, never a raw
+`usize`. This is why `arity-bitmap` depends on `arity-index`:
 
 ```rust
 pub trait Bitmap: Copy + Eq + sealed::Sealed {
+    type Index: Niche;                        // U3..U7 or u8 — WIDTH == Index::COUNT
     const WIDTH: usize;                       // bit count: 8,16,32,64,128,256
     const ZERO: Self;
     fn is_zero(self) -> bool;
     fn count_ones(self) -> u32;               // number of present slots
-    fn trailing_zeros(self) -> u32;           // index of lowest set bit
-    fn test(self, i: usize) -> bool;          // is bit i set?       (i < WIDTH)
-    fn with_bit(self, i: usize) -> Self;      // set bit i           (i < WIDTH)
-    fn rank(self, i: usize) -> u32;           // # set bits below i  (i < WIDTH)
-    fn clear_lowest(self) -> Self;            // clears lowest set bit
+    fn test(self, i: Self::Index) -> bool;    // is bit i set?
+    fn with_bit(self, i: Self::Index) -> Self; // set bit i
+    fn rank(self, i: Self::Index) -> u32;     // # set bits strictly below i
+    fn bits(self) -> BitIter<Self>;           // double-ended iter over set bits
 }
 ```
 
-> [!IMPORTANT]
-> `test`, `with_bit`, and `rank` share the **precondition** `i < Self::WIDTH`.
-> These index methods compute `1 << i` (`rank` uses the mask `(1 << i) - 1`); a
-> shift `>= WIDTH` is UB in release and panics in debug (e.g. `1u8 << 8`). `rank`
-> never needs `i == WIDTH`: the total population is `count_ones()`, and every
-> caller passes a valid slot index `< WIDTH`. Callers are
-> internal to `arity-array` and always pass `A::Index::as_usize()`, which is
-> `< A::LEN == WIDTH` by construction, so the precondition holds by typing; the
-> trait is sealed, so no external caller can violate it. The precondition is
-> documented on each method rather than enforced with `unsafe`, since violating
-> it is a logic bug (debug panic), not memory unsafety.
+Because the index is `Self::Index` (always `< WIDTH` by construction), the
+`1 << i` shift inside `test`/`with_bit`/`rank` can never reach the type width —
+**the shift-UB precondition that a raw-`usize` API would carry simply does not
+exist.** `rank(i)` is the dense offset of slot `i` within a `PackedArray`
+allocation; `with_bit` builds a bitmap when converting a `FixedArray` into a
+`PackedArray`.
 
-`rank(i)` is the dense offset of slot `i` within a `PackedArray` allocation.
-Iteration over present slots in ascending order is `trailing_zeros` +
-`clear_lowest` until `is_zero`. `with_bit` builds a bitmap when converting a
-`FixedArray` into a `PackedArray`.
+`trailing_zeros`/`clear_lowest` are no longer public trait methods — they are
+internal details of `BitIter`. **`BitIter<B: Bitmap>`** (in `iter.rs`) takes a
+**copy** of the bitmap and yields the set bits as `B::Index`:
+
+```rust
+pub struct BitIter<B: Bitmap> { remaining: B }   // Copy snapshot, drained as it iterates
+
+impl<B: Bitmap> Iterator for BitIter<B> {
+    type Item = B::Index;
+    fn next(&mut self) -> Option<B::Index> { /* lowest set bit: trailing_zeros → clear it */ }
+}
+// next_back uses the highest set bit (leading-zeros); + ExactSizeIterator
+// (len == remaining.count_ones()) + FusedIterator
+```
+
+Front iteration clears the lowest set bit, back iteration clears the highest, and
+`len` is `count_ones()` — so it is double-ended and exact-size. Yielded indices
+are reconstructed through `B::Index::try_from_usize(..).unwrap_unchecked()`
+(positions come from `trailing_zeros`/bit-width math and are provably valid).
+`PackedArray`'s present-iterator is built directly on `bits()`.
 
 Implemented for `u8, u16, u32, u64, u128` (thin wrappers over the standard
 methods) and for `U256`.
@@ -256,13 +303,14 @@ pub struct U256 { lo: u128, hi: u128 }   // bit i: i<128 → lo bit i, else hi b
 ```
 
 Pure **safe** code. Bit `i` lives in `lo` for `i < 128` and `hi` otherwise;
-`count_ones`/`trailing_zeros`/`rank` combine the two limbs (e.g.
+`count_ones`/`rank` and the internal `trailing_zeros`/leading-zeros used by
+`BitIter` combine the two limbs (e.g.
 `trailing_zeros = if lo != 0 { lo.trailing_zeros() } else { 128 + hi.trailing_zeros() }`).
-`clear_lowest` clears the lowest limb's lowest bit. Only the `Bitmap` surface is
-implemented — no `Add`/`Mul`/`From`/`Display`.
+`U256::Index = u8` (`WIDTH = 256`). Only the `Bitmap` surface is implemented — no
+`Add`/`Mul`/`From`/`Display`.
 
-`arity-bitmap` is `#![no_std]` and does **not** use `alloc`. It does not depend
-on `arity-index`.
+`arity-bitmap` is `#![no_std]` and does **not** use `alloc`. It depends on
+`arity-index` for the `Niche` index types (`Bitmap::Index`, `BitIter`'s item).
 
 ## `arity-array`
 
@@ -273,17 +321,19 @@ type per arity:
 
 ```rust
 pub trait Arity: sealed::Sealed {
-    const LEN: usize;                          // 8,16,32,64,128,256
-    type Index: Niche;                         // U3..U7 or u8
-    type Bitmap: Bitmap;                       // u8..u128 or U256
-    type Size: hybrid_array::ArraySize;        // typenum U8..U256, backs FixedArray
+    const LEN: usize;                                  // 8,16,32,64,128,256
+    type Index: Niche;                                 // U3..U7 or u8
+    type Bitmap: Bitmap<Index = Self::Index>;          // u8..u128 or U256
+    type Size: hybrid_array::ArraySize;                // typenum U8..U256, backs FixedArray
 }
 
 pub enum Arity8 {} pub enum Arity16 {} /* … */ pub enum Arity256 {}
 ```
 
 Each marker wires index ↔ bitmap ↔ size together (e.g. `Arity16`: `LEN = 16`,
-`Index = U4`, `Bitmap = u16`, `Size = typenum::U16`). Invariants the wiring
+`Index = U4`, `Bitmap = u16`, `Size = typenum::U16`). The
+`Bitmap<Index = Self::Index>` bound makes the index/bitmap pairing a
+**compile-time guarantee**, not just a convention. Invariants the wiring
 guarantees and tests assert:
 `Index::COUNT == LEN == Bitmap::WIDTH == Size::USIZE`.
 
@@ -316,9 +366,11 @@ unsafe { self.0.get_unchecked(index.as_usize()) }
 
 This is the documented "no bounds check" path. Ported surface (from firewood's
 `Children`): `from_fn`, `each_ref`/`each_mut`, `get`/`get_mut`/`replace`, `map`,
-`merge`, `Index`/`IndexMut`, and `IntoIterator` (zipping `A::Index::ALL` with the
-elements). The `FixedArray<Option<T>, A>` specialization adds `new`, `count`,
-`take`, `iter_present`, and `take_only_child`.
+`merge`, `Index`/`IndexMut`, and `IntoIterator` (zipping `A::Index::all()` with the
+elements). Because `all()` is double-ended and exact-size, `FixedArray`'s
+iterators are `DoubleEndedIterator + ExactSizeIterator`. The
+`FixedArray<Option<T>, A>` specialization adds `new`, `count`, `take`,
+`iter_present`, and `take_only_child`.
 
 ### `PackedArray<T, A: Arity>`
 
@@ -342,8 +394,8 @@ Layout & invariants:
 - `Some(p)` ↔ a heap block: `Inner` header + `bitmap.count_ones()` elements,
   stored in ascending slot order. **Invariant: when allocated, `bitmap != 0`.**
   This is documented rather than encoded with `NonZero`. firewood's
-  `DenseChildren` used `NonZeroU16` for a *static* non-zero guarantee; that
-  guarantee is given up here **for every arity** (8–128 have `NonZeroU8..U128`
+  `DenseChildren` used `NonZeroU16` for a *static* non-zero guarantee; this
+  static non-zero guarantee is dropped **for every arity** (8–128 have `NonZeroU8..U128`
   counterparts, but `U256` does not) to keep `A::Bitmap` and the `Inner` layout
   uniform across all arities. The pointer-niche that makes the type pointer-sized
   is on the outer `NonNull`, not the bitmap, so nothing about the size guarantee
@@ -353,11 +405,19 @@ Layout & invariants:
 
 Behavior (ported and generalized):
 
-- `new`/`Default` (empty), `bitmap`, `count`, `get` (via `Bitmap::rank`),
-  `iter_present` (`(A::Index, &T)`), all-slots `iter` (`(A::Index, Option<&T>)`).
-  Both iterators are `ExactSizeIterator + FusedIterator`. The all-slots iterator's
-  slot counter is **`usize`**, not `u8` (firewood used `u8` for its fixed 0..16;
-  a `u8` counter wraps before reaching slot 255 at arity 256).
+- `new`/`Default` (empty), `bitmap`, `count`, `get` (via `Bitmap::rank`).
+  - `iter_present` (`(A::Index, &T)`) is built directly on `bitmap.bits()`: for
+    each yielded index `i`, the element is at `data.add(bitmap.rank(i))`. The
+    `rank` call uses the **original, unmodified bitmap snapshot** captured at
+    iterator construction — *not* `BitIter`'s progressively-drained `remaining`
+    copy — so the dense offset for slot `i` is correct regardless of iteration
+    direction or how many elements have already been yielded. It inherits
+    `bits()`'s **`DoubleEndedIterator + ExactSizeIterator + FusedIterator`** — no
+    manual pointer-advance or slot counter, so the previous `u8`-slot-counter
+    overflow concern (slot 255 at arity 256) disappears.
+  - all-slots `iter` (`(A::Index, Option<&T>)`) maps `A::Index::all()` over
+    `self.get(i)`, so it too is `DoubleEndedIterator + ExactSizeIterator + FusedIterator`
+    and spans `0..LEN` correctly for every arity.
 - `Drop`: read count from the bitmap, then one `ptr::drop_in_place` over a slice
   pointer covering all elements, then `dealloc`.
 - `Clone`: allocate, copy the bitmap, clone elements under a `CloneGuard` drop
@@ -386,14 +446,15 @@ arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
 - **Every `unsafe` block** carries a `// SAFETY:` comment naming the invariant it
   relies on. This requires two **workspace `Cargo.toml` lint changes**: promote
   `clippy::undocumented_unsafe_blocks` from its current `"warn"` to **`"deny"`**,
-  and add `unsafe_op_in_unsafe_fn = "deny"` under `[workspace.lints.rust]` (absent
-  today). Without these the toolchain cannot enforce the bar described here.
+  and add `unsafe_op_in_unsafe_fn = "deny"` under `[workspace.lints.rust]` (not
+  present in the initial scaffold). Without these the toolchain cannot enforce the
+  bar described here.
 - **Miri**: the full `arity-array` test suite runs under `cargo +nightly miri
   test` (catches provenance, alignment, leak, and use-after-free errors in the
   allocation/drop/clone/conversion paths).
 - **No `#[allow]`** (per repo rules); `#[expect(reason = …)]` only where
-  unavoidable (e.g. `clippy::indexing_slicing` on a statically-bounded `ALL`
-  lookup).
+  unavoidable. The range/bit iterators' `try_from_usize(..).unwrap_unchecked()`
+  is the canonical documented `unsafe` site (cursor provably `< COUNT`).
 
 ## Testing strategy
 
@@ -408,23 +469,91 @@ arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
   copies), **clone-panic drop-guard** (partial clones freed on unwind), and
   owned/by-ref round-trips through `FixedArray`.
 - **Niche assertions**: `size_of::<Option<U{n}>>() == 1` for `n ∈ 3..=7`;
-  `size_of::<PackedArray<T, A>>() == size_of::<*const ()>()` for every `A`;
-  `U{n}::ALL` is ascending and length `COUNT`.
+  `size_of::<PackedArray<T, A>>() == size_of::<*const ()>()` for every `A`.
+- **Double-ended iteration**: for `Niche::all()`, `NicheRange`,
+  `NicheRangeInclusive`, and `Bitmap::bits()`, assert (a) forward order is
+  ascending and length `== COUNT` / `count_ones()`; (b) `next_back` yields the
+  reverse of `next`; (c) interleaving `next`/`next_back` meets in the middle with
+  no duplicate or skipped element; (d) `len()` is exact and monotonically
+  decreasing. Run across all six arities.
 - **`arity-bitmap` property tests** (`proptest`): for each backing including
-  `U256`, cross-check `count_ones`, `trailing_zeros`, `test`, `rank`, `with_bit`,
-  and `clear_lowest` against a reference bit-set model.
+  `U256`, cross-check `count_ones`, `test`, `rank`, `with_bit`, and the `bits()`
+  iterator (both directions) against a reference bit-set model.
 - **Round-trip property tests**: arbitrary occupancy → `PackedArray` → back is
   the identity; element order preserved.
 
-## Dependencies & toolchain
+## Dependencies and toolchain
 
 - `arity-index`: `seq-macro` (latest, via `cargo add`).
-- `arity-bitmap`: none (dev: `proptest`).
+- `arity-bitmap`: `arity-index` (dev: `proptest`).
 - `arity-array`: `hybrid-array` (already present), `arity-index`, `arity-bitmap`
   (dev: `proptest`).
 - Edition 2024 (workspace default). Bump workspace `rust-version` **1.85 → 1.92**
-  (`&raw` needs 1.82, edition 2024 needs 1.85; 1.92 is the library MSRV target and
-  comfortably covers both).
+  (`&raw` needs 1.82, edition 2024 needs 1.85; 1.92 comfortably covers both). The
+  floor is set by workspace policy: library crates pin a recent stable a few
+  releases behind the bleeding edge (1.92) so downstream consumers are not forced
+  onto the newest toolchain, while CLI/dev tooling may track current stable
+  (1.96). `&raw` and edition 2024 are the only features that hard-require ≥ 1.85;
+  the remaining headroom is the policy margin, not a technical requirement.
+
+## Continuous integration
+
+A single `.github/workflows/ci.yml`, triggered on push and pull request, with
+these jobs:
+
+- **`test`** — a matrix over four runner images, stable toolchain:
+  `windows-2025-vs2026`, `macos-26`, `ubuntu-26.04`, and `ubuntu-26.04-arm`.
+  Runs `cargo test --workspace --all-features --all-targets` (via `cargo nextest`
+  where available, plus a `--doc` pass). This is the load-bearing
+  cross-platform/cross-arch coverage the `unsafe` pointer + layout code needs
+  (alignment, pointer width, and endianness differences surface here).
+- **`lint`** — `ubuntu-26.04`, stable: `cargo fmt --check` and
+  `cargo clippy --workspace --all-targets --all-features` (warnings denied, which
+  enforces the `unsafe`-doc lints).
+- **`miri`** — `ubuntu-26.04`, nightly: `cargo +nightly miri nextest run` across
+  the workspace (the allocation/drop/clone/conversion and niche-reconstruction
+  paths). Miri is slow and platform-independent for these checks, so a single
+  platform is sufficient.
+- **`msrv`** — `ubuntu-26.04`: build + test on the pinned `1.92` toolchain to keep
+  the declared MSRV honest.
+- **`docs`** — `ubuntu-26.04`: `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`
+  (every public item is documented; broken intra-doc links fail).
+
+Toolchains are installed with `dtolnay/rust-toolchain`; caching via
+`Swatinem/rust-cache`. The runner labels are pinned to the specified images
+rather than `-latest` aliases for reproducibility.
+
+> [!NOTE]
+> All four labels are current GitHub-hosted runner images (`ubuntu-26.04` and
+> `ubuntu-26.04-arm` are the Ubuntu 26.04 preview; `macos-26` and
+> `windows-2025-vs2026` are the macOS 26 and Windows Server 2025 / VS 2026
+> images). Because these are newer images, re-confirm the labels against the
+> GitHub Actions image catalog when the workflow is authored, in case a label is
+> renamed or promoted out of preview.
+
+## Publishing and package metadata
+
+Keep `publish = false` workspace-wide during implementation; remove it when the
+crates are ready to publish to crates.io. To satisfy the existing
+`cargo_common_metadata` lint and crates.io requirements, each crate fills in:
+
+- `description` (per crate), `readme = "README.md"` (one per crate),
+  `keywords` (≤5), and `categories` (from the crates.io fixed list — e.g.
+  `no-std`, `data-structures`, `memory-management`).
+- `license`, `repository`, `homepage`, `authors`, `edition`, `rust-version`,
+  `version` are already inherited from `[workspace.package]`.
+
+Planned per-crate metadata:
+
+| Crate | `description` | `keywords` | `categories` |
+| :--- | :--- | :--- | :--- |
+| `arity-index` | Bounds-check-free niche integer index types (`U3`–`U7`) with double-ended range iterators | `niche`, `integer`, `index`, `no-std`, `bitfield` | `no-std`, `data-structures`, `rust-patterns` |
+| `arity-bitmap` | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by niche integers, with a double-ended set-bit iterator | `bitmap`, `bitset`, `niche`, `no-std`, `u256` | `no-std`, `data-structures` |
+| `arity-array` | Fixed and pointer-sized heap-packed arrays over a generic arity, indexed without bounds checks | `array`, `sparse`, `packed`, `trie`, `no-std` | `no-std`, `data-structures`, `memory-management` |
+
+A pre-publish checklist (run `cargo publish --dry-run` per crate in dependency
+order: `arity-index` → `arity-bitmap` → `arity-array`) is part of the final
+implementation step.
 
 ## Future work
 
