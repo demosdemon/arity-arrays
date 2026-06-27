@@ -1,10 +1,19 @@
 //! `Bitmap`/`Raw` impls for the native unsigned integers `u8`..`u128`.
 
-use crate::{sealed::Sealed, Bitmap, Raw};
-use arity_index::{Niche, U3, U4, U5, U6, U7};
+use arity_index::Niche;
+use arity_index::U3;
+use arity_index::U4;
+use arity_index::U5;
+use arity_index::U6;
+use arity_index::U7;
+
+use crate::Bitmap;
+use crate::sealed::Raw;
+use crate::sealed::Sealed;
 
 /// Implements `Sealed` + `Raw` + `Bitmap` for a native unsigned integer `$ty`
-/// (width `$width`) indexed by niche type `$idx` (with `$idx::COUNT == $width`).
+/// (width `$width`) indexed by niche type `$idx` (with `$idx::COUNT ==
+/// $width`).
 macro_rules! impl_native_bitmap {
     ($ty:ty, $idx:ty, $width:literal) => {
         // Wire-up invariant: the index domain must equal the bit width.
@@ -13,8 +22,6 @@ macro_rules! impl_native_bitmap {
         impl Sealed for $ty {}
 
         impl Raw for $ty {
-            type Index = $idx;
-
             fn raw_is_zero(self) -> bool {
                 self == 0
             }
