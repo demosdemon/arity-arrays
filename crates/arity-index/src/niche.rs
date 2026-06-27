@@ -1,6 +1,7 @@
 //! Niche integer index types `U3`–`U7`, the [`Niche`] trait, and the `u8`
 //! arity-256 index.
 
+use crate::range::NicheRangeInclusive;
 use crate::sealed::Sealed;
 
 /// The error returned by `TryFrom<u8>` for a niche integer when the value is out
@@ -30,6 +31,13 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
 
     /// Constructs from a `usize`, or `None` if `i >= COUNT`.
     fn try_from_usize(i: usize) -> Option<Self>;
+
+    /// Iterates over all values ascending (`MIN..=MAX`) as a double-ended,
+    /// exact-size iterator. `len() == COUNT`.
+    #[must_use]
+    fn all() -> NicheRangeInclusive<Self> {
+        NicheRangeInclusive::full()
+    }
 }
 
 /// Generates a niche integer newtype `$name` over a fieldless enum `$repr` with
@@ -290,5 +298,40 @@ mod tests {
         assert_eq!(<u8 as Niche>::try_from_usize(0), Some(0u8));
         assert_eq!(<u8 as Niche>::try_from_usize(255), Some(255u8));
         assert_eq!(<u8 as Niche>::try_from_usize(256), None);
+    }
+
+    #[test]
+    fn all_covers_domain_double_ended() {
+        fn check<N: Niche>(count: usize) {
+            // Forward length and order.
+            let fwd = N::all();
+            assert_eq!(fwd.len(), count);
+            let collected: usize = N::all().count();
+            assert_eq!(collected, count);
+
+            // First and last via both ends.
+            let mut it = N::all();
+            assert_eq!(it.next().map(Niche::as_usize), Some(0));
+            assert_eq!(it.next_back().map(Niche::as_usize), Some(count - 1));
+
+            // Ascending and exact.
+            let mut prev: Option<usize> = None;
+            let mut seen = 0usize;
+            for v in N::all() {
+                let cur = v.as_usize();
+                if let Some(p) = prev {
+                    assert!(cur == p + 1, "not ascending by 1");
+                }
+                prev = Some(cur);
+                seen += 1;
+            }
+            assert_eq!(seen, count);
+        }
+        check::<U3>(8);
+        check::<U4>(16);
+        check::<U5>(32);
+        check::<U6>(64);
+        check::<U7>(128);
+        check::<u8>(256);
     }
 }

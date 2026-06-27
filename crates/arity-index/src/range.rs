@@ -90,10 +90,6 @@ impl<N: Niche> NicheRangeInclusive<N> {
     }
 
     /// The whole domain `[0, COUNT - 1]`. Backs [`Niche::all`](crate::Niche::all).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "consumed by Niche::all(), added in a later task")
-    )]
     pub(crate) const fn full() -> Self {
         Self {
             lo: 0,
