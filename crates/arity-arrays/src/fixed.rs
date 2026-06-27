@@ -117,6 +117,49 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut FixedArray<T, A> {
     }
 }
 
+impl<T, A: Arity> FixedArray<Option<T>, A> {
+    /// Creates a `FixedArray` with every slot `None`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::from_fn(|_| None)
+    }
+
+    /// Returns the number of `Some` slots.
+    #[must_use]
+    pub fn count(&self) -> usize {
+        self.iter().filter(|slot| slot.is_some()).count()
+    }
+
+    /// Sets the slot at `index` to `None`, returning the previous value.
+    pub fn take(&mut self, index: A::Index) -> Option<T> {
+        self.replace(index, None)
+    }
+
+    /// Iterates over the present (`Some`) slots as `(A::Index, &T)`, ascending.
+    pub fn iter_present(&self) -> impl DoubleEndedIterator<Item = (A::Index, &T)> {
+        self.into_iter()
+            .filter_map(|(i, slot)| slot.as_ref().map(|v| (i, v)))
+    }
+
+    /// If exactly one slot is present, takes and returns it with its index;
+    /// otherwise returns `None` and leaves the array unchanged.
+    pub fn take_only_child(&mut self) -> Option<(A::Index, T)> {
+        let mut present = self.iter_present().map(|(i, _)| i);
+        let only = present.next()?;
+        if present.next().is_some() {
+            return None;
+        }
+        drop(present);
+        self.take(only).map(|v| (only, v))
+    }
+}
+
+impl<T, A: Arity> Default for FixedArray<Option<T>, A> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +213,39 @@ mod tests {
         let b = a.map(|i, v| i.as_u8() + v);
         let got: Vec<u8> = (&b).into_iter().map(|(_, &v)| v).collect();
         assert_eq!(got, alloc::vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn option_new_count_take() {
+        let mut a = FixedArray::<Option<u8>, Arity16>::new();
+        assert_eq!(a.count(), 0);
+        a[U4::new_masked(1)] = Some(10);
+        a[U4::new_masked(9)] = Some(90);
+        assert_eq!(a.count(), 2);
+        assert_eq!(a.take(U4::new_masked(1)), Some(10));
+        assert_eq!(a.count(), 1);
+        assert_eq!(a.take(U4::new_masked(1)), None);
+    }
+
+    #[test]
+    fn option_iter_present_ascending() {
+        let mut a = FixedArray::<Option<u8>, Arity16>::new();
+        a[U4::new_masked(3)] = Some(3);
+        a[U4::new_masked(11)] = Some(11);
+        let got: Vec<(u8, u8)> = a.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(got, alloc::vec![(3, 3), (11, 11)]);
+    }
+
+    #[test]
+    fn option_take_only_child() {
+        let mut a = FixedArray::<Option<u8>, Arity16>::new();
+        assert_eq!(a.take_only_child(), None);
+        a[U4::new_masked(5)] = Some(50);
+        assert_eq!(a.take_only_child().map(|(i, v)| (i.as_u8(), v)), Some((5, 50)));
+        assert_eq!(a.count(), 0);
+        a[U4::new_masked(2)] = Some(20);
+        a[U4::new_masked(6)] = Some(60);
+        assert_eq!(a.take_only_child(), None); // two children → None, nothing taken
+        assert_eq!(a.count(), 2);
     }
 }
