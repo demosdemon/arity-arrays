@@ -48,7 +48,10 @@ proptest! {
         }
         let fwd: Vec<usize> = bm.bits().map(arity_index::U7::as_usize).collect();
         let expected: Vec<usize> = model.iter().copied().collect();
-        prop_assert_eq!(fwd, expected);
+        prop_assert_eq!(&fwd, &expected);
+        let mut back: Vec<usize> = bm.bits().rev().map(arity_index::U7::as_usize).collect();
+        back.reverse();
+        prop_assert_eq!(&back, &expected);
     }
 
     #[test]
@@ -68,6 +71,9 @@ proptest! {
         }
         let fwd: Vec<usize> = bm.bits().map(Niche::as_usize).collect();
         let expected: Vec<usize> = model.iter().copied().collect();
-        prop_assert_eq!(fwd, expected);
+        prop_assert_eq!(&fwd, &expected);
+        let mut back: Vec<usize> = bm.bits().rev().map(Niche::as_usize).collect();
+        back.reverse();
+        prop_assert_eq!(&back, &expected);
     }
 }

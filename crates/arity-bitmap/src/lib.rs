@@ -41,15 +41,19 @@ mod sealed {
     /// Crate-internal bit-scanning mechanics used by
     /// [`BitIter`](crate::BitIter).
     ///
-    /// Lives in this private module (so it is unnameable and uncallable outside
-    /// the crate) and extends [`Bitmap`](crate::Bitmap) so its methods can name
-    /// the public `Bitmap::Index`. `raw_lowest`/`raw_highest` have the
-    /// precondition `!self.raw_is_zero()`.
-    pub trait Raw: super::Bitmap {
+    /// Declared in this private module so it is unnameable/uncallable outside
+    /// the crate. It is a *supertrait* of [`Bitmap`](crate::Bitmap), so
+    /// every `Bitmap` implies these mechanics — which is what lets
+    /// `Bitmap::bits()` be called from generic downstream code. It returns
+    /// raw `usize` bit positions (not the index type) to avoid a
+    /// `Raw`/`Bitmap` cycle; `BitIter` reconstructs the typed index.
+    /// `raw_lowest_pos`/`raw_highest_pos` have the precondition
+    /// `!self.raw_is_zero()` and return a position `< WIDTH`.
+    pub trait Raw: Copy + Eq {
         fn raw_is_zero(self) -> bool;
         fn raw_popcount(self) -> u32;
-        fn raw_lowest(self) -> <Self as super::Bitmap>::Index;
-        fn raw_highest(self) -> <Self as super::Bitmap>::Index;
+        fn raw_lowest_pos(self) -> usize;
+        fn raw_highest_pos(self) -> usize;
         #[must_use]
         fn raw_clear_lowest(self) -> Self;
         #[must_use]
@@ -62,7 +66,7 @@ mod sealed {
 /// Sealed: implemented only by `u8`/`u16`/`u32`/`u64`/`u128` and [`U256`].
 ///
 /// [`Niche`]: arity_index::Niche
-pub trait Bitmap: Copy + Eq + sealed::Sealed {
+pub trait Bitmap: Copy + Eq + sealed::Sealed + sealed::Raw {
     /// The niche index type; `Index::COUNT == WIDTH`.
     type Index: Niche;
     /// The number of bits (`8`, `16`, `32`, `64`, `128`, or `256`).
@@ -83,10 +87,7 @@ pub trait Bitmap: Copy + Eq + sealed::Sealed {
     /// `i`).
     fn rank(self, i: Self::Index) -> u32;
     /// Iterates over the set bits, ascending, as a double-ended iterator.
-    fn bits(self) -> BitIter<Self>
-    where
-        Self: sealed::Raw,
-    {
+    fn bits(self) -> BitIter<Self> {
         BitIter::new(self)
     }
 }

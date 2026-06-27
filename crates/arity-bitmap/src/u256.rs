@@ -41,24 +41,20 @@ impl Raw for U256 {
         self.lo.count_ones() + self.hi.count_ones()
     }
 
-    fn raw_lowest(self) -> u8 {
-        // Precondition: self != 0.
-        let pos = if self.lo != 0 {
+    fn raw_lowest_pos(self) -> usize {
+        if self.lo != 0 {
             self.lo.trailing_zeros() as usize
         } else {
             128 + self.hi.trailing_zeros() as usize
-        };
-        <u8 as Niche>::try_from_usize(pos).expect("lowest set bit < 256")
+        }
     }
 
-    fn raw_highest(self) -> u8 {
-        // Precondition: self != 0.
-        let pos = if self.hi != 0 {
+    fn raw_highest_pos(self) -> usize {
+        if self.hi != 0 {
             128 + self.hi.ilog2() as usize
         } else {
             self.lo.ilog2() as usize
-        };
-        <u8 as Niche>::try_from_usize(pos).expect("highest set bit < 256")
+        }
     }
 
     fn raw_clear_lowest(self) -> Self {

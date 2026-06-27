@@ -30,16 +30,12 @@ macro_rules! impl_native_bitmap {
                 self.count_ones()
             }
 
-            fn raw_lowest(self) -> $idx {
-                // Precondition: self != 0, so trailing_zeros() < WIDTH == COUNT.
-                <$idx>::try_from_usize(self.trailing_zeros() as usize)
-                    .expect("nonzero bitmap has a lowest set bit < WIDTH")
+            fn raw_lowest_pos(self) -> usize {
+                self.trailing_zeros() as usize
             }
 
-            fn raw_highest(self) -> $idx {
-                // Precondition: self != 0, so ilog2() (highest set bit) < WIDTH.
-                <$idx>::try_from_usize(self.ilog2() as usize)
-                    .expect("nonzero bitmap has a highest set bit < WIDTH")
+            fn raw_highest_pos(self) -> usize {
+                self.ilog2() as usize
             }
 
             fn raw_clear_lowest(self) -> Self {
