@@ -31,18 +31,3 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
     /// Constructs from a `usize`, or `None` if `i >= COUNT`.
     fn try_from_usize(i: usize) -> Option<Self>;
 }
-
-/// Placeholder index type for arity 8 — implemented in a later task.
-pub enum U3 {}
-
-/// Placeholder index type for arity 16 — implemented in a later task.
-pub enum U4 {}
-
-/// Placeholder index type for arity 32 — implemented in a later task.
-pub enum U5 {}
-
-/// Placeholder index type for arity 64 — implemented in a later task.
-pub enum U6 {}
-
-/// Placeholder index type for arity 128 — implemented in a later task.
-pub enum U7 {}
