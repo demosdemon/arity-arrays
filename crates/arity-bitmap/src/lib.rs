@@ -94,6 +94,18 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// Returns the number of set bits strictly below `i` (the dense rank of
     /// `i`).
     fn rank(self, i: Self::Index) -> u32;
+    /// Returns `self` with the bit at `i` cleared (the inverse of
+    /// [`with_bit`](Bitmap::with_bit)). Clearing an unset bit is a no-op.
+    #[must_use]
+    fn without_bit(self, i: Self::Index) -> Self;
+    /// Returns the index of the `n`-th set bit (0-based), or `None` if
+    /// `n >= count_ones()`. The inverse of [`rank`](Bitmap::rank):
+    /// `select(rank(i)) == Some(i)` for every set `i`.
+    ///
+    /// Provided over [`bits`](Bitmap::bits); runs in `O(n)`.
+    fn select(self, n: u32) -> Option<Self::Index> {
+        self.bits().nth(n as usize)
+    }
     /// Iterates over the set bits, ascending, as a double-ended iterator.
     fn bits(self) -> BitIter<Self> {
         BitIter::new(self)
