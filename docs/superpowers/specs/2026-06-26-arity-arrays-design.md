@@ -9,12 +9,15 @@
 > a single 16-wide trie-children layout to arbitrary power-of-two arities from 8
 > to 256.
 >
-> **Supersedes the initial scaffold.** The repository starts with a single
-> `arity-arrays` crate whose modules are `bitmap` / `dense` / `sparse`. This
-> design replaces that scaffold: three crates (below), modules named `fixed` /
-> `packed`, and compile-time `seq-macro` codegen for the niche `Repr` enums (see
-> [Codegen](#the-niche-trick)). The empty scaffold files are restructured before
-> any code is written.
+> **Scaffolding is in place.** The workspace is already split into the three
+> crates below — `arity-index`, `arity-bitmap`, and `arity-arrays` (the array
+> crate is plural) — with stub `#![no_std]` `lib.rs` files, `seq-macro` wired into
+> `arity-index`, the inter-crate dependencies declared, and the `unsafe` lints
+> promoted to `deny`. `arity-arrays/src/lib.rs` re-exports the dependency crates
+> as `arity_arrays::index` and `arity_arrays::bitmap`, so a consumer can reach the
+> primitives through the top-level crate. Implementation fills in the modules
+> described below; compile-time `seq-macro` codegen generates the niche `Repr`
+> enums (see [Codegen](#the-niche-trick)).
 
 ## Motivation
 
@@ -91,8 +94,8 @@ crates/
     src/lib.rs         # `Bitmap` trait + impls for u8/u16/u32/u64/u128
     src/u256.rs        # `U256([u128; 2])` bitmap backing (safe code)
     src/iter.rs        # `BitIter<B>` double-ended iterator over set bits
-  arity-array/         # no_std + alloc — the arrays
-    src/lib.rs
+  arity-arrays/        # no_std + alloc — the arrays
+    src/lib.rs         # re-exports `arity_index as index`, `arity_bitmap as bitmap`
     src/arity.rs       # `Arity` trait + markers Arity8..Arity256
     src/fixed.rs       # FixedArray<T, A>
     src/packed.rs      # PackedArray<T, A>
@@ -105,7 +108,7 @@ graph TD
     arity_index["arity-index<br/>(seq-macro)"]
     arity_bitmap["arity-bitmap"]
     hybrid["hybrid-array"]
-    arity_array["arity-array"]
+    arity_array["arity-arrays"]
     arity_index --> arity_bitmap
     arity_index --> arity_array
     arity_bitmap --> arity_array
@@ -115,11 +118,11 @@ graph TD
 `arity-index` is the sole leaf. `arity-bitmap` depends on it so the `Bitmap`
 trait can speak in the typed index (`Niche`) rather than raw `usize` — which
 makes every bit position statically `< WIDTH`, eliminating the shift-UB
-precondition entirely. `arity-array` is the only crate that needs `alloc`, and
+precondition entirely. `arity-arrays` is the only crate that needs `alloc`, and
 the only one with heavy `unsafe`. Splitting this way keeps the primitive types
 reusable and lets their tests run without touching the allocator. `hybrid-array`
 is a third-party crate (`RustCrypto/hybrid-array`) that bridges `typenum` and
-const generics; `arity-array` depends on it solely to express `[T; A::LEN]`
+const generics; `arity-arrays` depends on it solely to express `[T; A::LEN]`
 storage on stable Rust (see the [`typenum` note](#the-arity-trait)).
 
 ## `arity-index`
@@ -210,7 +213,7 @@ domain size.
 
 ### The `Niche` trait
 
-A **sealed** trait unifies the index types so `arity-array` can be generic:
+A **sealed** trait unifies the index types so `arity-arrays` can be generic:
 
 ```rust
 pub trait Niche: Copy + Ord + Sized + sealed::Sealed {
@@ -305,7 +308,7 @@ Pure **safe** code. Bit `i` lives in `lo` for `i < 128` and `hi` otherwise;
 `arity-bitmap` is `#![no_std]` and does **not** use `alloc`. It depends on
 `arity-index` for the `Niche` index types (`Bitmap::Index`, `BitIter`'s item).
 
-## `arity-array`
+## `arity-arrays`
 
 ### The `Arity` trait
 
@@ -427,22 +430,20 @@ Behavior (ported and generalized):
     `ptr::read` to move out without `T: Clone`.
   - `From<&PackedArray<T, A>> for FixedArray<Option<T>, A>` (`T: Clone`).
 
-`arity-array` is `#![no_std]` with `extern crate alloc;` (`alloc`/`dealloc`,
+`arity-arrays` is `#![no_std]` with `extern crate alloc;` (`alloc`/`dealloc`,
 `NonNull`, `ptr`, `slice` from `core`/`alloc`).
 
 ## `unsafe` quality bar
 
-The `unsafe` is concentrated in `arity-array::packed` (raw allocation, pointer
+The `unsafe` is concentrated in `arity-arrays::packed` (raw allocation, pointer
 arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
 `arity-bitmap` (including `U256`) is entirely safe code.
 
 - **Every `unsafe` block** carries a `// SAFETY:` comment naming the invariant it
-  relies on. This requires two **workspace `Cargo.toml` lint changes**: promote
-  `clippy::undocumented_unsafe_blocks` from its current `"warn"` to **`"deny"`**,
-  and add `unsafe_op_in_unsafe_fn = "deny"` under `[workspace.lints.rust]` (not
-  present in the initial scaffold). Without these the toolchain cannot enforce the
-  bar described here.
-- **Miri**: the full `arity-array` test suite runs under `cargo +nightly miri
+  relies on. The scaffold already enforces this at the workspace level:
+  `clippy::undocumented_unsafe_blocks` and `unsafe_op_in_unsafe_fn` are both set to
+  **`deny`** in `[workspace.lints]`.
+- **Miri**: the full `arity-arrays` test suite runs under `cargo +nightly miri
   test` (catches provenance, alignment, leak, and use-after-free errors in the
   allocation/drop/clone/conversion paths).
 - **No `#[allow]`** (per repo rules); `#[expect(reason = …)]` only where
@@ -479,7 +480,7 @@ arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
 
 - `arity-index`: `seq-macro` (latest, via `cargo add`).
 - `arity-bitmap`: `arity-index` (dev: `proptest`).
-- `arity-array`: `hybrid-array` (already present), `arity-index`, `arity-bitmap`
+- `arity-arrays`: `hybrid-array` (already present), `arity-index`, `arity-bitmap`
   (dev: `proptest`).
 - Edition 2024 (workspace default). Bump workspace `rust-version` **1.85 → 1.92**
   (`&raw` needs 1.82, edition 2024 needs 1.85; 1.92 comfortably covers both). The
@@ -494,15 +495,21 @@ arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
 A single `.github/workflows/ci.yml`, triggered on push and pull request, with
 these jobs:
 
-- **`test`** — a matrix over four runner images, stable toolchain:
-  `windows-2025-vs2026`, `macos-26`, `ubuntu-26.04`, and `ubuntu-26.04-arm`.
-  Runs `cargo test --workspace --all-features --all-targets` (via `cargo nextest`
-  where available, plus a `--doc` pass). This is the load-bearing
+- **`test`** — a matrix over four runner images
+  (`windows-2025-vs2026`, `macos-26`, `ubuntu-26.04`, `ubuntu-26.04-arm`)
+  **crossed with two toolchains, `stable` and `nightly`**. Runs
+  `cargo test --workspace --all-features --all-targets` (via `cargo nextest` where
+  available, plus a `--doc` pass). The four images give the load-bearing
   cross-platform/cross-arch coverage the `unsafe` pointer + layout code needs
-  (alignment, pointer width, and endianness differences surface here).
-- **`lint`** — `ubuntu-26.04`, stable: `cargo fmt --check` and
-  `cargo clippy --workspace --all-targets --all-features` (warnings denied, which
-  enforces the `unsafe`-doc lints).
+  (alignment, pointer width, and endianness differences surface here); the
+  `nightly` leg keeps the crates building on the unstable channel and is the lane
+  for any nightly-gated optimization the implementation may later add (such
+  features are probed for support — e.g. via a `build.rs`/`rustversion` cfg — so
+  the same source still compiles on `stable`).
+- **`lint`** — `ubuntu-26.04`: `cargo +nightly fmt --all --check` (the formatter
+  uses nightly-only rustfmt options, and `--all` covers every workspace member)
+  and `cargo clippy --workspace --all-targets --all-features` on stable (warnings
+  denied, which enforces the `unsafe`-doc lints).
 - **`miri`** — `ubuntu-26.04`, nightly: `cargo +nightly miri nextest run` across
   the workspace (the allocation/drop/clone/conversion and niche-reconstruction
   paths). Miri is slow and platform-independent for these checks, so a single
@@ -542,10 +549,10 @@ Planned per-crate metadata:
 | :--- | :--- | :--- | :--- |
 | `arity-index` | Bounds-check-free niche integer index types (`U3`–`U7`) with double-ended range iterators | `niche`, `integer`, `index`, `no-std`, `bitfield` | `no-std`, `data-structures`, `rust-patterns` |
 | `arity-bitmap` | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by niche integers, with a double-ended set-bit iterator | `bitmap`, `bitset`, `niche`, `no-std`, `u256` | `no-std`, `data-structures` |
-| `arity-array` | Fixed and pointer-sized heap-packed arrays over a generic arity, indexed without bounds checks | `array`, `sparse`, `packed`, `trie`, `no-std` | `no-std`, `data-structures`, `memory-management` |
+| `arity-arrays` | Fixed and pointer-sized heap-packed arrays over a generic arity, indexed without bounds checks | `array`, `sparse`, `packed`, `trie`, `no-std` | `no-std`, `data-structures`, `memory-management` |
 
 A pre-publish checklist (run `cargo publish --dry-run` per crate in dependency
-order: `arity-index` → `arity-bitmap` → `arity-array`) is part of the final
+order: `arity-index` → `arity-bitmap` → `arity-arrays`) is part of the final
 implementation step.
 
 ## Future work
