@@ -98,6 +98,39 @@ impl<T, A: Arity> PackedArray<T, A> {
         // `.add(rank)` is within the allocation, pointing at an initialised `T`.
         Some(unsafe { &*data_ptr(ptr).add(rank) })
     }
+
+    /// Iterates over present elements as `(A::Index, &T)`, ascending. Double-ended.
+    #[must_use]
+    pub fn iter_present(&self) -> PackedPresentIter<'_, T, A> {
+        self.0.map_or_else(
+            || PackedPresentIter {
+                bits: A::Bitmap::ZERO.bits(),
+                bitmap: A::Bitmap::ZERO,
+                data: core::ptr::null(),
+                _marker: PhantomData,
+            },
+            // SAFETY: `Some` ↔ a valid allocation with initialised bitmap/elements.
+            |ptr| unsafe {
+                let bitmap = ptr.as_ref().bitmap;
+                PackedPresentIter {
+                    bits: bitmap.bits(),
+                    bitmap,
+                    data: data_ptr(ptr).cast_const(),
+                    _marker: PhantomData,
+                }
+            },
+        )
+    }
+
+    /// Iterates over all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
+    /// Double-ended.
+    #[must_use]
+    pub fn iter(&self) -> PackedAllIter<'_, T, A> {
+        PackedAllIter {
+            array: self,
+            slots: A::Index::all(),
+        }
+    }
 }
 
 impl<T, A: Arity> Default for PackedArray<T, A> {
@@ -144,6 +177,90 @@ impl<T, A: Arity> From<FixedArray<Option<T>, A>> for PackedArray<T, A> {
             }
         }
         Self(Some(inner), PhantomData)
+    }
+}
+
+use arity_index::Niche;
+
+/// Iterator over present elements of a [`PackedArray`]. See
+/// [`PackedArray::iter_present`].
+pub struct PackedPresentIter<'a, T, A: Arity> {
+    bits: arity_bitmap::BitIter<A::Bitmap>,
+    bitmap: A::Bitmap,
+    data: *const T,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T, A: Arity> PackedPresentIter<'a, T, A> {
+    fn elem(&self, index: A::Index) -> (A::Index, &'a T) {
+        let rank = self.bitmap.rank(index) as usize;
+        // SAFETY: `index` is a set bit of the original `bitmap` snapshot, so
+        // `rank < count`; `data` is the element base; `.add(rank)` is in bounds
+        // and initialised. `rank` uses the original bitmap, not the drained
+        // `bits` state, so the offset is correct in either direction.
+        (index, unsafe { &*self.data.add(rank) })
+    }
+}
+
+impl<'a, T, A: Arity> Iterator for PackedPresentIter<'a, T, A> {
+    type Item = (A::Index, &'a T);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.bits.next().map(|i| self.elem(i))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.bits.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for PackedPresentIter<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.bits.next_back().map(|i| self.elem(i))
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for PackedPresentIter<'_, T, A> {
+    fn len(&self) -> usize {
+        self.bits.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for PackedPresentIter<'_, T, A> {}
+
+/// Iterator over all slots of a [`PackedArray`]. See [`PackedArray::iter`].
+pub struct PackedAllIter<'a, T, A: Arity> {
+    array: &'a PackedArray<T, A>,
+    slots: arity_index::NicheRangeInclusive<A::Index>,
+}
+
+impl<'a, T, A: Arity> Iterator for PackedAllIter<'a, T, A> {
+    type Item = (A::Index, Option<&'a T>);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slots.next().map(|i| (i, self.array.get(i)))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slots.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for PackedAllIter<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.slots.next_back().map(|i| (i, self.array.get(i)))
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for PackedAllIter<'_, T, A> {
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for PackedAllIter<'_, T, A> {}
+
+impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
+    type Item = (A::Index, Option<&'a T>);
+    type IntoIter = PackedAllIter<'a, T, A>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -206,5 +323,39 @@ mod tests {
             core::mem::size_of::<PackedArray<u16, Arity256>>(),
             core::mem::size_of::<*const ()>()
         );
+    }
+
+    #[test]
+    fn iter_present_ascending_and_double_ended() {
+        extern crate alloc;
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        src[U4::new_masked(1)] = Some(1);
+        src[U4::new_masked(4)] = Some(4);
+        src[U4::new_masked(14)] = Some(14);
+        let p = PackedArray::from(src);
+
+        let fwd: alloc::vec::Vec<(u8, u8)> =
+            p.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(fwd, alloc::vec![(1, 1), (4, 4), (14, 14)]);
+
+        let mut it = p.iter_present();
+        assert_eq!(it.len(), 3);
+        assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((1, 1)));
+        assert_eq!(it.next_back().map(|(i, &v)| (i.as_u8(), v)), Some((14, 14)));
+        assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((4, 4)));
+        assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn iter_all_slots() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        src[U4::new_masked(5)] = Some(5);
+        let p = PackedArray::from(src);
+        let all: alloc::vec::Vec<(u8, Option<u8>)> =
+            p.iter().map(|(i, opt)| (i.as_u8(), opt.copied())).collect();
+        assert_eq!(all.len(), 16);
+        assert_eq!(all[5], (5, Some(5)));
+        assert_eq!(all[0], (0, None));
+        assert_eq!(all[15], (15, None));
     }
 }
