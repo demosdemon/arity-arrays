@@ -49,7 +49,10 @@ Set up `lib.rs` (module declarations, sealed-trait module, error type) and defin
 mod niche;
 mod range;
 
-pub use niche::{Niche, TryFromIntError, U3, U4, U5, U6, U7};
+// Re-exports grow as tasks land: `U3`–`U7` are added in Task 2, once the
+// `niche_int!` macro defines them. Re-exporting them here before they exist
+// would not compile.
+pub use niche::{Niche, TryFromIntError};
 pub use range::{NicheRange, NicheRangeInclusive};
 
 mod sealed {
@@ -133,9 +136,10 @@ Generate the fieldless `Repr` enum and the `U{n}` newtype with all inherent asso
 
 **Files:**
 - Modify: `crates/arity-index/src/niche.rs`
+- Modify: `crates/arity-index/src/lib.rs` (extend the `niche::` re-export to add `U3, U4, U5, U6, U7`)
 
 **Interfaces:**
-- Produces, for each of `U3, U4, U5, U6, U7`: `const BITS: u32`, `const COUNT: usize`, `const MIN: Self`, `const MAX: Self`, `const fn try_new(u8) -> Option<Self>`, `const unsafe fn new_unchecked(u8) -> Self`, `const fn new_masked(u8) -> Self`, `const fn as_u8(self) -> u8`, `const fn as_usize(self) -> usize`; `impl Default`, `impl Sealed`, `impl Niche` (`as_usize`, `try_from_usize`; `COUNT`).
+- Produces, for each of `U3, U4, U5, U6, U7`: `const BITS: u32`, `const COUNT: usize`, `const MIN: Self`, `const MAX: Self`, `const fn try_new(u8) -> Option<Self>`, `const unsafe fn new_unchecked(u8) -> Self`, `const fn new_masked(u8) -> Self`, `const fn as_u8(self) -> u8`, `const fn as_usize(self) -> usize`; `impl Default`, `impl Sealed`, `impl Niche` (`as_usize`, `try_from_usize`; `COUNT`). Re-exported from the crate root.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -324,6 +328,13 @@ niche_int!(U4, Repr4, 4, 16);
 niche_int!(U5, Repr5, 5, 32);
 niche_int!(U6, Repr6, 6, 64);
 niche_int!(U7, Repr7, 7, 128);
+```
+
+Then extend the crate-root re-export in `crates/arity-index/src/lib.rs` so the
+types are public:
+
+```rust
+pub use niche::{Niche, TryFromIntError, U3, U4, U5, U6, U7};
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
