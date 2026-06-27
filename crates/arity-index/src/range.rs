@@ -37,7 +37,8 @@ impl<N: Niche> Iterator for NicheRange<N> {
         if self.lo >= self.hi {
             return None;
         }
-        // SAFETY: `lo < hi <= COUNT`, so `lo < COUNT` and `try_from_usize` is `Some`.
+        // SAFETY: `lo < hi <= COUNT-1 < COUNT`, so `lo < COUNT` and `try_from_usize` is
+        // `Some`.
         let v = unsafe { N::try_from_usize(self.lo).unwrap_unchecked() };
         self.lo += 1;
         Some(v)
@@ -55,7 +56,8 @@ impl<N: Niche> DoubleEndedIterator for NicheRange<N> {
             return None;
         }
         self.hi -= 1;
-        // SAFETY: `hi < COUNT` (it was `<= COUNT` and just decremented).
+        // SAFETY: after decrement, `hi <= COUNT-2 < COUNT`; no underflow since
+        // the guard ensured `lo < hi`, so `hi >= 1` before the decrement.
         Some(unsafe { N::try_from_usize(self.hi).unwrap_unchecked() })
     }
 }
@@ -175,6 +177,14 @@ mod tests {
         let r = NicheRange::new(u4(6), u4(2));
         assert_eq!(r.len(), 0);
         assert_eq!(r.count(), 0);
+    }
+
+    #[test]
+    fn inclusive_empty() {
+        let mut r = NicheRangeInclusive::new(u4(5), u4(2));
+        assert_eq!(r.len(), 0);
+        assert_eq!(r.next(), None);
+        assert_eq!(r.next_back(), None);
     }
 
     #[test]
