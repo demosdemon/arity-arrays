@@ -16,3 +16,6 @@ hybrid-array = "0.4.12"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest = "1.11.0"
