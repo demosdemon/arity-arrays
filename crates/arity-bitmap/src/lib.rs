@@ -34,31 +34,29 @@ use arity_index::Niche;
 pub use iter::BitIter;
 pub use u256::U256;
 
-mod sealed {
-    /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
-    pub trait Sealed {}
+/// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
+trait Sealed {}
 
-    /// Crate-internal bit-scanning mechanics used by
-    /// [`BitIter`](crate::BitIter).
-    ///
-    /// Declared in this private module so it is unnameable/uncallable outside
-    /// the crate. It is a *supertrait* of [`Bitmap`](crate::Bitmap), so
-    /// every `Bitmap` implies these mechanics — which is what lets
-    /// `Bitmap::bits()` be called from generic downstream code. It returns
-    /// raw `usize` bit positions (not the index type) to avoid a
-    /// `Raw`/`Bitmap` cycle; `BitIter` reconstructs the typed index.
-    /// `raw_lowest_pos`/`raw_highest_pos` have the precondition
-    /// `!self.raw_is_zero()` and return a position `< WIDTH`.
-    pub trait Raw: Copy + Eq {
-        fn raw_is_zero(self) -> bool;
-        fn raw_popcount(self) -> u32;
-        fn raw_lowest_pos(self) -> usize;
-        fn raw_highest_pos(self) -> usize;
-        #[must_use]
-        fn raw_clear_lowest(self) -> Self;
-        #[must_use]
-        fn raw_clear_highest(self) -> Self;
-    }
+/// Crate-internal bit-scanning mechanics used by
+/// [`BitIter`](crate::BitIter).
+///
+/// Declared in this private module so it is unnameable/uncallable outside
+/// the crate. It is a *supertrait* of [`Bitmap`](crate::Bitmap), so
+/// every `Bitmap` implies these mechanics — which is what lets
+/// `Bitmap::bits()` be called from generic downstream code. It returns
+/// raw `usize` bit positions (not the index type) to avoid a
+/// `Raw`/`Bitmap` cycle; `BitIter` reconstructs the typed index.
+/// `raw_lowest_pos`/`raw_highest_pos` have the precondition
+/// `!self.raw_is_zero()` and return a position `< WIDTH`.
+trait Raw: Sealed + Copy + Eq {
+    fn raw_is_zero(self) -> bool;
+    fn raw_popcount(self) -> u32;
+    fn raw_lowest_pos(self) -> usize;
+    fn raw_highest_pos(self) -> usize;
+    #[must_use]
+    fn raw_clear_lowest(self) -> Self;
+    #[must_use]
+    fn raw_clear_highest(self) -> Self;
 }
 
 /// A fixed-width bitmap addressed by a [`Niche`] index type.
@@ -66,7 +64,14 @@ mod sealed {
 /// Sealed: implemented only by `u8`/`u16`/`u32`/`u64`/`u128` and [`U256`].
 ///
 /// [`Niche`]: arity_index::Niche
-pub trait Bitmap: Copy + Eq + sealed::Sealed + sealed::Raw {
+#[expect(
+    private_bounds,
+    reason = "Raw and Sealed are intentionally private supertraits: they seal \
+              Bitmap against downstream impls and keep the bit-scanning mechanics \
+              off the public API, while still being implied by `B: Bitmap` so \
+              `bits()` is callable from generic downstream code"
+)]
+pub trait Bitmap: Copy + Eq + Raw {
     /// The niche index type; `Index::COUNT == WIDTH`.
     type Index: Niche;
     /// The number of bits (`8`, `16`, `32`, `64`, `128`, or `256`).

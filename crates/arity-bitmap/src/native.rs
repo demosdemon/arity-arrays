@@ -8,8 +8,8 @@ use arity_index::U6;
 use arity_index::U7;
 
 use crate::Bitmap;
-use crate::sealed::Raw;
-use crate::sealed::Sealed;
+use crate::Raw;
+use crate::Sealed;
 
 /// Implements `Sealed` + `Raw` + `Bitmap` for a native unsigned integer `$ty`
 /// (width `$width`) indexed by niche type `$idx` (with `$idx::COUNT ==
