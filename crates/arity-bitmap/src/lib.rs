@@ -46,8 +46,11 @@ trait Sealed {}
 /// `Bitmap::bits()` be called from generic downstream code. It returns
 /// raw `usize` bit positions (not the index type) to avoid a
 /// `Raw`/`Bitmap` cycle; `BitIter` reconstructs the typed index.
+///
 /// `raw_lowest_pos`/`raw_highest_pos` have the precondition
 /// `!self.raw_is_zero()` and return a position `< WIDTH`.
+/// `raw_clear_lowest`/`raw_clear_highest` are total: a zero bitmap is
+/// returned unchanged (zero), so they need no precondition.
 trait Raw: Sealed + Copy + Eq {
     fn raw_is_zero(self) -> bool;
     fn raw_popcount(self) -> u32;

@@ -27,7 +27,10 @@ impl<T, A: Arity> FixedArray<T, A> {
         }))
     }
 
-    /// Returns a reference to the element at `index` (no bounds check).
+    /// Returns a reference to the element at `index`.
+    ///
+    /// Infallible (unlike [`slice::get`]): `A::Index` is a total index type,
+    /// so every value of it is in bounds and there is no `None` case.
     #[must_use]
     pub fn get(&self, index: A::Index) -> &T {
         // SAFETY: `A::Index::as_usize()` is always `< Index::COUNT == A::LEN`,
@@ -35,7 +38,10 @@ impl<T, A: Arity> FixedArray<T, A> {
         unsafe { self.0.as_slice().get_unchecked(index.as_usize()) }
     }
 
-    /// Returns a mutable reference to the element at `index` (no bounds check).
+    /// Returns a mutable reference to the element at `index`.
+    ///
+    /// Infallible for the same reason as [`get`](Self::get): `A::Index` is a
+    /// total index type, so every value is in bounds.
     #[must_use]
     pub fn get_mut(&mut self, index: A::Index) -> &mut T {
         // SAFETY: as in `get` — `index.as_usize() < A::LEN == array length`.
@@ -119,6 +125,48 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut FixedArray<T, A> {
         core::iter::Zip<arity_index::NicheRangeInclusive<A::Index>, core::slice::IterMut<'a, T>>;
     fn into_iter(self) -> Self::IntoIter {
         A::Index::all().zip(self.0.as_mut_slice().iter_mut())
+    }
+}
+
+// Manual trait impls forwarding to the inner `Array`. These cannot be
+// `#[derive]`d: derive would emit a spurious `A: Clone` (etc.) bound on the
+// uninhabited `Arity` marker, even though `A` is never stored. Bounds rest on
+// `T` alone.
+impl<T: Clone, A: Arity> Clone for FixedArray<T, A> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T: PartialEq, A: Arity> PartialEq for FixedArray<T, A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T: Eq, A: Arity> Eq for FixedArray<T, A> {}
+
+impl<T: PartialOrd, A: Arity> PartialOrd for FixedArray<T, A> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl<T: Ord, A: Arity> Ord for FixedArray<T, A> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl<T: core::hash::Hash, A: Arity> core::hash::Hash for FixedArray<T, A> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<T: core::fmt::Debug, A: Arity> core::fmt::Debug for FixedArray<T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -267,5 +315,45 @@ mod tests {
         a[U4::new_masked(6)] = Some(60);
         assert_eq!(a.take_only_child(), None); // two children → None, nothing taken
         assert_eq!(a.count(), 2);
+    }
+
+    #[test]
+    fn clone_eq_and_ord() {
+        let a = FixedArray::<u8, Arity8>::from_fn(U3::as_u8);
+        let b = a.clone();
+        assert_eq!(a, b);
+        let mut c = a.clone();
+        c[U3::new_masked(0)] = 100;
+        assert_ne!(a, c);
+        // Lexicographic ordering: c differs from a at slot 0 (100 > 0).
+        assert!(c > a);
+        assert!(a < c);
+        assert_eq!(a.cmp(&b), core::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn debug_renders_elements() {
+        let a = FixedArray::<u8, Arity8>::from_fn(U3::as_u8);
+        let s = alloc::format!("{a:?}");
+        // Inner `Array` Debug renders as a list of the elements.
+        assert!(s.contains('0') && s.contains('7'));
+    }
+
+    #[test]
+    fn hash_matches_for_equal_arrays() {
+        extern crate std;
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::Hash;
+        use std::hash::Hasher;
+
+        fn hash_of(a: &FixedArray<u8, Arity8>) -> u64 {
+            let mut h = DefaultHasher::new();
+            a.hash(&mut h);
+            h.finish()
+        }
+
+        let a = FixedArray::<u8, Arity8>::from_fn(U3::as_u8);
+        let b = a.clone();
+        assert_eq!(hash_of(&a), hash_of(&b));
     }
 }

@@ -61,6 +61,55 @@ unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
     unsafe { (&raw mut (*inner.as_ptr()).data).cast::<T>() }
 }
 
+/// Allocates a heap block for `count` elements and writes the header `bitmap`,
+/// leaving the `count` element slots uninitialised. Returns the base `Inner`.
+///
+/// This is the single definition of the layout/header protocol shared by the
+/// three constructors (`From<FixedArray>`, `From<&FixedArray>`, `Clone`).
+///
+/// # Safety
+/// `count` must be `> 0` (so the layout is non-zero-sized) and equal to
+/// `bitmap.count_ones()`. The caller must initialise all `count` element slots
+/// before any read, and owns the allocation thereafter (dropping the elements
+/// and deallocating with `alloc_layout::<A, T>(count)`).
+unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<Inner<A, T>> {
+    let layout = alloc_layout::<A, T>(count);
+    // SAFETY: `count > 0` so `layout.size() > 0`; `alloc` returns null on
+    // failure, handled below.
+    let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
+        handle_alloc_error(layout)
+    };
+    let inner = raw.cast::<Inner<A, T>>();
+    // SAFETY: `inner` is freshly allocated and sized for `Inner<A, T>`; writing
+    // the bitmap initialises the header before any element.
+    unsafe { (&raw mut (*inner.as_ptr()).bitmap).write(bitmap) };
+    inner
+}
+
+/// Drop guard for the fill phase of a block allocated by [`alloc_block`]. On
+/// unwind it drops the `initialized` leading elements and frees the block;
+/// callers `core::mem::forget` it once the fill completes.
+struct FillGuard<A: Arity, T> {
+    inner: NonNull<Inner<A, T>>,
+    initialized: usize,
+    capacity: usize,
+}
+
+impl<A: Arity, T> Drop for FillGuard<A, T> {
+    fn drop(&mut self) {
+        // SAFETY: `inner` is a live allocation from `alloc_layout::<A, T>(capacity)`;
+        // its `initialized` leading elements are initialised.
+        unsafe {
+            let dp = data_ptr(self.inner);
+            core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(dp, self.initialized));
+            dealloc(
+                self.inner.as_ptr().cast(),
+                alloc_layout::<A, T>(self.capacity),
+            );
+        }
+    }
+}
+
 impl<T, A: Arity> PackedArray<T, A> {
     /// Creates an empty `PackedArray` (no allocation).
     #[must_use]
@@ -105,6 +154,22 @@ impl<T, A: Arity> PackedArray<T, A> {
         Some(unsafe { &*data_ptr(ptr).add(rank) })
     }
 
+    /// Returns the element at dense storage position `rank`, skipping the
+    /// bitmap `test`/`rank` that [`get`](Self::get) performs. Lets
+    /// [`PackedAllIter`] reuse a running rank counter instead of re-scanning
+    /// the bitmap per slot.
+    ///
+    /// # Safety
+    /// The array must be non-empty and `rank` must be `< self.count()`.
+    unsafe fn elem_at_rank(&self, rank: usize) -> &T {
+        // SAFETY: the array is non-empty per the precondition, so `self.0` is
+        // `Some`; the pointer is valid per the type invariant.
+        let ptr = unsafe { self.0.unwrap_unchecked() };
+        // SAFETY: `rank < count` per the precondition; `data_ptr(ptr).add(rank)`
+        // is an initialised element within the allocation.
+        unsafe { &*data_ptr(ptr).add(rank) }
+    }
+
     /// Iterates over present elements as `(A::Index, &T)`, ascending.
     /// Double-ended.
     #[must_use]
@@ -133,9 +198,14 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// Double-ended.
     #[must_use]
     pub fn iter(&self) -> PackedAllIter<'_, T, A> {
+        let bitmap = self.bitmap();
         PackedAllIter {
             array: self,
+            bitmap,
+            count: bitmap.count_ones() as usize,
             slots: A::Index::all(),
+            front_rank: 0,
+            back_consumed: 0,
         }
     }
 }
@@ -161,19 +231,15 @@ impl<T, A: Arity> From<FixedArray<Option<T>, A>> for PackedArray<T, A> {
             return Self::new();
         }
         let count = bitmap.count_ones() as usize;
-        let layout = alloc_layout::<A, T>(count);
-        // SAFETY: `count > 0` so `layout.size() > 0`; `alloc` returns null on
-        // failure, handled below.
-        let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
-            handle_alloc_error(layout)
-        };
-        let inner = raw.cast::<Inner<A, T>>();
-        // SAFETY: `inner` is freshly allocated and sized for `Inner<A, T>`;
-        // writing the bitmap initialises the header before any element.
-        unsafe { (&raw mut (*inner.as_ptr()).bitmap).write(bitmap) };
+        // SAFETY: `count == bitmap.count_ones() > 0`; the fill loop below
+        // initialises all `count` slots before the value is observed.
+        let inner = unsafe { alloc_block::<A, T>(bitmap, count) };
         // SAFETY: `inner` valid; `data_ptr` is the base of `count` element slots.
         let dp = unsafe { data_ptr(inner) };
-        // Pass 2 (by value): move each `Some` into the next dense slot.
+        // Pass 2 (by value): move each `Some` into the next dense slot. No
+        // `FillGuard` is needed here: moving an owned value out of `Some` cannot
+        // panic and dropping a `None` runs no user code, so there is no
+        // partial-init window to clean up on unwind.
         let mut rank = 0usize;
         for (_i, slot) in src {
             if let Some(v) = slot {
@@ -191,29 +257,6 @@ impl<T, A: Arity> From<FixedArray<Option<T>, A>> for PackedArray<T, A> {
 /// block.
 impl<T: Clone, A: Arity> From<&FixedArray<Option<T>, A>> for PackedArray<T, A> {
     fn from(src: &FixedArray<Option<T>, A>) -> Self {
-        // Drop guard for panic safety while cloning into the new block.
-        struct InitGuard<A: Arity, T> {
-            inner: NonNull<Inner<A, T>>,
-            initialized: usize,
-            capacity: usize,
-        }
-        impl<A: Arity, T> Drop for InitGuard<A, T> {
-            fn drop(&mut self) {
-                // SAFETY: `initialized` leading elements of a live `capacity`-sized block.
-                unsafe {
-                    let dp = data_ptr(self.inner);
-                    core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(
-                        dp,
-                        self.initialized,
-                    ));
-                    dealloc(
-                        self.inner.as_ptr().cast(),
-                        alloc_layout::<A, T>(self.capacity),
-                    );
-                }
-            }
-        }
-
         let mut bitmap = A::Bitmap::ZERO;
         for (i, slot) in src {
             if slot.is_some() {
@@ -224,17 +267,14 @@ impl<T: Clone, A: Arity> From<&FixedArray<Option<T>, A>> for PackedArray<T, A> {
             return Self::new();
         }
         let count = bitmap.count_ones() as usize;
-        let layout = alloc_layout::<A, T>(count);
-        // SAFETY: `count > 0`; null handled below.
-        let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
-            handle_alloc_error(layout)
-        };
-        let inner = raw.cast::<Inner<A, T>>();
-        // SAFETY: freshly allocated; write initialises the header.
-        unsafe { (&raw mut (*inner.as_ptr()).bitmap).write(bitmap) };
+        // SAFETY: `count == bitmap.count_ones() > 0`; the guarded fill loop
+        // initialises all `count` slots (or the guard cleans up on unwind).
+        let inner = unsafe { alloc_block::<A, T>(bitmap, count) };
         // SAFETY: `inner` valid; `data_ptr` is the base of `count` element slots.
         let dp = unsafe { data_ptr(inner) };
-        let mut guard = InitGuard {
+        // `T::clone` may panic; the guard frees already-cloned elements + the
+        // block on unwind.
+        let mut guard = FillGuard {
             inner,
             initialized: 0,
             capacity: count,
@@ -338,15 +378,36 @@ impl<T, A: Arity> ExactSizeIterator for PackedPresentIter<'_, T, A> {
 impl<T, A: Arity> core::iter::FusedIterator for PackedPresentIter<'_, T, A> {}
 
 /// Iterator over all slots of a [`PackedArray`]. See [`PackedArray::iter`].
+///
+/// Drives off a `bitmap` snapshot and two running rank counters rather than
+/// calling [`PackedArray::get`] per slot, so each step is an O(1) bit `test`
+/// plus a counter bump — no repeated `rank` scan. `slots` (the index range)
+/// owns termination and front/back crossing; because it partitions the indices
+/// between the two ends, a present index yielded from the front has dense rank
+/// `front_rank`, and one yielded from the back has dense rank
+/// `count - 1 - back_consumed`.
 pub struct PackedAllIter<'a, T, A: Arity> {
     array: &'a PackedArray<T, A>,
+    bitmap: A::Bitmap,
+    count: usize,
     slots: arity_index::NicheRangeInclusive<A::Index>,
+    front_rank: usize,
+    back_consumed: usize,
 }
 
 impl<'a, T, A: Arity> Iterator for PackedAllIter<'a, T, A> {
     type Item = (A::Index, Option<&'a T>);
     fn next(&mut self) -> Option<Self::Item> {
-        self.slots.next().map(|i| (i, self.array.get(i)))
+        let i = self.slots.next()?;
+        if self.bitmap.test(i) {
+            // SAFETY: `i` is set, so the array is non-empty and
+            // `front_rank == rank(i) < count`.
+            let v = unsafe { self.array.elem_at_rank(self.front_rank) };
+            self.front_rank += 1;
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slots.size_hint()
@@ -355,7 +416,17 @@ impl<'a, T, A: Arity> Iterator for PackedAllIter<'a, T, A> {
 
 impl<T, A: Arity> DoubleEndedIterator for PackedAllIter<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.slots.next_back().map(|i| (i, self.array.get(i)))
+        let i = self.slots.next_back()?;
+        if self.bitmap.test(i) {
+            let rank = self.count - 1 - self.back_consumed;
+            // SAFETY: `i` is set, so the array is non-empty and
+            // `rank == rank(i) < count`.
+            let v = unsafe { self.array.elem_at_rank(rank) };
+            self.back_consumed += 1;
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
     }
 }
 
@@ -393,50 +464,23 @@ impl<T, A: Arity> Drop for PackedArray<T, A> {
 
 impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
     fn clone(&self) -> Self {
-        // Frees already-cloned elements + the allocation if `T::clone` panics.
-        struct CloneGuard<A: Arity, T> {
-            inner: NonNull<Inner<A, T>>,
-            initialized: usize,
-            capacity: usize,
-        }
-        impl<A: Arity, T> Drop for CloneGuard<A, T> {
-            fn drop(&mut self) {
-                // SAFETY: `inner` is a live allocation from `alloc_layout::<A,T>(capacity)`;
-                // `initialized` leading elements are initialised.
-                unsafe {
-                    let dp = data_ptr(self.inner);
-                    core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(
-                        dp,
-                        self.initialized,
-                    ));
-                    dealloc(
-                        self.inner.as_ptr().cast(),
-                        alloc_layout::<A, T>(self.capacity),
-                    );
-                }
-            }
-        }
-
         let Some(ptr) = self.0 else {
             return Self::new();
         };
         // SAFETY: `ptr` valid per the invariant.
         let bitmap = unsafe { ptr.as_ref().bitmap };
         let count = bitmap.count_ones() as usize;
-        let layout = alloc_layout::<A, T>(count);
-        // SAFETY: `count > 0`; null handled below.
-        let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
-            handle_alloc_error(layout)
-        };
-        let new_inner = raw.cast::<Inner<A, T>>();
-        // SAFETY: freshly allocated; write initialises the header.
-        unsafe { (&raw mut (*new_inner.as_ptr()).bitmap).write(bitmap) };
+        // SAFETY: `count == bitmap.count_ones() > 0` (the source is non-empty);
+        // the guarded fill loop initialises all `count` slots.
+        let new_inner = unsafe { alloc_block::<A, T>(bitmap, count) };
         // SAFETY: `ptr` is valid per the invariant; `data_ptr` gives the element base.
         let src = unsafe { data_ptr(ptr).cast_const() };
         // SAFETY: `new_inner` was just allocated; `data_ptr` gives the element base.
         let dst = unsafe { data_ptr(new_inner) };
 
-        let mut guard = CloneGuard {
+        // `T::clone` may panic; the guard frees already-cloned elements + the
+        // block on unwind.
+        let mut guard = FillGuard {
             inner: new_inner,
             initialized: 0,
             capacity: count,
@@ -752,5 +796,60 @@ mod tests {
         // Debug renders present slots.
         let s = std::format!("{a:?}");
         assert!(s.contains('2'));
+    }
+
+    #[test]
+    fn iter_all_double_ended_interleaved() {
+        // Alternating next()/next_back() must visit every slot exactly once and
+        // map each present slot to its correct element via the running ranks.
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for s in [1u8, 4, 9, 14] {
+            src[U4::new_masked(s)] = Some(s * 10);
+        }
+        let p = PackedArray::from(src);
+
+        let mut it = p.iter();
+        let mut got: alloc::vec::Vec<(u8, Option<u8>)> = alloc::vec::Vec::new();
+        let mut take_front = true;
+        while let Some((i, opt)) = if take_front {
+            it.next()
+        } else {
+            it.next_back()
+        } {
+            got.push((i.as_u8(), opt.copied()));
+            take_front = !take_front;
+        }
+
+        assert_eq!(got.len(), 16);
+        got.sort_by_key(|(i, _)| *i);
+        for (i, opt) in got {
+            let expected = matches!(i, 1 | 4 | 9 | 14).then_some(i * 10);
+            assert_eq!(opt, expected, "slot {i}");
+        }
+    }
+
+    #[test]
+    fn zst_roundtrip() {
+        // Zero-sized `T`: the block is sized to the bitmap alone and the element
+        // writes/reads are no-ops, but rank-select and roundtrip must still hold.
+        let mut src = FixedArray::<Option<()>, Arity16>::new();
+        for s in [0u8, 3, 15] {
+            src[U4::new_masked(s)] = Some(());
+        }
+        let p = PackedArray::from(src);
+        assert_eq!(p.count(), 3);
+        assert_eq!(p.get(U4::new_masked(0)), Some(&()));
+        assert_eq!(p.get(U4::new_masked(3)), Some(&()));
+        assert_eq!(p.get(U4::new_masked(15)), Some(&()));
+        assert_eq!(p.get(U4::new_masked(1)), None);
+
+        let present: alloc::vec::Vec<u8> = p.iter_present().map(|(i, &())| i.as_u8()).collect();
+        assert_eq!(present, alloc::vec![0, 3, 15]);
+
+        let back: FixedArray<Option<()>, Arity16> = p.into();
+        for s in 0..16u8 {
+            let expected = matches!(s, 0 | 3 | 15).then_some(());
+            assert_eq!(*back.get(U4::new_masked(s)), expected, "slot {s}");
+        }
     }
 }
