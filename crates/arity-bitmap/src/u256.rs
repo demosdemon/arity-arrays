@@ -133,6 +133,21 @@ impl Bitmap for U256 {
             (self.lo & lo_mask).count_ones()
         }
     }
+
+    fn without_bit(self, i: u8) -> Self {
+        let (is_hi, bit) = Self::split(i);
+        if is_hi {
+            Self {
+                lo: self.lo,
+                hi: self.hi & !(1u128 << bit),
+            }
+        } else {
+            Self {
+                lo: self.lo & !(1u128 << bit),
+                hi: self.hi,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +208,27 @@ mod tests {
         assert_eq!(it.next_back(), Some(128));
         assert_eq!(it.next(), None);
         assert_eq!(it.next_back(), None);
+    }
+
+    #[test]
+    fn without_bit_across_limbs() {
+        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        let cleared = bm.without_bit(128);
+        assert!(!cleared.test(128));
+        assert!(cleared.test(127));
+        assert!(cleared.test(254));
+        assert_eq!(cleared.count_ones(), 3);
+        assert_eq!(bm.without_bit(200), bm); // unset bit: no-op
+    }
+
+    #[test]
+    fn select_spans_limbs() {
+        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        assert_eq!(bm.select(0), Some(3));
+        assert_eq!(bm.select(1), Some(127));
+        assert_eq!(bm.select(2), Some(128));
+        assert_eq!(bm.select(3), Some(254));
+        assert_eq!(bm.select(4), None);
     }
 
     extern crate alloc;

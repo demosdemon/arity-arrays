@@ -76,6 +76,10 @@ macro_rules! impl_native_bitmap {
                 let below = (1 << i.as_usize()) - 1;
                 (self & below).count_ones()
             }
+
+            fn without_bit(self, i: $idx) -> Self {
+                self & !(1 << i.as_usize())
+            }
         }
     };
 }
@@ -159,6 +163,31 @@ mod tests {
         assert_eq!(b128, 1u128 << 127);
         let only: alloc::vec::Vec<u8> = b128.bits().map(U7::as_u8).collect();
         assert_eq!(only, alloc::vec![127]);
+    }
+
+    #[test]
+    fn without_bit_clears_one_bit() {
+        let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(4)).with_bit(u4(9));
+        let cleared = bm.without_bit(u4(4));
+        assert!(!cleared.test(u4(4)));
+        assert!(cleared.test(u4(1)));
+        assert!(cleared.test(u4(9)));
+        assert_eq!(cleared.count_ones(), 2);
+        // Clearing an unset bit is a no-op.
+        assert_eq!(bm.without_bit(u4(2)), bm);
+    }
+
+    #[test]
+    fn select_is_inverse_of_rank() {
+        let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(4)).with_bit(u4(9));
+        assert_eq!(bm.select(0).map(U4::as_u8), Some(1));
+        assert_eq!(bm.select(1).map(U4::as_u8), Some(4));
+        assert_eq!(bm.select(2).map(U4::as_u8), Some(9));
+        assert_eq!(bm.select(3), None);
+        // select(rank(i)) == i for every set bit i.
+        for i in bm.bits() {
+            assert_eq!(bm.select(bm.rank(i)), Some(i));
+        }
     }
 
     extern crate alloc;
