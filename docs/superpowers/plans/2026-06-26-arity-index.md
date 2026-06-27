@@ -813,6 +813,7 @@ Add the `all()` provided method to the `Niche` trait (returning `NicheRangeInclu
 
 **Files:**
 - Modify: `crates/arity-index/src/niche.rs`
+- Modify: `crates/arity-index/src/range.rs` (remove the temporary `#[cfg_attr(not(test), expect(dead_code))]` on `full()`)
 
 **Interfaces:**
 - Consumes: `NicheRangeInclusive::full()`.
@@ -864,9 +865,22 @@ Add to the `tests` module in `niche.rs`:
 Run: `cargo test -p arity-index all_covers_domain_double_ended`
 Expected: FAIL — `Niche::all` does not exist.
 
-- [ ] **Step 3: Add `all()` to the `Niche` trait**
+- [ ] **Step 3: Add `all()` to the `Niche` trait (and un-suppress `full()`)**
 
-In `niche.rs`, add the import and the provided method. Change the top-of-file import and the trait body:
+`NicheRangeInclusive::full()` in `range.rs` carries a temporary
+`#[cfg_attr(not(test), expect(dead_code, reason = "consumed by Niche::all(), added in a later task"))]`
+attribute (it was unused in non-test builds until now). Adding `all()` makes
+`full()` reachable in non-test builds, so that `expect` becomes **unfulfilled**
+and CI would fail with `unfulfilled_lint_expectations`. **Delete that
+`#[cfg_attr(...)]` attribute from `full()`** as part of this task — leaving just:
+
+```rust
+    /// The whole domain `[0, COUNT - 1]`. Backs [`Niche::all`](crate::Niche::all).
+    pub(crate) const fn full() -> Self {
+```
+
+Then, in `niche.rs`, add the import and the provided method. Change the
+top-of-file import and the trait body:
 
 ```rust
 use crate::range::NicheRangeInclusive;
