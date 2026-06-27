@@ -37,7 +37,7 @@ fn check<A: Arity>(present: &BTreeMap<usize, u32>) {
     back.reverse();
     assert_eq!(back, model);
     // owned round-trip is the identity
-    let recovered: FixedArray<Option<u32>, A> = PackedArray::from(&src).into();
+    let recovered: FixedArray<Option<u32>, A> = PackedArray::from(src).into();
     for i in 0..A::LEN {
         let idx = A::Index::try_from_usize(i).expect("i < LEN");
         assert_eq!(*recovered.get(idx), present.get(&i).copied());
@@ -48,7 +48,7 @@ macro_rules! roundtrip_for {
     ($test:ident, $arity:ty, $len:expr) => {
         proptest! {
             #[test]
-            fn $test(entries in proptest::collection::vec((0usize..$len, any::<u32>()), 0..$len)) {
+            fn $test(entries in proptest::collection::vec((0usize..$len, any::<u32>()), 0..=$len)) {
                 let model: BTreeMap<usize, u32> = entries.into_iter().collect();
                 check::<$arity>(&model);
             }
