@@ -9,6 +9,7 @@
 //! statically-bounded [`arity_index::Niche`] index.
 
 mod iter;
+mod native;
 
 pub use iter::BitIter;
 
