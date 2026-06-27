@@ -46,6 +46,7 @@ macro_rules! niche_int {
     ($name:ident, $repr:ident, $bits:literal, $count:literal) => {
         ::seq_macro::seq!(N in 0..$count {
             #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[repr(u8)]
             enum $repr {
                 #( V~N, )*
             }
@@ -57,6 +58,10 @@ macro_rules! niche_int {
         #[doc = concat!("a ", stringify!($count), "-element array can elide the bounds check.")]
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name($repr);
+
+        // The whole point of the type: `Option<Self>` must fit in one byte
+        // (niche optimization). Enforced at compile time for every profile.
+        const _: () = assert!(::core::mem::size_of::<::core::option::Option<$name>>() == 1);
 
         impl $name {
             /// Number of bits in the value's domain.

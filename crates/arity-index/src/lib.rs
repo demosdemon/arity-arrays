@@ -9,6 +9,7 @@
 //! type's whole domain is via [`NicheRange`] / [`NicheRangeInclusive`].
 //!
 //! ```
+//! # extern crate alloc;
 //! use arity_index::{Niche, U4, NicheRange};
 //!
 //! // The whole domain, ascending:
@@ -19,7 +20,6 @@
 //! let mut r = NicheRange::new(U4::new_masked(1), U4::new_masked(4));
 //! assert_eq!(r.next().map(U4::as_u8), Some(1));
 //! assert_eq!(r.next_back().map(U4::as_u8), Some(3));
-//! # extern crate alloc;
 //! ```
 
 mod niche;
