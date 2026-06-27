@@ -1,11 +1,13 @@
 //! Regression guard: `Bitmap::bits()` (and the other methods) must be callable
 //! from generic code through only the public `Bitmap` bound — this is how
-//! `arity-arrays` uses it (`PackedArray<A: Arity>` over `A::Bitmap`). An earlier
-//! sealed-trait design compiled for concrete receivers but failed in a generic
-//! context; this test locks in the fix.
+//! `arity-arrays` uses it (`PackedArray<A: Arity>` over `A::Bitmap`). An
+//! earlier sealed-trait design compiled for concrete receivers but failed in a
+//! generic context; this test locks in the fix.
 
-use arity_bitmap::{Bitmap, U256};
-use arity_index::{Niche, U4};
+use arity_bitmap::Bitmap;
+use arity_bitmap::U256;
+use arity_index::Niche;
+use arity_index::U4;
 
 fn collect_indices<B: Bitmap>(bm: B) -> Vec<usize> {
     bm.bits().map(Niche::as_usize).collect()
