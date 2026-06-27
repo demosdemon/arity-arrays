@@ -31,7 +31,7 @@ Set up `lib.rs` (module declarations, sealed-trait module, error type) and defin
 - Create: `crates/arity-index/src/niche.rs`
 
 **Interfaces:**
-- Produces: `pub struct TryFromIntError;` (unit, `core::error::Error`); `pub trait Niche: Copy + Ord + Sized + sealed::Sealed { const COUNT: usize; fn as_usize(self) -> usize; fn try_from_usize(i: usize) -> Option<Self>; }`; `mod sealed { pub trait Sealed {} }` (crate-private).
+- Produces: `pub struct TryFromIntError;` (unit, `core::error::Error`); `#[expect(private_bounds)] pub trait Niche: Copy + Ord + Sized + Sealed { const COUNT: usize; fn as_usize(self) -> usize; fn try_from_usize(i: usize) -> Option<Self>; }`; a bare crate-private `trait Sealed {}` at the crate root.
 
 - [ ] **Step 1: Write `lib.rs`**
 
@@ -55,10 +55,8 @@ mod range;
 pub use niche::{Niche, TryFromIntError};
 pub use range::{NicheRange, NicheRangeInclusive};
 
-mod sealed {
-    /// Prevents downstream crates from implementing [`Niche`](crate::Niche).
-    pub trait Sealed {}
-}
+/// Prevents downstream crates from implementing [`Niche`](crate::Niche).
+trait Sealed {}
 ```
 
 - [ ] **Step 2: Write the `Niche` trait + error type into `niche.rs`**
@@ -67,7 +65,7 @@ mod sealed {
 //! Niche integer index types `U3`–`U7`, the [`Niche`] trait, and the `u8`
 //! arity-256 index.
 
-use crate::sealed::Sealed;
+use crate::Sealed;
 
 /// The error returned by `TryFrom<u8>` for a niche integer when the value is out
 /// of range. Mirrors [`core::num::TryFromIntError`], which has no public
@@ -87,6 +85,11 @@ impl core::error::Error for TryFromIntError {}
 /// A fixed-domain integer index whose value is always `< COUNT`.
 ///
 /// Sealed: implemented only by `U3`–`U7` and `u8` (the arity-256 index).
+#[expect(
+    private_bounds,
+    reason = "Sealed is an intentionally private supertrait that seals Niche \
+              against downstream implementations"
+)]
 pub trait Niche: Copy + Ord + Sized + Sealed {
     /// Number of valid values (`2^BITS`): 8, 16, 32, 64, 128, or 256.
     const COUNT: usize;
@@ -898,8 +901,8 @@ Then, in `niche.rs`, add the import and the provided method. Change the
 top-of-file import and the trait body:
 
 ```rust
+use crate::Sealed;
 use crate::range::NicheRangeInclusive;
-use crate::sealed::Sealed;
 ```
 
 Add to the `pub trait Niche` body (after `try_from_usize`):

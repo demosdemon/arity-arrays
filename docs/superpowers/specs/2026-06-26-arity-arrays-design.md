@@ -216,7 +216,9 @@ domain size.
 A **sealed** trait unifies the index types so `arity-arrays` can be generic:
 
 ```rust
-pub trait Niche: Copy + Ord + Sized + sealed::Sealed {
+// `Sealed` is a bare crate-private trait at the crate root (not a `mod sealed`).
+#[expect(private_bounds, reason = "Sealed seals Niche against downstream impls")]
+pub trait Niche: Copy + Ord + Sized + Sealed {
     const COUNT: usize;                       // 2^BITS (8,16,32,64,128,256)
     fn as_usize(self) -> usize;               // always < COUNT
     fn try_from_usize(i: usize) -> Option<Self>;
@@ -325,7 +327,8 @@ The single "trait interface" both arrays are generic over. Sealed; one marker
 type per arity:
 
 ```rust
-pub trait Arity: sealed::Sealed {
+#[expect(private_bounds, reason = "Sealed seals Arity against downstream impls")]
+pub trait Arity: Sealed {                              // bare crate-private Sealed
     const LEN: usize;                                  // 8,16,32,64,128,256
     type Index: Niche;                                 // U3..U7 or u8
     type Bitmap: Bitmap<Index = Self::Index>;          // u8..u128 or U256

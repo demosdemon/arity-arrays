@@ -32,7 +32,7 @@ Define the sealed `Arity` trait and the six zero-sized marker types, each wiring
 
 **Files:**
 - Create: `crates/arity-arrays/src/arity.rs`
-- Modify: `crates/arity-arrays/src/lib.rs` (add `pub mod arity;`, re-exports, `mod sealed`)
+- Modify: `crates/arity-arrays/src/lib.rs` (add `pub mod arity;`, re-exports, a crate-private `Sealed` trait)
 
 **Interfaces:**
 - Produces: `pub trait Arity` with `const LEN: usize`, `type Index: Niche`, `type Bitmap: Bitmap<Index = Self::Index>`, `type Size: ArraySize`; markers `pub enum Arity8 {} … Arity256 {}` implementing it.
@@ -54,7 +54,12 @@ use hybrid_array::typenum::{U8, U16, U32, U64, U128, U256, Unsigned};
 /// index type, a bitmap backing, and a `hybrid-array` size.
 ///
 /// Sealed: implemented only by the `Arity8` … `Arity256` markers in this crate.
-pub trait Arity: crate::sealed::Sealed {
+#[expect(
+    private_bounds,
+    reason = "Sealed is an intentionally private supertrait that seals Arity \
+              against downstream implementations"
+)]
+pub trait Arity: crate::Sealed {
     /// Number of slots.
     const LEN: usize;
     /// The niche index type (`U3`…`U7` or `u8`).
@@ -70,7 +75,7 @@ macro_rules! arity {
         #[doc = concat!("Arity ", stringify!($len), ".")]
         pub enum $name {}
 
-        impl crate::sealed::Sealed for $name {}
+        impl crate::Sealed for $name {}
 
         impl Arity for $name {
             const LEN: usize = $len;
@@ -137,10 +142,8 @@ pub use packed::PackedArray;
 pub use arity_bitmap as bitmap;
 pub use arity_index as index;
 
-mod sealed {
-    /// Prevents downstream crates from implementing [`Arity`](crate::Arity).
-    pub trait Sealed {}
-}
+/// Prevents downstream crates from implementing [`Arity`](crate::Arity).
+trait Sealed {}
 ```
 
 > The scaffold's `pub mod fixed;`/`pub mod packed;` already exist (empty files);
