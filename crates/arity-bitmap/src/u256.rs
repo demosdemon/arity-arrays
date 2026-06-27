@@ -3,8 +3,8 @@
 use arity_index::Niche;
 
 use crate::Bitmap;
-use crate::sealed::Raw;
-use crate::sealed::Sealed;
+use crate::Raw;
+use crate::Sealed;
 
 /// A 256-bit bitmap: bit `i` lives in `lo` for `i < 128`, else in `hi` at
 /// `i - 128`. Only the [`Bitmap`] surface is implemented (no arithmetic).

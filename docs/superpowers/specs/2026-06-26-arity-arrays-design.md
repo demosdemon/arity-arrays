@@ -248,7 +248,19 @@ that **every bit position is the statically-bounded `Niche`**, never a raw
 `usize`. This is why `arity-bitmap` depends on `arity-index`:
 
 ```rust
-pub trait Bitmap: Copy + Eq + sealed::Sealed {
+// Crate-private, kept entirely off the public API:
+trait Sealed {}
+trait Raw: Sealed + Copy + Eq {               // bit-scanning mechanics
+    fn raw_is_zero(self) -> bool;
+    fn raw_popcount(self) -> u32;
+    fn raw_lowest_pos(self) -> usize;         // lowest set bit  (precondition: !is_zero)
+    fn raw_highest_pos(self) -> usize;        // highest set bit (precondition: !is_zero)
+    fn raw_clear_lowest(self) -> Self;
+    fn raw_clear_highest(self) -> Self;
+}
+
+#[expect(private_bounds, reason = "Raw/Sealed are private supertraits — see below")]
+pub trait Bitmap: Copy + Eq + Raw {           // Raw (hence Sealed) is a *supertrait*
     type Index: Niche;                        // U3..U7 or u8 — WIDTH == Index::COUNT
     const WIDTH: usize;                       // bit count: 8,16,32,64,128,256
     const ZERO: Self;
@@ -261,33 +273,30 @@ pub trait Bitmap: Copy + Eq + sealed::Sealed {
 }
 ```
 
-Because the index is `Self::Index` (always `< WIDTH` by construction), the
-`1 << i` shift inside `test`/`with_bit`/`rank` can never reach the type width —
+Because the public `test`/`with_bit`/`rank` take `Self::Index` (always `< WIDTH`
+by construction), the `1 << i` shift inside them can never reach the type width —
 **the shift-UB precondition that a raw-`usize` API would carry simply does not
 exist.** `rank(i)` is the dense offset of slot `i` within a `PackedArray`
 allocation; `with_bit` builds a bitmap when converting a `FixedArray` into a
 `PackedArray`.
 
-`trailing_zeros`/`clear_lowest` are no longer public trait methods — they are
-internal details of `BitIter`. **`BitIter<B: Bitmap>`** (in `iter.rs`) takes a
-**copy** of the bitmap and yields the set bits as `B::Index`:
+The bit-scanning mechanics live on the **private** `Raw` trait (and the `Sealed`
+marker it extends), which are **supertraits of `Bitmap`**. This is the
+load-bearing choice: because `B: Bitmap` *implies* `Raw`, `bits()` is callable
+from **generic** downstream code (`PackedArray<A: Arity>` over the abstract
+`A::Bitmap`) without the caller having to name `Raw`. Since the supertraits are
+private, the public `Bitmap` declaration carries a deliberate
+`#[expect(private_bounds, reason = …)]`; the scan methods stay unnameable and
+uncallable outside the crate. (`Raw` returns raw `usize` positions rather than
+`Self::Index` to break the `Raw`/`Bitmap` reference cycle.)
 
-```rust
-pub struct BitIter<B: Bitmap> { remaining: B }   // Copy snapshot, drained as it iterates
-
-impl<B: Bitmap> Iterator for BitIter<B> {
-    type Item = B::Index;
-    fn next(&mut self) -> Option<B::Index> { /* lowest set bit: trailing_zeros → clear it */ }
-}
-// next_back uses the highest set bit (leading-zeros); + ExactSizeIterator
-// (len == remaining.count_ones()) + FusedIterator
-```
-
-Front iteration clears the lowest set bit, back iteration clears the highest, and
-`len` is `count_ones()` — so it is double-ended and exact-size. Yielded indices
-are reconstructed through `B::Index::try_from_usize(..).unwrap_unchecked()`
-(positions come from `trailing_zeros`/bit-width math and are provably valid).
-`PackedArray`'s present-iterator is built directly on `bits()`.
+**`BitIter<B: Bitmap>`** (in `iter.rs`) takes a **copy** of the bitmap, drains it
+from both ends (lowest set bit forward, highest backward), and reconstructs each
+`B::Index` from the raw position via the **safe** `Self::Index::try_from_usize(pos).expect(..)`
+— `pos < WIDTH == Index::COUNT`, so it never panics. **The crate contains no
+`unsafe`.** `len` is `count_ones()`, so it is `DoubleEndedIterator +
+ExactSizeIterator + FusedIterator`. `PackedArray`'s present-iterator is built
+directly on `bits()`.
 
 Implemented for `u8, u16, u32, u64, u128` (thin wrappers over the standard
 methods) and for `U256`.
@@ -447,8 +456,12 @@ arithmetic, manual drop) and the `new_unchecked` constructors in `arity-index`.
   test` (catches provenance, alignment, leak, and use-after-free errors in the
   allocation/drop/clone/conversion paths).
 - **No `#[allow]`** (per repo rules); `#[expect(reason = …)]` only where
-  unavoidable. The range/bit iterators' `try_from_usize(..).unwrap_unchecked()`
+  unavoidable. In `arity-index`, the range iterators' `try_from_usize(..).unwrap_unchecked()`
   is the canonical documented `unsafe` site (cursor provably `< COUNT`).
+  `arity-bitmap` avoids `unsafe` entirely — its `BitIter` reconstructs indices
+  with a safe `try_from_usize(..).expect(..)` that can never fire — and its one
+  `#[expect]` is `private_bounds` on the `Bitmap` trait (private `Raw`/`Sealed`
+  supertraits, with a `reason`).
 
 ## Testing strategy
 
