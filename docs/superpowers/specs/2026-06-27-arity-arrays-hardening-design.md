@@ -143,15 +143,17 @@ pub trait Bitmap: /* … existing … */ {
 - `impl From<U{n}> for u8` and `impl From<U{n}> for usize` — infallible (the value
   is provably in range), so the index types satisfy `Into<u8>`/`Into<usize>`
   bounds. The native `u8` (arity-256 index) already has these.
-- `const fn` where it is both feasible and useful. The niche index constructors
-  (`try_new`, `new_masked`, `as_u8`, `as_usize`) are already `const`. The bitmap
-  *operations* are exposed through the `Bitmap` trait, and trait methods cannot be
-  `const` on stable Rust — nor can inherent `const fn` wrappers be added to the
-  native primitive backings (`u8`–`u128`), which are foreign types. The one
-  backing defined in this workspace, `U256`, therefore gains inherent `const fn`
-  construction (`from_limbs`, and const `from_le_bytes`/`with_bit`) so 256-bit
-  masks can be built in const context; const-context users of the native widths
-  operate on the primitive directly (whose operators are already `const`).
+- `const fn` where it is both feasible and has a consumer. The niche index
+  constructors (`try_new`, `new_masked`, `as_u8`, `as_usize`) are already `const`.
+  The bitmap *operations* are exposed through the `Bitmap` trait, and trait methods
+  cannot be `const` on stable Rust — nor can inherent `const fn` wrappers be added
+  to the native primitive backings (`u8`–`u128`), which are foreign types. The one
+  backing defined in this workspace, `U256`, gets a `const fn from_limbs` (free, and
+  used by its `from_le_bytes`). Broader inherent `const` construction on `U256`
+  (const `with_bit`/`from_le_bytes`, for building 256-bit masks at compile time) is
+  **deferred** — no current or planned consumer needs it (serde `Compact`
+  deserializes at runtime), and adding inherent `const fn` later is purely additive
+  and non-breaking, so there is no cost to waiting for a real const-context use.
 
 ### `U256` — custom backing only (`#[cfg(not(feature = "ethnum"))]`)
 

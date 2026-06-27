@@ -136,7 +136,7 @@ change.
 
 - [ ] **Step 1: Add the `# Safety` section to `NicheRange`**
 
-In `crates/arity-index/src/range.rs`, replace the `NicheRange` doc comment (line 13) so the struct reads:
+In `crates/arity-index/src/range.rs`, replace the `NicheRange` doc comment (line 13) with the expanded version below. (The `#[derive(Clone, Debug)]` and `pub struct NicheRange<N: Niche> {` lines are shown for context and are **not** changed.)
 
 ```rust
 /// A half-open range `[start, end)` over the values of a [`Niche`] type.
@@ -155,7 +155,7 @@ pub struct NicheRange<N: Niche> {
 
 - [ ] **Step 2: Add the `# Safety` section to `NicheRangeInclusive`**
 
-In the same file, replace the `NicheRangeInclusive` doc comment (line 73) so the struct reads:
+In the same file, replace the `NicheRangeInclusive` doc comment (line 73) with the expanded version below. (The `#[derive(Clone, Debug)]` and `pub struct NicheRangeInclusive<N: Niche> {` lines are shown for context and are **not** changed.)
 
 ```rust
 /// A closed range `[start, end]` over the values of a [`Niche`] type.
@@ -265,7 +265,7 @@ Expected: FAIL to compile — `no method named `without_bit`` / `select` found.
 
 - [ ] **Step 3: Add the methods to the `Bitmap` trait**
 
-In `crates/arity-bitmap/src/lib.rs`, inside `pub trait Bitmap`, after the `rank` method (line 96, before `bits`), add:
+In `crates/arity-bitmap/src/lib.rs`, inside `pub trait Bitmap`, after the `rank` method declaration (line 97, before the `bits` method), add:
 
 ```rust
     /// Returns `self` with the bit at `i` cleared (the inverse of
@@ -415,13 +415,13 @@ and after the `select` method added in Task 3 (before `bits`), add the two metho
 
 - [ ] **Step 4: Add the byte surface to the native macro**
 
-In `crates/arity-bitmap/src/native.rs`, inside `impl Bitmap for $ty`, add the const after `const ZERO: Self = 0;` (line 57):
+In `crates/arity-bitmap/src/native.rs`, inside `impl Bitmap for $ty`, add the const immediately after `const WIDTH: usize = $width;` (so `BYTES` sits next to `WIDTH`, matching the trait):
 
 ```rust
             const BYTES: usize = $width / 8;
 ```
 
-and after the `without_bit` method from Task 3, add:
+and after the new `without_bit` body (before the closing `}` of `impl Bitmap for $ty`), add:
 
 ```rust
             fn to_le_bytes(self, buf: &mut [u8]) {
@@ -450,13 +450,13 @@ In `crates/arity-bitmap/src/u256.rs`, inside `impl U256` (after `split`, line 30
     }
 ```
 
-and inside `impl Bitmap for U256`, add the const after `const ZERO: Self = Self { lo: 0, hi: 0 };` (line 94):
+and inside `impl Bitmap for U256`, add the const immediately after `const WIDTH: usize = 256;` (so `BYTES` sits next to `WIDTH`, matching the trait):
 
 ```rust
     const BYTES: usize = 32;
 ```
 
-and after the `without_bit` method from Task 3, add:
+and after the new `without_bit` body (before the closing `}` of `impl Bitmap for U256`), add:
 
 ```rust
     fn to_le_bytes(self, buf: &mut [u8]) {
@@ -586,7 +586,7 @@ git commit -m "feat(arity-bitmap): derive Hash for U256"
   - `Bitmap::select` → Task 3 (provided default). ✓
   - `Bitmap::to_le_bytes`/`from_le_bytes`/`BYTES` → Task 4. ✓
   - `From<U{n}> for u8`/`usize` → Task 1. ✓
-  - `const fn` (feasible scope): `U256::from_limbs` is `const`, native byte methods wrap already-`const` primitive ops; the index constructors were already `const`. ✓ (Inherent `const` operation wrappers on native primitives are infeasible — foreign types — per the revised spec bullet.)
+  - `const fn` (feasible scope with a consumer): `U256::from_limbs` is `const` (Task 4); the index constructors were already `const`. ✓ Native inherent `const` wrappers are infeasible (foreign types); broader inherent `const` construction on `U256` (const `with_bit`/`from_le_bytes`) is **deferred** per the spec — no consumer needs it and it is additive/non-breaking to add later.
   - `U256: Hash` → Task 5. ✓
   - `/// # Safety` docs on `NicheRange`/`NicheRangeInclusive` → Task 2. ✓
   - `/// # Safety` docs on `PackedArray`/`PackedAllIter` → **deferred to plan 3** (mutation), which owns `packed.rs`. Noted in the header.
