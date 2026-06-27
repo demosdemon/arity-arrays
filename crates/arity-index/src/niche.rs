@@ -182,6 +182,18 @@ macro_rules! niche_int {
             }
         }
 
+        impl ::core::convert::From<$name> for u8 {
+            fn from(v: $name) -> u8 {
+                v.as_u8()
+            }
+        }
+
+        impl ::core::convert::From<$name> for usize {
+            fn from(v: $name) -> usize {
+                v.as_usize()
+            }
+        }
+
         impl Sealed for $name {}
 
         impl Niche for $name {
@@ -343,5 +355,21 @@ mod tests {
         check::<U6>(64);
         check::<U7>(128);
         check::<u8>(256);
+    }
+
+    #[test]
+    fn into_u8_and_usize() {
+        fn take(i: impl Into<usize>) -> usize {
+            i.into()
+        }
+
+        // Infallible widening conversions for generic `Into` bounds.
+        assert_eq!(u8::from(U4::MAX), 15u8);
+        assert_eq!(usize::from(U4::MAX), 15usize);
+        assert_eq!(u8::from(U7::MAX), 127u8);
+        assert_eq!(usize::from(U3::MIN), 0usize);
+
+        // Usable through a generic `Into<usize>` bound.
+        assert_eq!(take(U5::new_masked(5)), 5usize);
     }
 }
