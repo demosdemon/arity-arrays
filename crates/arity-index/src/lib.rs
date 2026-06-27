@@ -11,7 +11,7 @@
 mod niche;
 mod range;
 
-pub use niche::{Niche, TryFromIntError};
+pub use niche::{Niche, TryFromIntError, U3, U4, U5, U6, U7};
 pub use range::{NicheRange, NicheRangeInclusive};
 
 mod sealed {
