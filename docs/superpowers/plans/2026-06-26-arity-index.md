@@ -228,6 +228,7 @@ macro_rules! niche_int {
     ($name:ident, $repr:ident, $bits:literal, $count:literal) => {
         ::seq_macro::seq!(N in 0..$count {
             #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[repr(u8)]
             enum $repr {
                 #( V~N, )*
             }
@@ -239,6 +240,11 @@ macro_rules! niche_int {
         #[doc = concat!("a ", stringify!($count), "-element array can elide the bounds check.")]
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name($repr);
+
+        // The whole point of the type: `Option<Self>` must fit in one byte
+        // (niche optimization). Enforced at compile time for every build profile,
+        // not just under `#[cfg(test)]`.
+        const _: () = assert!(::core::mem::size_of::<::core::option::Option<$name>>() == 1);
 
         impl $name {
             /// Number of bits in the value's domain.
@@ -595,6 +601,14 @@ mod tests {
     }
 
     #[test]
+    fn inclusive_empty() {
+        let mut r = NicheRangeInclusive::new(u4(5), u4(2));
+        assert_eq!(r.len(), 0);
+        assert_eq!(r.next(), None);
+        assert_eq!(r.next_back(), None);
+    }
+
+    #[test]
     fn inclusive_single_element() {
         let mut r = NicheRangeInclusive::new(u4(7), u4(7));
         assert_eq!(r.len(), 1);
@@ -672,7 +686,7 @@ impl<N: Niche> Iterator for NicheRange<N> {
         if self.lo >= self.hi {
             return None;
         }
-        // SAFETY: `lo < hi <= COUNT`, so `lo < COUNT` and `try_from_usize` is `Some`.
+        // SAFETY: `lo < hi <= COUNT-1 < COUNT`, so `try_from_usize(lo)` is `Some`.
         let v = unsafe { N::try_from_usize(self.lo).unwrap_unchecked() };
         self.lo += 1;
         Some(v)
@@ -690,7 +704,8 @@ impl<N: Niche> DoubleEndedIterator for NicheRange<N> {
             return None;
         }
         self.hi -= 1;
-        // SAFETY: `hi < COUNT` (it was `<= COUNT` and just decremented).
+        // SAFETY: the guard ensured `lo < hi`, so the decrement does not underflow
+        // and leaves `hi <= COUNT-2 < COUNT`.
         Some(unsafe { N::try_from_usize(self.hi).unwrap_unchecked() })
     }
 }
@@ -929,6 +944,7 @@ Append to the crate-level doc comment block at the top of `lib.rs` (inside `//!`
 ```rust
 //!
 //! ```
+//! # extern crate alloc;
 //! use arity_index::{Niche, U4, NicheRange};
 //!
 //! // The whole domain, ascending:
@@ -939,7 +955,6 @@ Append to the crate-level doc comment block at the top of `lib.rs` (inside `//!`
 //! let mut r = NicheRange::new(U4::new_masked(1), U4::new_masked(4));
 //! assert_eq!(r.next().map(U4::as_u8), Some(1));
 //! assert_eq!(r.next_back().map(U4::as_u8), Some(3));
-//! # extern crate alloc;
 //! ```
 ```
 
