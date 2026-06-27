@@ -35,7 +35,5 @@ pub use niche::U7;
 pub use range::NicheRange;
 pub use range::NicheRangeInclusive;
 
-mod sealed {
-    /// Prevents downstream crates from implementing [`Niche`](crate::Niche).
-    pub trait Sealed {}
-}
+/// Prevents downstream crates from implementing [`Niche`](crate::Niche).
+trait Sealed {}
