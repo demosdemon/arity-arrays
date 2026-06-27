@@ -1,5 +1,5 @@
 [package]
-name = "arity-arrays"
+name = "arity-bitmap"
 version = "0.1.0"
 authors.workspace = true
 repository.workspace = true
@@ -10,9 +10,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-arity-bitmap.workspace = true
 arity-index.workspace = true
-hybrid-array = "0.4.12"
 
 [lints]
 workspace = true
