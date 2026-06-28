@@ -104,10 +104,13 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      # Install a prebuilt cargo-fuzz instead of compiling it (and the local-dev
-      # tools the fuzz job never uses) from source.
-      - uses: cargo-bins/cargo-binstall@v1.20.1
-      - run: cargo binstall --no-confirm cargo-fuzz
+      # Install a prebuilt cargo-fuzz instead of compiling it from source.
+      # taiki-e/install-action verifies the binary is actually present each run,
+      # so it is not fooled by the cargo install ledger (.crates2.json) that
+      # rust-cache round-trips while cleaning the binary out of ~/.cargo/bin.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       # Persist + grow the corpus across runs so later runs explore deeper.
       - uses: actions/cache@v6
         with:
