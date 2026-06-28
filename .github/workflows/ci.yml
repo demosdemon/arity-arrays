@@ -99,8 +99,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      # Installs cargo-fuzz from mise.toml (the cargo:cargo-fuzz pin).
-      - uses: jdx/mise-action@v2
+      # Install a prebuilt cargo-fuzz instead of compiling it (and the local-dev
+      # tools the fuzz job never uses) from source.
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall --no-confirm cargo-fuzz
       # Persist + grow the corpus across runs so later runs explore deeper.
       - uses: actions/cache@v4
         with:
