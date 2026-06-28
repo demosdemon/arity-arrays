@@ -39,6 +39,11 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
 
     /// Iterates over all values ascending (`MIN..=MAX`) as a double-ended,
     /// exact-size iterator. `len() == COUNT`.
+    ///
+    /// This range iterator is deliberately the only way to enumerate the
+    /// domain: there is no `ALL` constant, so nothing materializes a
+    /// `COUNT`-element table (an `[U7; 128]` / `[u8; 256]` const would otherwise
+    /// sit in the binary).
     #[must_use]
     fn all() -> NicheRangeInclusive<Self> {
         NicheRangeInclusive::full()
@@ -47,6 +52,15 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
 
 /// Generates a niche integer newtype `$name` over a fieldless enum `$repr` with
 /// `$count == 2^$bits` variants.
+///
+/// The fieldless enum gives the compiler a layout with `2^$bits` valid
+/// discriminants and the rest as niches, which is what earns both payoffs:
+/// `Option<$name>` reuses an unused discriminant for `None` (stays one byte),
+/// and a value is statically `< 2^$bits` so array indexing can elide the bounds
+/// check. The largest type (`U7`) needs 128 variants — too many to hand-write —
+/// so [`seq_macro`](https://docs.rs/seq-macro) generates the variants and match
+/// arms. Compile-time expansion keeps a single source of truth (no committed
+/// generated `.rs` to drift) at the cost of one build dependency.
 #[cfg(any(
     feature = "8",
     feature = "16",

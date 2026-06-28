@@ -40,6 +40,14 @@ struct Inner<A: Arity, T> {
 /// element slots are all initialised in ascending slot (rank) order. When
 /// `self.0` is `None`, there is no allocation. The `unsafe` reads throughout
 /// this module rely on this invariant.
+///
+/// The `bitmap != ZERO` invariant is documented rather than encoded with a
+/// `NonZero` bitmap field. firewood's `DenseChildren` used `NonZeroU16` for a
+/// static non-zero guarantee, but that is dropped here for every arity to keep
+/// `A::Bitmap` and the `Inner` layout uniform (`U256` has no `NonZero`
+/// counterpart). The pointer-niche that makes this type pointer-sized lives on
+/// the outer `NonNull`, not the bitmap, so the size guarantee does not depend
+/// on the bitmap being `NonZero`.
 pub struct PackedArray<T, A: Arity>(
     Option<NonNull<Inner<A, T>>>,
     PhantomData<alloc::boxed::Box<T>>,
@@ -139,6 +147,13 @@ unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<I
 /// Drop guard for the fill phase of a block allocated by [`alloc_block`]. On
 /// unwind it drops the `initialized` leading elements and frees the block;
 /// callers `core::mem::forget` it once the fill completes.
+///
+/// Only the `Clone` and owned `From<FixedArray<Option<T>, A>>` paths need this
+/// guard: they run user code (`T::clone`) or move owned values mid-fill, which
+/// can panic and leave a partially-initialised block. The in-place mutators
+/// (`insert`/`remove`) need no such guard — their element relocation is
+/// `ptr::copy` of bits, which runs no user code and so cannot panic mid-way,
+/// and their only fallible step (allocation) happens before any moves occur.
 struct FillGuard<A: Arity, T> {
     inner: NonNull<Inner<A, T>>,
     initialized: usize,

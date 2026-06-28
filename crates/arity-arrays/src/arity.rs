@@ -42,7 +42,18 @@ pub trait Arity: crate::Sealed {
     type Index: Niche;
     /// The bitmap backing, whose `Index` must match `Self::Index`.
     type Bitmap: Bitmap<Index = Self::Index>;
-    /// The `hybrid-array` size used by `FixedArray` (a typenum equal to `LEN`).
+    /// The `hybrid-array` size used by [`FixedArray`](crate::FixedArray) (a
+    /// typenum equal to `LEN`).
+    ///
+    /// `hybrid-array` / `typenum` is an acknowledged sunset dependency: this
+    /// associated type exists only because stable Rust cannot write
+    /// `[T; A::LEN]` with `LEN` a trait associated `const`
+    /// (`generic_const_exprs` is unstable). To contain the blast radius,
+    /// `hybrid_array::Array` never appears in a public signature —
+    /// [`FixedArray`](crate::FixedArray) exposes `Deref<Target = [T]>` /
+    /// `AsRef<[T]>` instead. When `generic_const_exprs` stabilizes the internal
+    /// storage can switch to `[T; A::LEN]`; keeping `Array` out of the public
+    /// surface is what makes that a non-breaking change.
     type Size: ArraySize;
 }
 
