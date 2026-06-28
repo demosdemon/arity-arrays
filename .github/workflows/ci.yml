@@ -77,24 +77,20 @@ jobs:
       # that std-capable optional deps (serde, serde_with) exist.
       - run: cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
 
+  # Per-PR Miri smoke: the shared reusable workflow (miri.yml) at a reduced
+  # proptest depth. Miri interprets ~100s per proptest case across these
+  # binaries, so the full 256-case spread is ~7h — over GitHub's 6h job limit.
+  # Keep PR/merge feedback fast here; the sharded daily run in miri-full.yml
+  # covers the full 256-case spread.
+  #
+  # needs: [test] — don't spend the Miri shards on a tree the basic tests
+  # already reject (mirrors the fuzz job).
   miri:
-    runs-on: ubuntu-26.04
-    # disable-isolation: the round-trip proptests read/write their regression
-    # files on disk and seed from host entropy; strict-provenance stays on.
-    env:
-      MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
-      # Per-PR smoke depth. Miri runs the interpreter ~100s per proptest case
-      # across these binaries, so the full 256-case spread is ~7h — over GitHub's
-      # 6h job limit. Keep PR/merge feedback fast here; the sharded daily run in
-      # miri-full.yml covers the full 256-case spread.
-      PROPTEST_CASES: "8"
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo +nightly miri test --workspace --tests
+    needs: [test]
+    uses: ./.github/workflows/miri.yml
+    with:
+      proptest-cases: "8"
+      timeout-minutes: 30
 
   fuzz:
     runs-on: ubuntu-26.04
