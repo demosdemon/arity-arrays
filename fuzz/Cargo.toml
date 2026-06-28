@@ -71,6 +71,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "bitmap_roundtrip"
+path = "fuzz_targets/bitmap_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
 # Build the fuzz target with debug assertions and overflow checks on.
 [profile.release]
 debug = true
