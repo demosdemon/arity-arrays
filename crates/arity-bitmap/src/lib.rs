@@ -80,7 +80,7 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// The number of bits (`8`, `16`, `32`, `64`, `128`, or `256`).
     const WIDTH: usize;
     /// The number of bytes in the little-endian byte form (`WIDTH / 8`).
-    const BYTES: usize;
+    const BYTES: usize = Self::WIDTH / 8;
     /// The empty bitmap.
     const ZERO: Self;
 

@@ -98,7 +98,6 @@ impl Raw for U256 {
 impl Bitmap for U256 {
     type Index = u8;
     const WIDTH: usize = 256;
-    const BYTES: usize = 32;
     const ZERO: Self = Self { lo: 0, hi: 0 };
 
     fn is_zero(self) -> bool {
@@ -158,8 +157,8 @@ impl Bitmap for U256 {
     }
 
     fn to_le_bytes(self, buf: &mut [u8]) {
-        buf[..16].copy_from_slice(&self.lo.to_le_bytes());
-        buf[16..].copy_from_slice(&self.hi.to_le_bytes());
+        buf[..16].copy_from_slice(&<u128>::to_le_bytes(self.lo));
+        buf[16..].copy_from_slice(&<u128>::to_le_bytes(self.hi));
     }
 
     fn from_le_bytes(buf: &[u8]) -> Self {
