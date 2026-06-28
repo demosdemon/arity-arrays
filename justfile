@@ -55,3 +55,7 @@ features:
 
 # Run the fast checks (everything except the slow Miri pass).
 ci: fmt-check lint features test doc
+
+# Run a fuzz target on the host (omit the CI-only gnu target pin). Default 60s.
+fuzz target time="60":
+    cargo +nightly fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
