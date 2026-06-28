@@ -270,6 +270,113 @@ impl<T, A: Arity> PackedArray<T, A> {
         // `&mut self`, which gives exclusive access for its lifetime.
         Some(unsafe { &mut *data_ptr(ptr).add(rank) })
     }
+
+    /// Inserts `value` at `index`, returning the previous value if the slot was
+    /// already present (otherwise `None`).
+    ///
+    /// On a new insertion the array reallocates to exactly hold one more element
+    /// (`O(count)` move). Overwriting a present slot is in place.
+    pub fn insert(&mut self, index: A::Index, value: T) -> Option<T> {
+        let Some(ptr) = self.0 else {
+            // Empty → fresh single-element block.
+            let bitmap = A::Bitmap::ZERO.with_bit(index);
+            debug_assert_eq!(bitmap.count_ones(), 1);
+            // SAFETY: `count == 1 == bitmap.count_ones() > 0`; the write below
+            // initialises the sole element slot before any read.
+            let inner = unsafe { alloc_block::<A, T>(bitmap, 1) };
+            // SAFETY: `inner` is freshly allocated; `data_ptr(inner)` is its first
+            // (uninitialised) element slot; `write` initialises it.
+            unsafe { data_ptr(inner).write(value) };
+            self.0 = Some(inner);
+            return None;
+        };
+        // SAFETY: `ptr` is valid per the type invariant.
+        let bm = unsafe { ptr.as_ref().bitmap };
+        let rank = bm.rank(index) as usize;
+        if bm.test(index) {
+            // Present → overwrite in place; return the old value.
+            // SAFETY: `index` present ⇒ `rank < count`; `data_ptr(ptr).add(rank)`
+            // is an initialised element; `&mut self` gives exclusive access, so
+            // forming `&mut *slot` and `mem::replace` (read old, write new) is
+            // sound and drops nothing.
+            Some(unsafe { core::mem::replace(&mut *data_ptr(ptr).add(rank), value) })
+        } else {
+            // Absent → grow by one: new block, copy the two segments around `rank`.
+            let old_count = bm.count_ones() as usize;
+            let new_count = old_count + 1;
+            let new_bm = bm.with_bit(index);
+            debug_assert_eq!(new_bm.count_ones() as usize, new_count);
+            // SAFETY: `new_count == new_bm.count_ones() > 0`; the copies + write
+            // below initialise all `new_count` slots before any read.
+            let new_inner = unsafe { alloc_block::<A, T>(new_bm, new_count) };
+            // SAFETY: `ptr` is valid per the type invariant; base of `old_count`
+            // initialised elements.
+            let src = unsafe { data_ptr(ptr) };
+            // SAFETY: `new_inner` is freshly allocated; base of `new_count` slots.
+            let dst = unsafe { data_ptr(new_inner) };
+            // SAFETY: `rank <= old_count`. Copy `[0, rank)` to `dst[0..]`, write
+            // `value` at `dst[rank]`, copy the old `[rank, old_count)` to
+            // `dst[rank+1..]`. `copy_nonoverlapping` moves the elements bitwise
+            // (no drop, no user code); the old block is freed without dropping.
+            unsafe {
+                core::ptr::copy_nonoverlapping(src, dst, rank);
+                dst.add(rank).write(value);
+                core::ptr::copy_nonoverlapping(src.add(rank), dst.add(rank + 1), old_count - rank);
+            }
+            // SAFETY: the old block came from `alloc_layout::<A, T>(old_count)`;
+            // its elements were moved out above, so free it without dropping.
+            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+            self.0 = Some(new_inner);
+            None
+        }
+    }
+
+    /// Removes and returns the element at `index`, or `None` if absent.
+    ///
+    /// Reallocates to exactly hold one fewer element (`O(count)` move); removing
+    /// the last element deallocates and leaves the array empty.
+    pub fn remove(&mut self, index: A::Index) -> Option<T> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` is valid per the type invariant.
+        let bm = unsafe { ptr.as_ref().bitmap };
+        if !bm.test(index) {
+            return None;
+        }
+        let rank = bm.rank(index) as usize;
+        let old_count = bm.count_ones() as usize;
+        // SAFETY: `index` present ⇒ `rank < old_count`; `read` moves the element
+        // out (it is not dropped here — it is returned to the caller).
+        let removed = unsafe { data_ptr(ptr).add(rank).read() };
+        let new_count = old_count - 1;
+        if new_count == 0 {
+            // Last element removed → deallocate, become empty (upholds
+            // "allocated ⇒ bitmap != ZERO").
+            // SAFETY: the sole element was moved out above; free the old block.
+            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+            self.0 = None;
+        } else {
+            let new_bm = bm.without_bit(index);
+            debug_assert_eq!(new_bm.count_ones() as usize, new_count);
+            // SAFETY: `new_count == new_bm.count_ones() > 0`; the two copies below
+            // initialise all `new_count` slots before any read.
+            let new_inner = unsafe { alloc_block::<A, T>(new_bm, new_count) };
+            // SAFETY: `ptr` is valid per the type invariant; base of `old_count`
+            // initialised elements.
+            let src = unsafe { data_ptr(ptr) };
+            // SAFETY: `new_inner` is freshly allocated; base of `new_count` slots.
+            let dst = unsafe { data_ptr(new_inner) };
+            // SAFETY: copy the survivors `[0, rank)` and `[rank+1, old_count)`
+            // around the already-read-out slot `rank`. Bitwise move, no drop.
+            unsafe {
+                core::ptr::copy_nonoverlapping(src, dst, rank);
+                core::ptr::copy_nonoverlapping(src.add(rank + 1), dst.add(rank), old_count - rank - 1);
+            }
+            // SAFETY: survivors moved, removed element read out; free the old block.
+            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+            self.0 = Some(new_inner);
+        }
+        Some(removed)
+    }
 }
 
 impl<T, A: Arity> Default for PackedArray<T, A> {
@@ -943,5 +1050,76 @@ mod tests {
         // Empty array yields None.
         let mut empty = PackedArray::<u8, Arity16>::new();
         assert!(empty.get_mut(U4::new_masked(0)).is_none());
+    }
+
+    #[test]
+    fn insert_into_empty_and_overwrite() {
+        let mut p = PackedArray::<u8, Arity16>::new();
+        assert_eq!(p.insert(U4::new_masked(7), 70), None); // into empty
+        assert_eq!(p.count(), 1);
+        assert_eq!(p.get(U4::new_masked(7)), Some(&70));
+        // Overwrite returns the old value, no count change.
+        assert_eq!(p.insert(U4::new_masked(7), 77), Some(70));
+        assert_eq!(p.count(), 1);
+        assert_eq!(p.get(U4::new_masked(7)), Some(&77));
+    }
+
+    #[test]
+    fn insert_grows_and_preserves_order() {
+        let mut p = PackedArray::<u8, Arity16>::new();
+        // Insert out of order; storage stays ascending by slot.
+        assert_eq!(p.insert(U4::new_masked(9), 90), None); // back
+        assert_eq!(p.insert(U4::new_masked(1), 10), None); // front
+        assert_eq!(p.insert(U4::new_masked(5), 50), None); // middle
+        assert_eq!(p.count(), 3);
+        let present: alloc::vec::Vec<(u8, u8)> =
+            p.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(present, alloc::vec![(1, 10), (5, 50), (9, 90)]);
+    }
+
+    #[test]
+    fn remove_present_absent_and_to_empty() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        src[U4::new_masked(1)] = Some(10);
+        src[U4::new_masked(5)] = Some(50);
+        src[U4::new_masked(9)] = Some(90);
+        let mut p = PackedArray::from(src);
+
+        assert_eq!(p.remove(U4::new_masked(5)), Some(50)); // middle
+        assert_eq!(p.count(), 2);
+        assert_eq!(p.get(U4::new_masked(5)), None);
+        assert_eq!(p.get(U4::new_masked(1)), Some(&10));
+        assert_eq!(p.get(U4::new_masked(9)), Some(&90));
+
+        assert_eq!(p.remove(U4::new_masked(5)), None); // absent
+        assert_eq!(p.remove(U4::new_masked(1)), Some(10));
+        assert_eq!(p.remove(U4::new_masked(9)), Some(90)); // last → empty
+        assert!(p.is_empty());
+        assert_eq!(p.bitmap(), <u16 as Bitmap>::ZERO);
+        assert_eq!(p.remove(U4::new_masked(0)), None); // remove from empty
+    }
+
+    #[test]
+    fn insert_remove_arity256_and_zst() {
+        // Arity-256 boundary slots.
+        let mut p = PackedArray::<u16, Arity256>::new();
+        assert_eq!(p.insert(0, 1), None);
+        assert_eq!(p.insert(255, 2), None);
+        assert_eq!(p.insert(128, 3), None);
+        assert_eq!(p.count(), 3);
+        assert_eq!(p.get(128), Some(&3));
+        assert_eq!(p.remove(128), Some(3));
+        assert_eq!(p.get(128), None);
+        assert_eq!(p.count(), 2);
+
+        // Zero-sized T: writes/reads are no-ops, but rank-select still holds.
+        let mut z = PackedArray::<(), Arity16>::new();
+        assert_eq!(z.insert(U4::new_masked(3), ()), None);
+        assert_eq!(z.insert(U4::new_masked(0), ()), None);
+        assert_eq!(z.count(), 2);
+        assert_eq!(z.get(U4::new_masked(3)), Some(&()));
+        assert_eq!(z.remove(U4::new_masked(0)), Some(()));
+        assert_eq!(z.count(), 1);
+        assert_eq!(z.get(U4::new_masked(3)), Some(&()));
     }
 }
