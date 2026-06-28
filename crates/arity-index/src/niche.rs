@@ -201,6 +201,26 @@ macro_rules! niche_int {
             }
         }
 
+        #[cfg(feature = "serde")]
+        impl ::serde::Serialize for $name {
+            fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
+                serializer.serialize_u8(self.as_u8())
+            }
+        }
+
+        #[cfg(feature = "serde")]
+        impl<'de> ::serde::Deserialize<'de> for $name {
+            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::core::result::Result<Self, D::Error> {
+                let v = <u8 as ::serde::Deserialize>::deserialize(deserializer)?;
+                Self::try_new(v).ok_or_else(|| {
+                    ::serde::de::Error::invalid_value(
+                        ::serde::de::Unexpected::Unsigned(::core::primitive::u64::from(v)),
+                        &concat!("an integer in 0..", stringify!($count)),
+                    )
+                })
+            }
+        }
+
         impl Sealed for $name {}
 
         impl Niche for $name {
@@ -385,5 +405,22 @@ mod tests {
 
         // Usable through a generic `Into<usize>` bound.
         assert_eq!(take(U5::new_masked(5)), 5usize);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_round_trip_and_range_validation() {
+        // Round-trip through JSON for a couple of values.
+        let v = U4::new_masked(9);
+        let json = serde_json::to_string(&v).expect("serialize U4");
+        assert_eq!(json, "9");
+        let back: U4 = serde_json::from_str(&json).expect("deserialize U4");
+        assert_eq!(back, v);
+
+        // Out-of-range integers are rejected (16 is not a valid U4).
+        let err = serde_json::from_str::<U4>("16");
+        assert!(err.is_err());
+        // In-range boundary is accepted.
+        assert_eq!(serde_json::from_str::<U4>("15").expect("15"), U4::MAX);
     }
 }
