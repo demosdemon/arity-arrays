@@ -9,6 +9,8 @@
 //! statically-bounded [`arity_index::Niche`] index.
 //!
 //! ```
+//! # #[cfg(feature = "16")]
+//! # fn main() {
 //! # extern crate alloc;
 //! use arity_bitmap::Bitmap;
 //! use arity_index::{Niche, U4};
@@ -24,6 +26,9 @@
 //!
 //! let set: alloc::vec::Vec<u8> = bm.bits().map(U4::as_u8).collect();
 //! assert_eq!(set, alloc::vec![1, 4, 9]);
+//! # }
+//! # #[cfg(not(feature = "16"))]
+//! # fn main() {}
 //! ```
 
 mod iter;
@@ -34,6 +39,7 @@ mod u256;
 use arity_index::Niche;
 pub use iter::BitIter;
 #[cfg(feature = "256")]
+#[doc(hidden)]
 pub use u256::U256;
 
 /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
