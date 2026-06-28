@@ -14,7 +14,7 @@ rust-version = "1.92"
 
 [workspace.dependencies]
 arity-arrays = { path = "crates/arity-arrays", version = "0.1.0" }
-arity-bitmap = { path = "crates/arity-bitmap", version = "0.1.0" }
+arity-bitmap = { path = "crates/arity-bitmap", version = "0.1.0", default-features = false }
 arity-index = { path = "crates/arity-index", version = "0.1.0", default-features = false }
 
 [workspace.lints.rust]

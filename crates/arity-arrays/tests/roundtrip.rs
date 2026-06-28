@@ -56,9 +56,15 @@ macro_rules! roundtrip_for {
     };
 }
 
+#[cfg(feature = "8")]
 roundtrip_for!(arity8, arity_arrays::Arity8, 8);
+#[cfg(feature = "16")]
 roundtrip_for!(arity16, arity_arrays::Arity16, 16);
+#[cfg(feature = "32")]
 roundtrip_for!(arity32, arity_arrays::Arity32, 32);
+#[cfg(feature = "64")]
 roundtrip_for!(arity64, arity_arrays::Arity64, 64);
+#[cfg(feature = "128")]
 roundtrip_for!(arity128, arity_arrays::Arity128, 128);
+#[cfg(feature = "256")]
 roundtrip_for!(arity256, arity_arrays::Arity256, 256);

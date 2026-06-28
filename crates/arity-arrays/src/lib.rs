@@ -33,11 +33,17 @@ pub mod fixed;
 pub mod packed;
 
 pub use arity::Arity;
+#[cfg(feature = "8")]
 pub use arity::Arity8;
+#[cfg(feature = "16")]
 pub use arity::Arity16;
+#[cfg(feature = "32")]
 pub use arity::Arity32;
+#[cfg(feature = "64")]
 pub use arity::Arity64;
+#[cfg(feature = "128")]
 pub use arity::Arity128;
+#[cfg(feature = "256")]
 pub use arity::Arity256;
 pub use arity_bitmap as bitmap;
 pub use arity_index as index;
