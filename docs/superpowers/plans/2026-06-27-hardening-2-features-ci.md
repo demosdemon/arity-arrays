@@ -32,6 +32,7 @@ Copied from the spec and existing conventions; every task implicitly includes th
 - **Inter-crate deps must be `default-features = false`** so disabling a consumer's defaults actually drops the transitive arities. Without this, lean builds silently pull every arity.
 - **Zero-arity build must be warning-clean**, not just compile: gate each `macro_rules!` definition and its supporting imports under `any(<the arities that use it>)`, and gate type-specific imports/invocations under the specific arity.
 - Edition 2024, MSRV 1.92. Conventional-commit messages, imperative mood. Edit `Cargo.toml` by hand here (these are feature tables, not dependency adds).
+- **Line numbers below are indicative; the quoted anchor text and the shown code block govern.** Before editing a file, confirm the anchor with a quick `grep -n` (e.g. `grep -n 'macro_rules! niche_int' …`) and apply the change at the matched location — these crates' macro bodies were grown by plan 1, so always trust the anchor over a raw line range.
 
 ### Verification model for this plan
 
@@ -89,7 +90,7 @@ Add `#[cfg(...)]` immediately before `macro_rules! niche_int {` (currently line 
 macro_rules! niche_int {
 ```
 
-Replace the five invocation lines (currently 204-208) with gated versions:
+Replace the five `niche_int!(…)` invocation lines (currently 216-220) with gated versions:
 
 ```rust
 #[cfg(feature = "8")]
@@ -106,7 +107,7 @@ niche_int!(U7, Repr7, 7, 128);
 
 - [ ] **Step 3: Gate the `u8` arity-256 impls in `crates/arity-index/src/niche.rs`**
 
-The two `u8` impls (currently lines 210-223) become:
+The two `u8` impls (`impl Sealed for u8` and `impl Niche for u8`, currently lines 222-235) become:
 
 ```rust
 #[cfg(feature = "256")]
@@ -265,7 +266,7 @@ macro_rules! impl_native_bitmap {
 
 - [ ] **Step 3: Gate the native invocations in `crates/arity-bitmap/src/native.rs`**
 
-Replace the five invocations (currently lines 83-87) with:
+Replace the five `impl_native_bitmap!(…)` invocations (currently lines 99-103) with:
 
 ```rust
 #[cfg(feature = "8")]
@@ -328,7 +329,7 @@ Gate the six `Arity` markers and their re-exports; forward features to both leaf
 
 **Files:**
 - Modify: `crates/arity-arrays/src/arity.rs` (gate the typenum-size + `Unsigned` imports, `macro_rules! arity`, and its 6 invocations)
-- Modify: `crates/arity-arrays/src/lib.rs:35-40` (gate the `Arity8`–`Arity256` re-exports)
+- Modify: `crates/arity-arrays/src/lib.rs:36-41` (gate the `Arity8`–`Arity256` re-exports; leave `pub use arity::Arity;` on line 35 ungated)
 - Modify: `crates/arity-arrays/Cargo.toml` (add `[features]`; set `arity-index`/`arity-bitmap` `default-features = false`)
 
 **Interfaces:**
@@ -357,7 +358,7 @@ default = ["8", "16", "32", "64", "128", "256"]
 
 - [ ] **Step 2: Gate the size imports in `crates/arity-arrays/src/arity.rs`**
 
-The typenum size aliases are each used only by one arity's invocation, and `Unsigned` is used only inside the macro/tests. Replace the import block (currently lines 4-12) so the always-needed trait imports stay ungated and the size/`Unsigned` imports gate:
+The typenum size aliases are each used only by one arity's invocation, and `Unsigned` is used only inside the macro/tests. Replace the import block — the `use` lines from `use arity_bitmap::Bitmap;` through `use hybrid_array::typenum::Unsigned;` inclusive (currently lines 4-13; **the `Unsigned` line must be inside the replaced range**) — so the always-needed trait imports stay ungated and the size/`Unsigned` imports gate:
 
 ```rust
 use arity_bitmap::Bitmap;
@@ -390,7 +391,7 @@ use hybrid_array::typenum::Unsigned;
 
 - [ ] **Step 3: Gate the `arity!` macro definition and invocations in `crates/arity-arrays/src/arity.rs`**
 
-Add the `any(...)` gate immediately before `macro_rules! arity {` (currently line 34):
+Add the `any(...)` gate immediately before `macro_rules! arity {` (currently line 35):
 
 ```rust
 #[cfg(any(
@@ -404,7 +405,7 @@ Add the `any(...)` gate immediately before `macro_rules! arity {` (currently lin
 macro_rules! arity {
 ```
 
-Replace the six invocations (currently lines 60-65) with:
+Replace the six `arity!(…)` invocations (currently lines 56-61) with:
 
 ```rust
 #[cfg(feature = "8")]
@@ -423,7 +424,7 @@ arity!(Arity256, 256, u8, arity_bitmap::U256, U256);
 
 - [ ] **Step 4: Gate the re-exports in `crates/arity-arrays/src/lib.rs`**
 
-Replace lines 35-40 (`pub use arity::Arity8;` … `pub use arity::Arity256;`) with:
+Replace the six arity-marker re-exports (`pub use arity::Arity8;` … `pub use arity::Arity256;`, currently lines 36-41) with the gated versions below. **Do not touch `pub use arity::Arity;` on line 35 — the `Arity` trait re-export must stay ungated.**
 
 ```rust
 #[cfg(feature = "8")]
@@ -527,7 +528,10 @@ Replace the existing `miri` job with:
 
 Run:
 ```bash
-python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml')); print('yaml ok')"
+cd "$(git rev-parse --show-toplevel)"
+# Validate the workflow YAML parses (uses PyYAML; if unavailable, skip this line
+# and rely on the clippy checks plus GitHub's own workflow validation on push).
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); print('yaml ok')"
 cargo clippy --workspace --no-default-features --features 16 -- -D warnings
 cargo clippy --workspace --no-default-features --features 256 -- -D warnings
 cargo clippy --workspace --no-default-features -- -D warnings
