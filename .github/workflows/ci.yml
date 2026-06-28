@@ -70,6 +70,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo +nightly miri test --workspace --tests
 
+  fuzz:
+    runs-on: ubuntu-26.04
+    # Don't burn a 60s fuzzer run on a tree the basic tests already reject.
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      # Installs cargo-fuzz from mise.toml (the cargo:cargo-fuzz pin).
+      - uses: jdx/mise-action@v2
+      # Persist + grow the corpus across runs so later runs explore deeper.
+      - uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/packed_ops
+          key: fuzz-corpus-packed_ops-${{ github.run_id }}
+          restore-keys: fuzz-corpus-packed_ops-
+      # Smoke-level fuzzing: a fixed wall-clock budget catches regressions
+      # without unbounded CI cost. Deeper soaks run out-of-band.
+      - run: cargo +nightly fuzz run packed_ops -- -max_total_time=60 -rss_limit_mb=4096
+
   msrv:
     runs-on: ubuntu-26.04
     steps:
