@@ -24,11 +24,22 @@ struct Inner<A: Arity, T> {
     data: [T; 0],
 }
 
-/// An immutable, pointer-sized, heap-packed array over arity `A`.
+/// A pointer-sized, heap-packed array over arity `A`, storing only the present
+/// elements.
 ///
 /// `None` ↔ empty (no allocation). `Some(ptr)` ↔ a heap block sized to exactly
 /// the present elements. The `NonNull` null-pointer niche makes this type the
 /// size of a pointer for every `A`.
+///
+/// # Safety
+///
+/// Invariant upheld by every constructor and mutator: when `self.0` is
+/// `Some(ptr)`, `ptr` points to a live allocation from
+/// `alloc_layout::<A, T>(count)` whose `bitmap` field is initialised with
+/// `bitmap != A::Bitmap::ZERO`, and whose `count == bitmap.count_ones()` element
+/// slots are all initialised in ascending slot (rank) order. When `self.0` is
+/// `None`, there is no allocation. The `unsafe` reads throughout this module
+/// rely on this invariant.
 pub struct PackedArray<T, A: Arity>(
     Option<NonNull<Inner<A, T>>>,
     PhantomData<alloc::boxed::Box<T>>,
@@ -243,6 +254,22 @@ impl<T, A: Arity> PackedArray<T, A> {
             back_consumed: 0,
         }
     }
+
+    /// Returns a mutable reference to the element at `index`, or `None` if
+    /// absent. Does not change which slots are present (no reallocation).
+    pub fn get_mut(&mut self, index: A::Index) -> Option<&mut T> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` is valid per the type invariant.
+        let bm = unsafe { ptr.as_ref().bitmap };
+        if !bm.test(index) {
+            return None;
+        }
+        let rank = bm.rank(index) as usize;
+        // SAFETY: `index` is present, so `rank < count`; `data_ptr(ptr).add(rank)`
+        // is an initialised element within the allocation. The borrow is tied to
+        // `&mut self`, which gives exclusive access for its lifetime.
+        Some(unsafe { &mut *data_ptr(ptr).add(rank) })
+    }
 }
 
 impl<T, A: Arity> Default for PackedArray<T, A> {
@@ -421,6 +448,15 @@ impl<T, A: Arity> core::iter::FusedIterator for PackedPresentIter<'_, T, A> {}
 /// between the two ends, a present index yielded from the front has dense rank
 /// `front_rank`, and one yielded from the back has dense rank
 /// `count - 1 - back_consumed`.
+///
+/// # Safety
+///
+/// Invariant: `front_rank` counts the present slots yielded from the front and
+/// `back_consumed` counts those yielded from the back, with
+/// `front_rank + back_consumed <= count` at all times. Because `slots`
+/// partitions the index domain between the two ends, no present slot is counted
+/// by both, so each computed dense rank is `< count` — which the private
+/// `elem_at_rank` helper requires.
 pub struct PackedAllIter<'a, T, A: Arity> {
     array: &'a PackedArray<T, A>,
     bitmap: A::Bitmap,
@@ -886,5 +922,26 @@ mod tests {
             let expected = matches!(s, 0 | 3 | 15).then_some(());
             assert_eq!(*back.get(U4::new_masked(s)), expected, "slot {s}");
         }
+    }
+
+    #[test]
+    fn get_mut_mutates_present_only() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        src[U4::new_masked(2)] = Some(20);
+        src[U4::new_masked(9)] = Some(90);
+        let mut p = PackedArray::from(src);
+
+        // Mutate a present slot through the &mut.
+        if let Some(v) = p.get_mut(U4::new_masked(9)) {
+            *v = 99;
+        }
+        assert_eq!(p.get(U4::new_masked(9)), Some(&99));
+        assert_eq!(p.get(U4::new_masked(2)), Some(&20));
+
+        // Absent slot yields None.
+        assert!(p.get_mut(U4::new_masked(5)).is_none());
+        // Empty array yields None.
+        let mut empty = PackedArray::<u8, Arity16>::new();
+        assert!(empty.get_mut(U4::new_masked(0)).is_none());
     }
 }
