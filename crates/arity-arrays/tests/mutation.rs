@@ -1,12 +1,15 @@
 //! Property and drop-safety tests for in-place `PackedArray` mutation.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use arity_arrays::Arity16;
+use arity_arrays::Arity256;
+use arity_arrays::PackedArray;
 use arity_arrays::index::U4;
-use arity_arrays::{Arity16, PackedArray};
 use proptest::prelude::*;
 
 #[derive(Clone, Debug)]
@@ -73,7 +76,10 @@ fn mutation_drops_each_element_exactly_once() {
 
     // Insert 4 elements (no drops yet).
     for s in [1u8, 4, 9, 14] {
-        assert!(p.insert(U4::new_masked(s), Counted(drops.clone())).is_none());
+        assert!(
+            p.insert(U4::new_masked(s), Counted(drops.clone()))
+                .is_none()
+        );
     }
     assert_eq!(drops.load(Ordering::SeqCst), 0);
 
@@ -92,4 +98,106 @@ fn mutation_drops_each_element_exactly_once() {
     // Drop the array: the remaining 3 elements (slots 1, 4, 14) drop exactly once.
     drop(p);
     assert_eq!(drops.load(Ordering::SeqCst), 5);
+}
+
+#[derive(Clone, Debug)]
+enum Op256 {
+    Insert(u8, u32),
+    Remove(u8),
+    GetMut(u8, u32),
+}
+
+fn op256_strategy() -> impl Strategy<Value = Op256> {
+    prop_oneof![
+        (any::<u8>(), any::<u32>()).prop_map(|(s, v)| Op256::Insert(s, v)),
+        any::<u8>().prop_map(Op256::Remove),
+        (any::<u8>(), any::<u32>()).prop_map(|(s, v)| Op256::GetMut(s, v)),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn packed_mutation_matches_btreemap_arity256(
+        ops in proptest::collection::vec(op256_strategy(), 0..200),
+    ) {
+        // Arity-256 uses `u8` directly as the index, so every byte is a valid
+        // slot — no masking. Exercises the U256 two-limb rank/with_bit/without_bit.
+        let mut packed: PackedArray<u32, Arity256> = PackedArray::new();
+        let mut oracle: BTreeMap<u8, u32> = BTreeMap::new();
+        for op in ops {
+            match op {
+                Op256::Insert(slot, val) => {
+                    prop_assert_eq!(packed.insert(slot, val), oracle.insert(slot, val));
+                }
+                Op256::Remove(slot) => {
+                    prop_assert_eq!(packed.remove(slot), oracle.remove(&slot));
+                }
+                Op256::GetMut(slot, val) => {
+                    if let Some(p) = packed.get_mut(slot) { *p = val; }
+                    if let Some(o) = oracle.get_mut(&slot) { *o = val; }
+                }
+            }
+            prop_assert_eq!(packed.count(), oracle.len());
+            // Limb-boundary + spread spot-check after every op (cheap).
+            for slot in [0u8, 1, 64, 126, 127, 128, 129, 200, 254, 255] {
+                prop_assert_eq!(packed.get(slot), oracle.get(&slot));
+            }
+        }
+        // Final full-domain sweep.
+        for slot in 0..=255u8 {
+            prop_assert_eq!(packed.get(slot), oracle.get(&slot));
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ZstOp {
+    Insert(u8),
+    Remove(u8),
+}
+
+fn zst_op_strategy() -> impl Strategy<Value = ZstOp> {
+    prop_oneof![
+        (0u8..16).prop_map(ZstOp::Insert),
+        (0u8..16).prop_map(ZstOp::Remove),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn packed_mutation_zst_matches_btreemap(
+        ops in proptest::collection::vec(zst_op_strategy(), 0..200),
+    ) {
+        // Zero-sized `T = ()`: the block is sized to the bitmap alone; element
+        // writes/reads/copies are no-ops, but rank-select must still hold.
+        // Use a `BTreeSet` oracle (not `BTreeMap<u8, ()>`) to avoid the
+        // `clippy::zero_sized_map_values` lint.
+        let mut packed: PackedArray<(), Arity16> = PackedArray::new();
+        let mut oracle: BTreeSet<u8> = BTreeSet::new();
+        for op in ops {
+            match op {
+                ZstOp::Insert(slot) => {
+                    let i = U4::new_masked(slot);
+                    let was_present = oracle.contains(&i.as_u8());
+                    oracle.insert(i.as_u8());
+                    let prev = packed.insert(i, ());
+                    // `insert` returns `None` when the slot was absent, `Some(())`
+                    // when it was already present — mirrors `BTreeSet::insert`
+                    // returning `true` for new / `false` for duplicate.
+                    prop_assert_eq!(prev.is_some(), was_present);
+                }
+                ZstOp::Remove(slot) => {
+                    let i = U4::new_masked(slot);
+                    let was_present = oracle.remove(&i.as_u8());
+                    let removed = packed.remove(i);
+                    prop_assert_eq!(removed.is_some(), was_present);
+                }
+            }
+            prop_assert_eq!(packed.count(), oracle.len());
+            for slot in 0..16u8 {
+                let i = U4::new_masked(slot);
+                prop_assert_eq!(packed.get(i).is_some(), oracle.contains(&i.as_u8()));
+            }
+        }
+    }
 }
