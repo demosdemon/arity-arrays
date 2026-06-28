@@ -336,7 +336,23 @@ Gate the six `Arity` markers and their re-exports; forward features to both leaf
 - Consumes: `arity-index` and `arity-bitmap` features `"8"`…`"256"` (Tasks 1–2).
 - Produces: features `"8"`…`"256"` on `arity-arrays`, each forwarding to `arity-index/N` + `arity-bitmap/N`. `"8"`→`Arity8`, …, `"256"`→`Arity256`.
 
-- [ ] **Step 1: Update `crates/arity-arrays/Cargo.toml`**
+- [ ] **Step 1a: Set `arity-bitmap` to `default-features = false` in the ROOT `Cargo.toml`**
+
+Cargo only honors a `default-features = false` override on an inherited (`workspace = true`) dependency when it is *also* declared in the workspace table. Task 2 did this for `arity-index`; do the same for `arity-bitmap`. In the root `/Users/demosdemon/src/arity-arrays/Cargo.toml`, under `[workspace.dependencies]`, change:
+
+```toml
+arity-bitmap = { path = "crates/arity-bitmap", version = "0.1.0" }
+```
+
+to:
+
+```toml
+arity-bitmap = { path = "crates/arity-bitmap", version = "0.1.0", default-features = false }
+```
+
+(`arity-index` already carries `default-features = false` there from Task 2 — leave it.)
+
+- [ ] **Step 1b: Update `crates/arity-arrays/Cargo.toml`**
 
 Set the inter-crate deps to drop transitive default arities, and add the feature table. Replace the `[dependencies]` section and append `[features]` (leave `hybrid-array` as-is — it has no `std` feature and its defaults are needed):
 
@@ -587,6 +603,9 @@ setup:
     mise install
 
 # Build/lint the crates under representative feature subsets (mirrors CI `features`).
+# Library/lints only — NOT tests. The test suite references types from several
+# arities at once, so it compiles and runs only with the default (all-arity)
+# feature set; run `just test`, not a per-arity `cargo test`.
 features:
     cargo clippy --workspace --no-default-features --features 16 -- -D warnings
     cargo clippy --workspace --no-default-features --features 256 -- -D warnings
