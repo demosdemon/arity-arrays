@@ -14,6 +14,7 @@ categories = ["no-std", "data-structures", "rust-patterns"]
 
 [dependencies]
 seq-macro = "0.3.6"
+serde = { version = "1", optional = true, default-features = false }
 
 [lints]
 workspace = true
@@ -26,3 +27,8 @@ default = ["8", "16", "32", "64", "128", "256"]
 "64" = []
 "128" = []
 "256" = []
+serde = ["dep:serde"]
+std = ["serde?/std"]
+
+[dev-dependencies]
+serde_json = "1.0.150"
