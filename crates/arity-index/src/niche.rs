@@ -42,8 +42,8 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
     ///
     /// This range iterator is deliberately the only way to enumerate the
     /// domain: there is no `ALL` constant, so nothing materializes a
-    /// `COUNT`-element table (an `[U7; 128]` / `[u8; 256]` const would otherwise
-    /// sit in the binary).
+    /// `COUNT`-element table (an `[U7; 128]` / `[u8; 256]` const would
+    /// otherwise sit in the binary).
     #[must_use]
     fn all() -> NicheRangeInclusive<Self> {
         NicheRangeInclusive::full()
