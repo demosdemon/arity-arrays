@@ -557,17 +557,13 @@ unsafe impl<T: Sync, A: Arity> Sync for PackedPresentIter<'_, T, A> {}
 mod tests {
     extern crate std;
 
-    #[cfg(feature = "16")]
     use arity_index::U4;
 
     use super::*;
-    #[cfg(feature = "16")]
     use crate::Arity16;
-    #[cfg(feature = "256")]
     use crate::Arity256;
     use crate::FixedArray;
 
-    #[cfg(feature = "16")]
     #[test]
     fn pointer_sized_and_empty() {
         assert_eq!(
@@ -580,7 +576,6 @@ mod tests {
         assert_eq!(p.get(U4::new_masked(0)), None);
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn from_fixed_and_get() {
         let mut src = FixedArray::<Option<u8>, Arity16>::new();
@@ -596,7 +591,6 @@ mod tests {
         assert_eq!(p.get(U4::new_masked(8)), None);
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn single_child_rank_zero_every_slot() {
         // Exercises the rank-zero boundary at every slot of every arity edge.
@@ -609,7 +603,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "256")]
     #[test]
     fn arity256_boundary() {
         let mut src = FixedArray::<Option<u16>, Arity256>::new();
@@ -626,7 +619,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn iter_present_ascending_and_double_ended() {
         extern crate alloc;
@@ -648,7 +640,6 @@ mod tests {
         assert_eq!(it.next(), None);
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn iter_all_slots() {
         let mut src = FixedArray::<Option<u8>, Arity16>::new();
@@ -662,7 +653,6 @@ mod tests {
         assert_eq!(all[15], (15, None));
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn drop_runs_once_per_element() {
         use std::sync::Arc;
@@ -686,7 +676,6 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn clone_is_independent() {
         use std::sync::Arc;
@@ -718,7 +707,6 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 4);
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn clone_panic_frees_partial() {
         use std::panic;
@@ -765,7 +753,6 @@ mod tests {
         assert_eq!(drops.load(Ordering::SeqCst), 6);
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn owned_roundtrip_lossless() {
         extern crate alloc;
@@ -784,7 +771,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn by_ref_roundtrip_lossless() {
         let mut src = FixedArray::<Option<u8>, Arity16>::new();
@@ -798,7 +784,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn eq_and_debug() {
         let mut src = FixedArray::<Option<u8>, Arity16>::new();
@@ -814,7 +799,6 @@ mod tests {
         assert!(s.contains('2'));
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn iter_all_double_ended_interleaved() {
         // Alternating next()/next_back() must visit every slot exactly once and
@@ -845,7 +829,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "16")]
     #[test]
     fn zst_roundtrip() {
         // Zero-sized `T`: the block is sized to the bitmap alone and the element
