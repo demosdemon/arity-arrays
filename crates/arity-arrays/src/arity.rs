@@ -94,19 +94,12 @@ mod tests {
 
     #[test]
     fn wiring_constants() {
-        #[cfg(feature = "8")]
         assert_eq!(Arity8::LEN, 8);
-        #[cfg(feature = "16")]
         assert_eq!(Arity16::LEN, 16);
-        #[cfg(feature = "256")]
         assert_eq!(Arity256::LEN, 256);
-        #[cfg(feature = "16")]
         assert_eq!(<Arity16 as Arity>::Size::USIZE, 16);
-        #[cfg(feature = "16")]
         assert_eq!(<<Arity16 as Arity>::Index as Niche>::COUNT, 16);
-        #[cfg(feature = "16")]
         assert_eq!(<<Arity16 as Arity>::Bitmap as Bitmap>::WIDTH, 16);
-        #[cfg(feature = "256")]
         assert_eq!(<<Arity256 as Arity>::Index as Niche>::COUNT, 256);
     }
 }
