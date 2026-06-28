@@ -14,10 +14,13 @@ use crate::Sealed;
 // Wire-up invariant: the u8 index domain (256) must equal the bit width.
 const _: () = assert!(<u8 as Niche>::COUNT == 256);
 
-// ---- Default backing: a self-contained two-limb integer (pure safe code). ----
+// ---- Default backing: a self-contained two-limb integer (pure safe code).
+// ----
 #[cfg(not(feature = "ethnum"))]
 mod custom {
-    use super::{Bitmap, Raw, Sealed};
+    use super::Bitmap;
+    use super::Raw;
+    use super::Sealed;
 
     /// A 256-bit bitmap: bit `i` lives in `lo` for `i < 128`, else in `hi` at
     /// `i - 128`.
@@ -28,7 +31,8 @@ mod custom {
     }
 
     impl U256 {
-        /// Splits a bit index `i` (`< 256`) into `(limb_is_hi, bit_within_limb)`.
+        /// Splits a bit index `i` (`< 256`) into `(limb_is_hi,
+        /// bit_within_limb)`.
         const fn split(i: u8) -> (bool, u32) {
             if i < 128 {
                 (false, i as u32)
@@ -69,16 +73,28 @@ mod custom {
         }
         fn raw_clear_lowest(self) -> Self {
             if self.lo != 0 {
-                Self { lo: self.lo & self.lo.wrapping_sub(1), hi: self.hi }
+                Self {
+                    lo: self.lo & self.lo.wrapping_sub(1),
+                    hi: self.hi,
+                }
             } else {
-                Self { lo: 0, hi: self.hi & self.hi.wrapping_sub(1) }
+                Self {
+                    lo: 0,
+                    hi: self.hi & self.hi.wrapping_sub(1),
+                }
             }
         }
         fn raw_clear_highest(self) -> Self {
             if self.hi != 0 {
-                Self { lo: self.lo, hi: self.hi & !(1u128 << self.hi.ilog2()) }
+                Self {
+                    lo: self.lo,
+                    hi: self.hi & !(1u128 << self.hi.ilog2()),
+                }
             } else if self.lo != 0 {
-                Self { lo: self.lo & !(1u128 << self.lo.ilog2()), hi: 0 }
+                Self {
+                    lo: self.lo & !(1u128 << self.lo.ilog2()),
+                    hi: 0,
+                }
             } else {
                 self
             }
@@ -104,9 +120,15 @@ mod custom {
         fn with_bit(self, i: u8) -> Self {
             let (is_hi, bit) = Self::split(i);
             if is_hi {
-                Self { lo: self.lo, hi: self.hi | (1u128 << bit) }
+                Self {
+                    lo: self.lo,
+                    hi: self.hi | (1u128 << bit),
+                }
             } else {
-                Self { lo: self.lo | (1u128 << bit), hi: self.hi }
+                Self {
+                    lo: self.lo | (1u128 << bit),
+                    hi: self.hi,
+                }
             }
         }
         fn rank(self, i: u8) -> u32 {
@@ -122,9 +144,15 @@ mod custom {
         fn without_bit(self, i: u8) -> Self {
             let (is_hi, bit) = Self::split(i);
             if is_hi {
-                Self { lo: self.lo, hi: self.hi & !(1u128 << bit) }
+                Self {
+                    lo: self.lo,
+                    hi: self.hi & !(1u128 << bit),
+                }
             } else {
-                Self { lo: self.lo & !(1u128 << bit), hi: self.hi }
+                Self {
+                    lo: self.lo & !(1u128 << bit),
+                    hi: self.hi,
+                }
             }
         }
         fn to_le_bytes(self, buf: &mut [u8]) {
@@ -143,12 +171,15 @@ mod custom {
 #[cfg(not(feature = "ethnum"))]
 pub use custom::U256;
 
-// ---- Optional backing: re-export `ethnum::U256` (a real 256-bit integer). ----
+// ---- Optional backing: re-export `ethnum::U256` (a real 256-bit integer).
+// ----
 #[cfg(feature = "ethnum")]
 mod ethnum_backed {
-    use super::{Bitmap, Raw, Sealed};
-
     pub use ethnum::U256;
+
+    use super::Bitmap;
+    use super::Raw;
+    use super::Sealed;
 
     // ethnum has no ZERO/ONE consts we can rely on; build them from words.
     const ZERO: U256 = U256::from_words(0, 0);
@@ -161,6 +192,9 @@ mod ethnum_backed {
             self == ZERO
         }
         fn raw_popcount(self) -> u32 {
+            // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
+            // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
+            // or the trait path here would recurse.
             Self::count_ones(self)
         }
         fn raw_lowest_pos(self) -> usize {
@@ -170,7 +204,11 @@ mod ethnum_backed {
             255 - self.leading_zeros() as usize
         }
         fn raw_clear_lowest(self) -> Self {
-            if self == ZERO { self } else { self & (self - ONE) }
+            if self == ZERO {
+                self
+            } else {
+                self & (self - ONE)
+            }
         }
         fn raw_clear_highest(self) -> Self {
             if self == ZERO {
@@ -190,6 +228,9 @@ mod ethnum_backed {
             self == ZERO
         }
         fn count_ones(self) -> u32 {
+            // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
+            // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
+            // or the trait path here would recurse.
             Self::count_ones(self)
         }
         fn test(self, i: u8) -> bool {
@@ -202,6 +243,9 @@ mod ethnum_backed {
             if i == 0 {
                 0
             } else {
+                // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
+                // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
+                // or the trait path here would recurse.
                 Self::count_ones(self & ((ONE << u32::from(i)) - ONE))
             }
         }

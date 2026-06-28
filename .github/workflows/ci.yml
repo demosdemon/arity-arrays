@@ -24,6 +24,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --all-targets
       - run: cargo test --workspace --all-features --doc
+      # Default features (= the custom two-limb U256 backing): fast runtime
+      # coverage of the shipping default, which --all-features swaps to ethnum.
+      - run: cargo test --workspace
 
   lint:
     runs-on: ubuntu-26.04
@@ -58,6 +61,20 @@ jobs:
       - run: cargo clippy --workspace --no-default-features --features "16,serde" -- -D warnings
       # ethnum backing + compact serde + std together.
       - run: cargo clippy --workspace --no-default-features --features "256,ethnum,serde_with,std" -- -D warnings
+
+  nostd:
+    name: no_std bare-metal build
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      # A no_std target (no std in the sysroot) fails to build if any dep or
+      # feature transitively pulls std — locking the #![no_std] discipline now
+      # that std-capable optional deps (serde, serde_with) exist.
+      - run: cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
 
   miri:
     runs-on: ubuntu-26.04
