@@ -54,6 +54,7 @@ macro_rules! impl_native_bitmap {
         impl Bitmap for $ty {
             type Index = $idx;
             const WIDTH: usize = $width;
+            const BYTES: usize = $width / 8;
             const ZERO: Self = 0;
 
             fn is_zero(self) -> bool {
@@ -79,6 +80,18 @@ macro_rules! impl_native_bitmap {
 
             fn without_bit(self, i: $idx) -> Self {
                 self & !(1 << i.as_usize())
+            }
+
+            fn to_le_bytes(self, buf: &mut [u8]) {
+                // Inherent primitive method (1 arg) — unambiguous with the trait's.
+                buf.copy_from_slice(&<$ty>::to_le_bytes(self));
+            }
+
+            fn from_le_bytes(buf: &[u8]) -> Self {
+                let mut arr = [0u8; $width / 8];
+                arr.copy_from_slice(buf);
+                // Inherent primitive method (owned array arg) — unambiguous.
+                <$ty>::from_le_bytes(arr)
             }
         }
     };
@@ -188,6 +201,19 @@ mod tests {
         for i in bm.bits() {
             assert_eq!(bm.select(bm.rank(i)), Some(i));
         }
+    }
+
+    #[test]
+    fn le_bytes_round_trip_native() {
+        assert_eq!(<u16 as Bitmap>::BYTES, 2);
+        assert_eq!(<u8 as Bitmap>::BYTES, 1);
+        assert_eq!(<u128 as Bitmap>::BYTES, 16);
+
+        let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(9));
+        let mut buf = [0u8; 2];
+        <u16 as Bitmap>::to_le_bytes(bm, &mut buf);
+        assert_eq!(buf, 0b0000_0010_0000_0010u16.to_le_bytes());
+        assert_eq!(<u16 as Bitmap>::from_le_bytes(&buf), bm);
     }
 
     extern crate alloc;

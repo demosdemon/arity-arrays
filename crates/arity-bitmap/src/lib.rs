@@ -79,6 +79,8 @@ pub trait Bitmap: Copy + Eq + Raw {
     type Index: Niche;
     /// The number of bits (`8`, `16`, `32`, `64`, `128`, or `256`).
     const WIDTH: usize;
+    /// The number of bytes in the little-endian byte form (`WIDTH / 8`).
+    const BYTES: usize;
     /// The empty bitmap.
     const ZERO: Self;
 
@@ -106,6 +108,16 @@ pub trait Bitmap: Copy + Eq + Raw {
     fn select(self, n: u32) -> Option<Self::Index> {
         self.bits().nth(n as usize)
     }
+    /// Writes the bitmap as `BYTES` little-endian bytes into `buf`.
+    ///
+    /// `buf.len()` must equal [`BYTES`](Bitmap::BYTES); a wrong length panics.
+    /// The byte form is backing-independent — it does not depend on the limb
+    /// layout of any particular backing.
+    fn to_le_bytes(self, buf: &mut [u8]);
+    /// Reads a bitmap from `BYTES` little-endian bytes.
+    ///
+    /// `buf.len()` must equal [`BYTES`](Bitmap::BYTES); a wrong length panics.
+    fn from_le_bytes(buf: &[u8]) -> Self;
     /// Iterates over the set bits, ascending, as a double-ended iterator.
     fn bits(self) -> BitIter<Self> {
         BitIter::new(self)
