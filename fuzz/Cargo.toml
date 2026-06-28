@@ -1,0 +1,34 @@
+[package]
+name = "arity-arrays-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Make `fuzz/` its own workspace root so Cargo does not treat it as a stray
+# member of the parent workspace (whose `members = ["crates/*"]` excludes it).
+# Without this, `cargo fuzz build/run` aborts with "believes it's in a workspace
+# when it's not". This is the standard cargo-fuzz layout.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.arity-arrays]
+path = "../crates/arity-arrays"
+
+[[bin]]
+name = "packed_ops"
+path = "fuzz_targets/packed_ops.rs"
+test = false
+doc = false
+bench = false
+
+# Build the fuzz target with debug assertions and overflow checks on.
+[profile.release]
+debug = true
+debug-assertions = true
+overflow-checks = true
