@@ -39,15 +39,34 @@ jobs:
       - run: cargo +nightly fmt --all --check
       - run: cargo +stable clippy --workspace --all-targets --all-features -- -D warnings
 
+  features:
+    name: feature matrix
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Lean single-arity build (the firewood shape): library compiles and lints clean.
+      - run: cargo clippy --workspace --no-default-features --features 16 -- -D warnings
+      # Arity-256 alone: exercises the U256 backing in isolation.
+      - run: cargo clippy --workspace --no-default-features --features 256 -- -D warnings
+      # No arities selected: the crates still compile (empty of arity types), warning-free.
+      - run: cargo clippy --workspace --no-default-features -- -D warnings
+
   miri:
     runs-on: ubuntu-26.04
+    env:
+      MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
+      PROPTEST_CASES: "32"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
       - uses: Swatinem/rust-cache@v2
-      - run: cargo +nightly miri test --workspace --lib
+      - run: cargo +nightly miri test --workspace --tests
 
   msrv:
     runs-on: ubuntu-26.04
