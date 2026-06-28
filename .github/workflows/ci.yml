@@ -83,7 +83,11 @@ jobs:
     # files on disk and seed from host entropy; strict-provenance stays on.
     env:
       MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
-      PROPTEST_CASES: "32"
+      # Per-PR smoke depth. Miri runs the interpreter ~100s per proptest case
+      # across these binaries, so the full 256-case spread is ~7h — over GitHub's
+      # 6h job limit. Keep PR/merge feedback fast here; the sharded daily run in
+      # miri-full.yml covers the full 256-case spread.
+      PROPTEST_CASES: "8"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

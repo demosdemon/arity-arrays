@@ -1,0 +1,52 @@
+name: Miri (full)
+
+# The per-PR Miri job in ci.yml runs a reduced proptest spread (PROPTEST_CASES=8)
+# to keep pull-request feedback fast. This workflow runs the full 256-case spread
+# on a daily schedule, sharded so no single job approaches GitHub's 6h limit.
+#
+# Scheduled runs only fire on the default branch. Use workflow_dispatch to trigger
+# the full spread on demand (e.g. before a release).
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily at 07:00 UTC (00:00 US/Pacific)
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  miri:
+    name: miri full / ${{ matrix.name }}
+    runs-on: ubuntu-26.04
+    # Guardrail well under the 6h hard limit: the heaviest shard is ~2.7h, so a
+    # timeout here means a runaway, not normal growth.
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exhaustive, non-overlapping partition of `--workspace --tests`. The
+        # mutation binary dominates (~4h at 256 cases), so it is split by arity:
+        # the Arity256 full-domain sweep gets its own shard.
+        include:
+          - name: lib
+            args: --workspace --lib
+          - name: roundtrip
+            args: -p arity-arrays --test roundtrip
+          - name: bitmap
+            args: -p arity-bitmap --test proptests --test generic_use
+          - name: mutation
+            args: -p arity-arrays --test mutation -- --skip _arity256
+          - name: mutation-256
+            args: -p arity-arrays --test mutation -- --exact packed_mutation_matches_btreemap_arity256
+    env:
+      # Match ci.yml's Miri flags; disable-isolation lets the proptests read/write
+      # their regression files and seed from host entropy. Strict-provenance stays on.
+      MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
+      PROPTEST_CASES: "256"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly miri test ${{ matrix.args }}
