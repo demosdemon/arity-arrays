@@ -713,6 +713,59 @@ impl<T: core::fmt::Debug, A: Arity> core::fmt::Debug for PackedArray<T, A> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<T: serde::Serialize, A: Arity> serde::Serialize for PackedArray<T, A>
+where
+    A::Index: serde::Serialize,
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Logical form: a sequence of `(index, value)` pairs in ascending order.
+        serializer.collect_seq(self.iter_present())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for PackedArray<T, A>
+where
+    A::Index: serde::Deserialize<'de>,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PairsVisitor<T, A>(PhantomData<(T, A)>);
+
+        impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::de::Visitor<'de> for PairsVisitor<T, A>
+        where
+            A::Index: serde::Deserialize<'de>,
+        {
+            type Value = PackedArray<T, A>;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a sequence of (index, value) pairs with strictly ascending indices")
+            }
+
+            fn visit_seq<S: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: S,
+            ) -> Result<Self::Value, S::Error> {
+                let mut out = FixedArray::<Option<T>, A>::new();
+                let mut last: Option<usize> = None;
+                while let Some((index, value)) = seq.next_element::<(A::Index, T)>()? {
+                    let i = index.as_usize();
+                    if last.is_some_and(|prev| i <= prev) {
+                        return Err(serde::de::Error::custom(
+                            "PackedArray indices must be strictly ascending",
+                        ));
+                    }
+                    last = Some(i);
+                    out[index] = Some(value);
+                }
+                Ok(PackedArray::from(out))
+            }
+        }
+
+        deserializer.deserialize_seq(PairsVisitor(PhantomData))
+    }
+}
+
 // SAFETY: `PackedArray` exclusively owns its allocation; sending it across
 // threads is sound when `T: Send`.
 unsafe impl<T: Send, A: Arity> Send for PackedArray<T, A> {}

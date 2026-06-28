@@ -95,6 +95,25 @@ impl<T, A: Arity> AsRef<[T]> for FixedArray<T, A> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<T: serde::Serialize, A: Arity> serde::Serialize for FixedArray<T, A> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // The inner `Array<T, A::Size>` serializes as a fixed-length sequence of
+        // exactly `LEN` elements (hybrid-array's `serde` impl). UFCS because the
+        // `Serialize` trait is not otherwise in method-call scope here.
+        serde::Serialize::serialize(&self.0, serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for FixedArray<T, A> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let inner =
+            <hybrid_array::Array<T, A::Size> as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        Ok(Self(inner))
+    }
+}
+
 impl<T, A: Arity> IntoIterator for FixedArray<T, A> {
     type Item = (A::Index, T);
     // `hybrid-array` has no public `IntoIter<T, N>` name; the owned iterator type
