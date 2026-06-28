@@ -57,6 +57,8 @@ jobs:
 
   miri:
     runs-on: ubuntu-26.04
+    # disable-isolation: the round-trip proptests read/write their regression
+    # files on disk and seed from host entropy; strict-provenance stays on.
     env:
       MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
       PROPTEST_CASES: "32"
