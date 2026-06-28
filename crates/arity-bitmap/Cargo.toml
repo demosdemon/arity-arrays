@@ -27,14 +27,6 @@ default = ["8", "16", "32", "64", "128", "256"]
 ethnum = ["dep:ethnum"]
 std = ["arity-index/std"]
 
-[[test]]
-name = "generic_use"
-required-features = ["16", "256"]
-
-[[test]]
-name = "proptests"
-required-features = ["16", "128", "256"]
-
 [lints]
 workspace = true
 
