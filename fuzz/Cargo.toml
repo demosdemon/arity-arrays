@@ -21,8 +21,8 @@ arbitrary = { version = "1", features = ["derive"] }
 path = "../crates/arity-arrays"
 
 [[bin]]
-name = "packed_ops"
-path = "fuzz_targets/packed_ops.rs"
+name = "mutation_16"
+path = "fuzz_targets/mutation_16.rs"
 test = false
 doc = false
 bench = false
