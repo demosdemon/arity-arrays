@@ -10,6 +10,7 @@ mod support;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use arity_arrays::Arity;
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
 use arity_arrays::FixedArray;
@@ -17,7 +18,10 @@ use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 use support::BenchContainer;
 use support::BoxArr;
+use support::ChurnOp;
 use support::Payload;
+use support::churn_len;
+use support::churn_ops;
 use support::masked_index;
 
 #[test]
@@ -74,4 +78,38 @@ fn fold_sums_present_values() {
     // fill(2) → values make(0), make(1); XOR fold over u64 = 0 ^ 1 = 1.
     let c = <PackedArray<u64, Arity256> as BenchContainer<u64>>::fill(2);
     assert_eq!(c.fold(), 1u64); // 0 ^ 1 = 1
+}
+
+#[test]
+fn churn_ops_hold_half_occupancy() {
+    // Simulate the sequence against a plain occupancy bitset and confirm it
+    // never no-ops: every Remove hits a present slot, every Insert an absent
+    // one, and occupancy oscillates around N/2.
+    let ops = churn_ops::<Arity16>();
+    let n = Arity16::LEN;
+    assert_eq!(ops.len(), churn_len(n));
+    let mut occupied = vec![false; n];
+    for slot in occupied.iter_mut().take(n / 2) {
+        *slot = true;
+    }
+    let mut count = n / 2;
+    for (op, slot) in ops {
+        assert!(slot < n);
+        match op {
+            ChurnOp::Remove => {
+                assert!(occupied[slot], "remove must target a present slot");
+                occupied[slot] = false;
+                count -= 1;
+            }
+            ChurnOp::Insert => {
+                assert!(!occupied[slot], "insert must target an absent slot");
+                occupied[slot] = true;
+                count += 1;
+            }
+        }
+        assert!(
+            count == n / 2 || count == n / 2 - 1,
+            "occupancy stays near half"
+        );
+    }
 }

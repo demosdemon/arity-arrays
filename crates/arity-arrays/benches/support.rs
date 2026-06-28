@@ -184,3 +184,72 @@ impl<T: Payload> BenchContainer<T> for HashMap<usize, T> {
         self.values().fold(0, |acc, v| acc ^ v.fold())
     }
 }
+
+/// A churn step: which mutation, and the slot it targets.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChurnOp {
+    Remove,
+    Insert,
+}
+
+/// Deterministic xorshift64 seed for the churn sequence. Fixed so the workload
+/// — and therefore the committed baseline — is reproducible across runs.
+const CHURN_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+
+const fn xorshift64(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
+/// Churn sequence length for arity width `n`: `max(256, 8 × n)`. A single
+/// definition so `churn_ops` and its test cannot drift — the length is part of
+/// the before/after baseline contract for the capacity-tracking follow-up.
+pub const fn churn_len(n: usize) -> usize {
+    let scaled = n.saturating_mul(8);
+    if scaled > 256 { scaled } else { 256 }
+}
+
+/// Build the churn sequence for arity `A`: start from slots `0..N/2` present,
+/// then alternate Remove(present)/Insert(absent) so occupancy oscillates ±1
+/// around `N/2` and never reaches a boundary where a step would no-op. Length
+/// is `max(256, 8 * N)`, a named constant of the before/after baseline.
+pub fn churn_ops<A: Arity>() -> Vec<(ChurnOp, usize)> {
+    let n = A::LEN;
+    let len = churn_len(n);
+    let mut occupied = vec![false; n];
+    for slot in occupied.iter_mut().take(n / 2) {
+        *slot = true;
+    }
+    let mut state = CHURN_SEED;
+    let mut ops = Vec::with_capacity(len);
+    let mut want_remove = true;
+    while ops.len() < len {
+        let want = want_remove;
+        // Draw masked slots until one matches the required present/absent state.
+        let slot = loop {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "xorshift output is masked to n-1; n is always a power-of-two \
+                          ≤ 256 for this crate's arity types, so the masked value fits \
+                          usize on 32-bit targets too"
+            )]
+            let candidate = (xorshift64(&mut state) as usize) & (n - 1);
+            if occupied[candidate] == want {
+                break candidate;
+            }
+        };
+        if want {
+            occupied[slot] = false;
+            ops.push((ChurnOp::Remove, slot));
+        } else {
+            occupied[slot] = true;
+            ops.push((ChurnOp::Insert, slot));
+        }
+        want_remove = !want_remove;
+    }
+    ops
+}

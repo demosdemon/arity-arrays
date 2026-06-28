@@ -9,13 +9,16 @@ mod support;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use arity_arrays::Arity;
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
 use arity_arrays::FixedArray;
 use arity_arrays::PackedArray;
 use support::BenchContainer;
 use support::BoxArr;
+use support::ChurnOp;
 use support::Payload;
+use support::churn_ops;
 
 // Cell A: Arity16 + 32-byte hash. Cell B: Arity256 + 8-byte pointer stand-in.
 const OCC_A: &[usize] = &[1, 4, 8, 16];
@@ -109,6 +112,117 @@ single_op_benches!(
 
 single_op_benches!(
     cell_b, u64, Arity256, OCC_B, OCC_B_PARTIAL,
+    [
+        PackedArray<u64, Arity256>,
+        FixedArray<Option<u64>, Arity256>,
+        BoxArr<u64, Arity256>,
+        BTreeMap<usize, u64>,
+        HashMap<usize, u64>,
+    ]
+);
+
+mod convert {
+    use super::Arity16;
+    use super::Arity256;
+    use super::BenchContainer;
+    use super::FixedArray;
+    use super::OCC_A;
+    use super::OCC_B;
+    use super::PackedArray;
+
+    // pack: clone a populated FixedArray into a PackedArray (From<&FixedArray>).
+    #[divan::bench(args = OCC_A)]
+    fn pack_cell_a(bencher: divan::Bencher, occupancy: usize) {
+        let src =
+            <FixedArray<Option<[u8; 32]>, Arity16> as BenchContainer<[u8; 32]>>::fill(occupancy);
+        bencher.bench_local(|| divan::black_box(PackedArray::from(divan::black_box(&src))));
+    }
+
+    #[divan::bench(args = OCC_B)]
+    fn pack_cell_b(bencher: divan::Bencher, occupancy: usize) {
+        let src = <FixedArray<Option<u64>, Arity256> as BenchContainer<u64>>::fill(occupancy);
+        bencher.bench_local(|| divan::black_box(PackedArray::from(divan::black_box(&src))));
+    }
+
+    // unpack: clone a populated PackedArray back into a FixedArray
+    // (From<&PackedArray>).
+    #[divan::bench(args = OCC_A)]
+    fn unpack_cell_a(bencher: divan::Bencher, occupancy: usize) {
+        let src = <PackedArray<[u8; 32], Arity16> as BenchContainer<[u8; 32]>>::fill(occupancy);
+        bencher.bench_local(|| {
+            divan::black_box(FixedArray::<Option<[u8; 32]>, Arity16>::from(
+                divan::black_box(&src),
+            ))
+        });
+    }
+
+    #[divan::bench(args = OCC_B)]
+    fn unpack_cell_b(bencher: divan::Bencher, occupancy: usize) {
+        let src = <PackedArray<u64, Arity256> as BenchContainer<u64>>::fill(occupancy);
+        bencher.bench_local(|| {
+            divan::black_box(FixedArray::<Option<u64>, Arity256>::from(divan::black_box(
+                &src,
+            )))
+        });
+    }
+}
+
+macro_rules! workload_benches {
+    ($modname:ident, $ty:ty, $arity:ty, [$($ctype:ty),+ $(,)?]) => {
+        mod $modname {
+            use super::*;
+
+            // build: N successive inserts from empty (burst-insert).
+            #[divan::bench(types = [$($ctype),+])]
+            fn build<C: BenchContainer<$ty>>(bencher: divan::Bencher) {
+                let n = <$arity as Arity>::LEN;
+                bencher.bench_local(|| {
+                    let mut c = C::empty();
+                    for i in 0..n {
+                        c.set(i, <$ty as Payload>::make(i));
+                    }
+                    divan::black_box(c)
+                });
+            }
+
+            // churn: hold ~half occupancy through max(256, 8N) alternating ops.
+            #[divan::bench(types = [$($ctype),+])]
+            fn churn<C: BenchContainer<$ty>>(bencher: divan::Bencher) {
+                let ops = churn_ops::<$arity>();
+                let half = <$arity as Arity>::LEN / 2;
+                bencher
+                    .with_inputs(|| C::fill(half))
+                    .bench_local_values(|mut c| {
+                        for &(op, slot) in &ops {
+                            match op {
+                                ChurnOp::Remove => {
+                                    divan::black_box(c.del(slot));
+                                }
+                                ChurnOp::Insert => {
+                                    divan::black_box(c.set(slot, <$ty as Payload>::make(slot)));
+                                }
+                            }
+                        }
+                        divan::black_box(c)
+                    });
+            }
+        }
+    };
+}
+
+workload_benches!(
+    workload_a, [u8; 32], Arity16,
+    [
+        PackedArray<[u8; 32], Arity16>,
+        FixedArray<Option<[u8; 32]>, Arity16>,
+        BoxArr<[u8; 32], Arity16>,
+        BTreeMap<usize, [u8; 32]>,
+        HashMap<usize, [u8; 32]>,
+    ]
+);
+
+workload_benches!(
+    workload_b, u64, Arity256,
     [
         PackedArray<u64, Arity256>,
         FixedArray<Option<u64>, Arity256>,
