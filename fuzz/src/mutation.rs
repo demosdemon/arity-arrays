@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use arbitrary::Arbitrary;
+use arity_arrays::Arity;
+use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
-use arity_arrays::{Arity, PackedArray};
 
 #[derive(Arbitrary, Debug)]
 pub enum Op {

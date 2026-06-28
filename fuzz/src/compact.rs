@@ -4,7 +4,9 @@
 //! `#[path]`-included by `fuzz_targets/compact_decode.rs`.
 
 use arbitrary::Arbitrary;
-use arity_arrays::{Arity256, Compact, PackedArray};
+use arity_arrays::Arity256;
+use arity_arrays::Compact;
+use arity_arrays::PackedArray;
 use serde_with::de::DeserializeAsWrap;
 use serde_with::ser::SerializeAsWrap;
 
