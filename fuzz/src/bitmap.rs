@@ -6,7 +6,10 @@
 use arity_arrays::bitmap::Bitmap;
 use arity_arrays::index::Niche;
 
-pub fn bitmap_roundtrip_run<B: Bitmap>(bytes: &[u8]) {
+pub fn bitmap_roundtrip_run<B: Bitmap>(bytes: &[u8])
+where
+    <B as Bitmap>::Index: std::fmt::Debug,
+{
     // Unreachable from the thin wrapper (always 32 bytes); guards generic-fn
     // misuse so from_le_bytes never sees a wrong-length buffer (its panic
     // precondition).
@@ -27,7 +30,7 @@ pub fn bitmap_roundtrip_run<B: Bitmap>(bytes: &[u8]) {
     // rank/select are inverse on present bits (documented contract).
     for i in b.bits() {
         assert!(b.test(i));
-        assert!(b.select(b.rank(i)) == Some(i));
+        assert_eq!(b.select(b.rank(i)), Some(i));
     }
 
     // with_bit/without_bit behave at every position, incl. the limb boundary
