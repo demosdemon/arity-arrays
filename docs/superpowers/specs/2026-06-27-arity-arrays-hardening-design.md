@@ -112,7 +112,7 @@ All breaking changes land before the first publish (step 1).
 ```rust
 pub trait Bitmap: /* … existing … */ {
     // existing: is_zero, count_ones, test, with_bit, rank, bits
-    const BYTES: usize;                                  // WIDTH / 8
+    const BYTES: usize = Self::WIDTH / 8;                // defaulted from WIDTH
     fn without_bit(self, i: Self::Index) -> Self;        // inverse of with_bit
     fn select(self, n: u32) -> Option<Self::Index>;      // index of the n-th set bit (0-based)
     fn to_le_bytes(self, buf: &mut [u8]);                // writes BYTES little-endian bytes
@@ -136,7 +136,12 @@ pub trait Bitmap: /* … existing … */ {
   long; callers size it from the const. Each backing implements these over its
   native `to_le_bytes`/`from_le_bytes` (or `U256`'s two limbs / `ethnum`'s
   `to_le_bytes`), keeping the limb-ordering detail in one verified place per
-  backing.
+  backing. `BYTES` is a trait default (`Self::WIDTH / 8`), so it cannot diverge
+  from `WIDTH`. The methods take a `&[u8]` slice and **panic on a wrong-length
+  buffer** (`buf.len()` must equal `Self::BYTES`) rather than taking a
+  `[u8; Self::BYTES]` array — const-generic array lengths from an associated
+  `const` are not stable at MSRV 1.92, so the runtime-checked slice is the
+  pragmatic contract.
 
 ### Index ergonomics (`arity-index`)
 
