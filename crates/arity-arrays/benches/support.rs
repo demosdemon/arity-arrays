@@ -231,13 +231,8 @@ pub fn churn_ops<A: Arity>() -> Vec<(ChurnOp, usize)> {
         let want = want_remove;
         // Draw masked slots until one matches the required present/absent state.
         let slot = loop {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "xorshift output is masked to n-1; n is always a power-of-two \
-                          ≤ 256 for this crate's arity types, so the masked value fits \
-                          usize on 32-bit targets too"
-            )]
-            let candidate = (xorshift64(&mut state) as usize) & (n - 1);
+            let candidate = usize::try_from(xorshift64(&mut state) & ((n as u64) - 1))
+                .expect("masked value is < n <= 256, fits usize");
             if occupied[candidate] == want {
                 break candidate;
             }
