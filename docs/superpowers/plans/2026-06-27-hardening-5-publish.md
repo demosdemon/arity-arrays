@@ -111,7 +111,7 @@ are **not yet guaranteed stable**: they may change before `1.0` if a production
 consumer's encoding needs differ. The `Compact` form is backing-independent — it
 is identical whether the arity-256 backing is the custom `U256` or `ethnum::U256`.
 
-[`Compact`]: https://docs.rs/arity-arrays
+[`Compact`]: https://docs.rs/arity-arrays/latest/arity_arrays/struct.Compact.html
 ```
 
 - [ ] **Step 4: Verify the READMEs render and the workspace docs build**
@@ -120,7 +120,7 @@ Run:
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 # Markdown sanity: the new tables have a blank line before them and License stays last.
-grep -n '## Cargo features\|## `no_std`\|## License' crates/*/README.md
+grep -nE '## Cargo features|## `no_std`|## License' crates/*/README.md
 # The docs job still builds clean (READMEs are not doctested, but confirm no doc regressions):
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 ```
@@ -201,8 +201,9 @@ Run:
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 test -f CHANGELOG.md && head -5 CHANGELOG.md
+grep -nE '## \[0.1.0\]|### `arity-(index|bitmap|arrays)`' CHANGELOG.md
 ```
-Expected: the file exists and starts with `# Changelog`.
+Expected: the file exists and starts with `# Changelog`; the second grep shows the `## [0.1.0]` heading and all three `### \`arity-*\`` sub-sections (catches a truncated/mis-pasted body).
 
 - [ ] **Step 3: Commit**
 
@@ -226,14 +227,16 @@ Run `cargo publish --dry-run` in dependency order, re-confirm the CI runner imag
 
 - [ ] **Step 1: Dry-run publish each crate in dependency order**
 
-The working tree must be clean first (commit Tasks 1–2). Run:
+The working tree must be clean first (commit Tasks 1–2). Run the **workspace** dry-run as a single command:
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-cargo publish --dry-run -p arity-index
-cargo publish --dry-run -p arity-bitmap
-cargo publish --dry-run -p arity-arrays
+cargo publish --dry-run --workspace
 ```
-Expected: each `--dry-run` packages and verify-builds the crate with no errors. (`--dry-run` uses the workspace path for the inter-crate deps, so it does not require the dependency to already be on crates.io; the real publish must still go in this order.) If a dry-run reports an error (missing metadata, an uncommitted change, a packaging problem), capture it verbatim — it is a real publish blocker.
+Expected: cargo packages, verify-builds, and dry-run-"uploads" all three crates with no errors (each ends in `warning: aborting upload due to dry run`).
+
+> Do **not** use the per-crate form `cargo publish --dry-run -p arity-bitmap` — it FAILS with `error: ... no matching package named \`arity-index\` found`, because a dependent crate's packaging step resolves its `arity-index = "0.1.0"` dependency against crates.io, where it is not yet published. (`--no-verify` does **not** fix this — the failure is in packaging, not the verify build.) The workspace form (`cargo publish --workspace`, stabilized in Rust 1.89, available on the MSRV-1.92 toolchain) resolves the inter-crate deps within the publish set and is the correct way to dry-run an unpublished workspace. This was verified to succeed on this workspace.
+
+If the dry-run reports an error (missing metadata, an uncommitted change, a packaging problem), capture it verbatim — it is a real publish blocker.
 
 - [ ] **Step 2: Re-confirm the CI runner image labels still exist**
 
@@ -249,21 +252,21 @@ Confirm the workspace is green across the gates the publish depends on:
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 cargo +nightly fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo +stable clippy --workspace --all-targets --all-features -- -D warnings   # CI lints on +stable
 cargo test --workspace --all-features
 cargo test --workspace            # default features (custom U256 backing)
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 ```
-Expected: all green.
+Expected: all green. (The Miri and fuzz jobs are slow and not part of this local fast suite — they run in CI; the maintainer confirms them on the pushed branch.)
 
-- [ ] **Step 4: Write the pre-publish checklist to the report**
+- [ ] **Step 4: Write the verification report**
 
-Record, in the report file, a checklist for the maintainer's out-of-band publish:
-- [ ] all three `cargo publish --dry-run` clean (Step 1);
+Create `docs/superpowers/2026-06-27-prepublish-verification.md`. Open it with the captured output from Steps 1–3 — the workspace dry-run pass/fail lines verbatim, the runner-label confirmation (or the flagged discrepancy), and the fast-suite results — then append this checklist for the maintainer's out-of-band publish:
+- [ ] `cargo publish --dry-run --workspace` clean for all three crates (Step 1);
 - [ ] CI runner labels confirmed valid, or the discrepancy flagged (Step 2);
 - [ ] local fmt/clippy/test/doc green (Step 3);
 - [ ] CI green on the pushed branch (the maintainer confirms on GitHub — includes the Miri and fuzz jobs, which are not part of the fast local suite);
-- [ ] publish order: `cargo publish -p arity-index`, then `-p arity-bitmap`, then `-p arity-arrays`, each after the previous lands on crates.io;
+- [ ] publish: `cargo publish --workspace` (atomic — publishes the three crates in dependency order in one command), or, if publishing individually, `cargo publish -p arity-index` then `-p arity-bitmap` then `-p arity-arrays`, each after the previous lands on crates.io;
 - [ ] tag `v0.1.0`.
 
 - [ ] **Step 5: Commit the verification report into the repo for the record**
