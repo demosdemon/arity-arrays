@@ -40,5 +40,18 @@ miri pkg='':
     MIRIFLAGS="{{ miri_flags }}" PROPTEST_CASES={{ proptest_cases }} \
         cargo +nightly miri test {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}
 
+# Install the pinned developer tooling (cargo subtools + just) via mise.
+setup:
+    mise install
+
+# Build/lint the crates under representative feature subsets (mirrors CI `features`).
+# Library/lints only — NOT tests. The test suite references types from several
+# arities at once, so it compiles and runs only with the default (all-arity)
+# feature set; run `just test`, not a per-arity `cargo test`.
+features:
+    cargo clippy --workspace --no-default-features --features 16 -- -D warnings
+    cargo clippy --workspace --no-default-features --features 256 -- -D warnings
+    cargo clippy --workspace --no-default-features -- -D warnings
+
 # Run the fast checks (everything except the slow Miri pass).
-ci: fmt-check lint test doc
+ci: fmt-check lint features test doc

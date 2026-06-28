@@ -1,0 +1,13 @@
+# Pinned developer tooling shared by the `just` recipes and CI.
+#
+# Install everything locally with `mise install` (or `just setup`).
+# CI installs the Rust toolchains via dtolnay/rust-toolchain (the stable/nightly/
+# MSRV matrix); this manifest covers the auxiliary cargo tools those toolchains
+# drive. CI jobs that need these tools install them via jdx/mise-action (added by
+# the plans that introduce the tools — cargo-fuzz in the mutation plan,
+# cargo-insta in the serde plan).
+[tools]
+just = "latest"
+"cargo:cargo-nextest" = "latest"
+"cargo:cargo-fuzz" = "latest"
+"cargo:cargo-insta" = "latest"
