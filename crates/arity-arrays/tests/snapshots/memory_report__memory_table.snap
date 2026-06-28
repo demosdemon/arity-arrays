@@ -1,0 +1,26 @@
+---
+source: crates/arity-arrays/tests/memory_report.rs
+expression: table
+---
+Exact bytes (handle + heap). PackedArray heap = bitmap + occupancy × size_of::<T> + padding. FixedArray and Box are occupancy-independent. Maps (BTreeMap/HashMap) are omitted: their heap use is impl-defined per-entry overhead, not an analytic function.
+
+### Cell A — Arity16 + [u8; 32]
+
+| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |
+|----------:|------------:|-----------:|-----------------:|
+| 0 | 8 | 528 | 544 |
+| 1 | 42 | 528 | 544 |
+| 4 | 138 | 528 | 544 |
+| 8 | 266 | 528 | 544 |
+| 16 | 522 | 528 | 544 |
+
+### Cell B — Arity256 + u64
+
+| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |
+|----------:|------------:|-----------:|-----------------:|
+| 0 | 8 | 4096 | 4112 |
+| 1 | 56 | 4096 | 4112 |
+| 16 | 168 | 4096 | 4112 |
+| 64 | 552 | 4096 | 4112 |
+| 128 | 1064 | 4096 | 4112 |
+| 256 | 2088 | 4096 | 4112 |
