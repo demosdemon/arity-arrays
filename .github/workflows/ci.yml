@@ -112,7 +112,13 @@ jobs:
           restore-keys: fuzz-corpus-packed_ops-
       # Smoke-level fuzzing: a fixed wall-clock budget catches regressions
       # without unbounded CI cost. Deeper soaks run out-of-band.
-      - run: cargo +nightly fuzz run packed_ops -- -max_total_time=60 -rss_limit_mb=4096
+      #
+      # Pin --target to the gnu host triple. cargo-fuzz defaults --target to the
+      # triple it was *built* for (a compile-time constant), and the prebuilt
+      # binstall binary is musl. Without this, the fuzz target builds for
+      # x86_64-unknown-linux-musl, where ASAN cannot link against static musl
+      # libc and the musl std is not installed.
+      - run: cargo +nightly fuzz run packed_ops --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
 
   msrv:
     runs-on: ubuntu-26.04
