@@ -81,5 +81,5 @@ Before issuing `cargo publish --workspace`:
 - [x] CI runner labels confirmed valid against the current runner-images catalog (Step 2 above)
 - [x] Local fmt / clippy / test / doc green (Step 3 above)
 - [ ] CI green on the pushed branch — confirm on GitHub (includes Miri and fuzz jobs, which are not part of the fast local suite)
-- [ ] Publish: `cargo publish --workspace` (atomic — publishes the three crates in dependency order in a single command), **or** if publishing individually: `cargo publish -p arity-index`, then `cargo publish -p arity-bitmap`, then `cargo publish -p arity-arrays` — each after the previous has landed on crates.io
+- [ ] Publish: `cargo publish --workspace` (sequential in dependency order — publishes arity-index, then arity-bitmap, then arity-arrays; a failure after the first upload leaves the earlier crates live on crates.io), **or** if publishing individually: `cargo publish -p arity-index`, then `cargo publish -p arity-bitmap`, then `cargo publish -p arity-arrays` — each after the previous has landed on crates.io
 - [ ] Tag `v0.1.0`

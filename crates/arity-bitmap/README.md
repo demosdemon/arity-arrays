@@ -32,7 +32,7 @@ assert_eq!(set, vec![1, 4, 9]);
 | `std` | | Forwards `std`; the crate is `no_std`-first. |
 
 The arity features are **additive**. The test suite runs only under the default
-(all-arity) feature set.
+(all-arity) feature set — run `cargo test`, not a per-arity `cargo test`.
 
 ### The 256-bit backing is opaque
 

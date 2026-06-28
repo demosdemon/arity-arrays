@@ -266,7 +266,7 @@ Create `docs/superpowers/2026-06-27-prepublish-verification.md`. Open it with th
 - [ ] CI runner labels confirmed valid, or the discrepancy flagged (Step 2);
 - [ ] local fmt/clippy/test/doc green (Step 3);
 - [ ] CI green on the pushed branch (the maintainer confirms on GitHub — includes the Miri and fuzz jobs, which are not part of the fast local suite);
-- [ ] publish: `cargo publish --workspace` (atomic — publishes the three crates in dependency order in one command), or, if publishing individually, `cargo publish -p arity-index` then `-p arity-bitmap` then `-p arity-arrays`, each after the previous lands on crates.io;
+- [ ] publish: `cargo publish --workspace` (sequential in dependency order — publishes arity-index, then arity-bitmap, then arity-arrays; a failure after the first upload leaves the earlier crates live on crates.io), or, if publishing individually, `cargo publish -p arity-index` then `-p arity-bitmap` then `-p arity-arrays`, each after the previous lands on crates.io;
 - [ ] tag `v0.1.0`.
 
 - [ ] **Step 5: Commit the verification report into the repo for the record**
