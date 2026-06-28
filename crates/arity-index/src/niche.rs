@@ -47,6 +47,13 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
 
 /// Generates a niche integer newtype `$name` over a fieldless enum `$repr` with
 /// `$count == 2^$bits` variants.
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128"
+))]
 macro_rules! niche_int {
     ($name:ident, $repr:ident, $bits:literal, $count:literal) => {
         ::seq_macro::seq!(N in 0..$count {
@@ -213,14 +220,21 @@ macro_rules! niche_int {
     };
 }
 
+#[cfg(feature = "8")]
 niche_int!(U3, Repr3, 3, 8);
+#[cfg(feature = "16")]
 niche_int!(U4, Repr4, 4, 16);
+#[cfg(feature = "32")]
 niche_int!(U5, Repr5, 5, 32);
+#[cfg(feature = "64")]
 niche_int!(U6, Repr6, 6, 64);
+#[cfg(feature = "128")]
 niche_int!(U7, Repr7, 7, 128);
 
+#[cfg(feature = "256")]
 impl Sealed for u8 {}
 
+#[cfg(feature = "256")]
 impl Niche for u8 {
     const COUNT: usize = 256;
 
