@@ -28,10 +28,12 @@
 
 mod iter;
 mod native;
+#[cfg(feature = "256")]
 mod u256;
 
 use arity_index::Niche;
 pub use iter::BitIter;
+#[cfg(feature = "256")]
 pub use u256::U256;
 
 /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.

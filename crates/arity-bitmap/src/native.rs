@@ -1,19 +1,59 @@
 //! `Bitmap`/`Raw` impls for the native unsigned integers `u8`..`u128`.
 
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128"
+))]
 use arity_index::Niche;
+#[cfg(feature = "8")]
 use arity_index::U3;
+#[cfg(feature = "16")]
 use arity_index::U4;
+#[cfg(feature = "32")]
 use arity_index::U5;
+#[cfg(feature = "64")]
 use arity_index::U6;
+#[cfg(feature = "128")]
 use arity_index::U7;
 
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128"
+))]
 use crate::Bitmap;
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128"
+))]
 use crate::Raw;
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128"
+))]
 use crate::Sealed;
 
 /// Implements `Sealed` + `Raw` + `Bitmap` for a native unsigned integer `$ty`
 /// (width `$width`) indexed by niche type `$idx` (with `$idx::COUNT ==
 /// $width`).
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128"
+))]
 macro_rules! impl_native_bitmap {
     ($ty:ty, $idx:ty, $width:literal) => {
         // Wire-up invariant: the index domain must equal the bit width.
@@ -96,10 +136,15 @@ macro_rules! impl_native_bitmap {
     };
 }
 
+#[cfg(feature = "8")]
 impl_native_bitmap!(u8, U3, 8);
+#[cfg(feature = "16")]
 impl_native_bitmap!(u16, U4, 16);
+#[cfg(feature = "32")]
 impl_native_bitmap!(u32, U5, 32);
+#[cfg(feature = "64")]
 impl_native_bitmap!(u64, U6, 64);
+#[cfg(feature = "128")]
 impl_native_bitmap!(u128, U7, 128);
 
 #[cfg(test)]
