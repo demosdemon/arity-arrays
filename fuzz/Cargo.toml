@@ -27,6 +27,41 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "mutation_8"
+path = "fuzz_targets/mutation_8.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mutation_32"
+path = "fuzz_targets/mutation_32.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mutation_64"
+path = "fuzz_targets/mutation_64.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mutation_128"
+path = "fuzz_targets/mutation_128.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mutation_256"
+path = "fuzz_targets/mutation_256.rs"
+test = false
+doc = false
+bench = false
+
 # Build the fuzz target with debug assertions and overflow checks on.
 [profile.release]
 debug = true
