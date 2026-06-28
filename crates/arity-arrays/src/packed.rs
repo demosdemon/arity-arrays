@@ -198,6 +198,21 @@ impl<T, A: Arity> PackedArray<T, A> {
         self.bitmap().count_ones() as usize
     }
 
+    /// Returns the number of heap bytes this array currently owns: `0` when
+    /// empty, otherwise the exact size of the block holding the present
+    /// elements (the `bitmap` header plus `count` elements, padded to
+    /// alignment). Equals `bitmap + occupancy × size_of::<T>` plus header
+    /// padding; the only allocation the type ever makes.
+    #[must_use]
+    pub fn allocated_size(&self) -> usize {
+        self.0.map_or(0, |ptr| {
+            // SAFETY: `Some` ↔ a live allocation with an initialised bitmap, sized
+            // by `alloc_layout::<A, T>(count)`.
+            let count = unsafe { ptr.as_ref().bitmap }.count_ones() as usize;
+            alloc_layout::<A, T>(count).size()
+        })
+    }
+
     /// Returns `true` if there are no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -1198,5 +1213,35 @@ mod tests {
         assert_eq!(z.remove(U4::new_masked(0)), Some(()));
         assert_eq!(z.count(), 1);
         assert_eq!(z.get(U4::new_masked(3)), Some(&()));
+    }
+
+    #[test]
+    fn allocated_size_empty_is_zero() {
+        let p = PackedArray::<[u8; 32], Arity16>::new();
+        assert_eq!(p.allocated_size(), 0);
+    }
+
+    #[test]
+    fn allocated_size_matches_layout() {
+        // Inner<Arity16, [u8; 32]> = u16 bitmap (2 bytes, align 2) followed by the
+        // element array (align 1). For `count` elements the padded block is
+        // `2 + 32 * count`, which stays a multiple of 2.
+        let mut p = PackedArray::<[u8; 32], Arity16>::new();
+        for i in 0..3u8 {
+            p.insert(U4::new_masked(i), [i; 32]);
+        }
+        assert_eq!(p.allocated_size(), 2 + 32 * 3);
+        // Cross-check against the private layout helper in this module.
+        assert_eq!(p.allocated_size(), alloc_layout::<Arity16, [u8; 32]>(3).size());
+    }
+
+    #[test]
+    fn allocated_size_zst_is_header_only() {
+        // A zero-sized element contributes no element bytes; at any non-zero
+        // occupancy the block is just the `Inner` header.
+        let mut p = PackedArray::<(), Arity16>::new();
+        p.insert(U4::new_masked(0), ());
+        p.insert(U4::new_masked(5), ());
+        assert_eq!(p.allocated_size(), core::mem::size_of::<u16>());
     }
 }
