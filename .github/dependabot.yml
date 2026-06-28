@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Bundle every action bump into one PR per week instead of a PR per action.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
