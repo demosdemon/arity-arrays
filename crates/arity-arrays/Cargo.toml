@@ -9,6 +9,7 @@ license.workspace = true
 rust-version.workspace = true
 description = "Fixed and pointer-sized heap-packed arrays over a generic arity, indexed without bounds checks"
 readme = "README.md"
+autobenches = false
 keywords = ["array", "sparse", "packed", "trie", "no-std"]
 categories = ["no-std", "data-structures", "memory-management"]
 
@@ -36,7 +37,12 @@ std = ["serde?/std", "serde_with?/std", "arity-index/std", "arity-bitmap/std"]
 workspace = true
 
 [dev-dependencies]
+divan = "0.1.21"
 insta = "1.48.0"
 proptest = "1.11.0"
 serde_json = "1"
 serde_with = { version = "3.21", features = ["macros"] }
+
+[[bench]]
+name = "throughput"
+harness = false
