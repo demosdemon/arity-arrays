@@ -1,0 +1,38 @@
+//! `serde_with::Compact` round-trip + adversarial-decode tests.
+#![cfg(feature = "serde_with")]
+
+use arity_arrays::index::U4;
+use arity_arrays::{Arity16, Compact, PackedArray};
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+
+#[serde_as]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct Node {
+    #[serde_as(as = "Compact")]
+    children: PackedArray<u16, Arity16>,
+}
+
+#[test]
+fn compact_round_trip() {
+    let mut children = PackedArray::<u16, Arity16>::new();
+    children.insert(U4::new_masked(2), 20);
+    children.insert(U4::new_masked(9), 90);
+    let node = Node { children };
+
+    let json = serde_json::to_string(&node).expect("ser");
+    // bitmap = bits 2 and 9 set = 0x0204, little-endian bytes [4, 2]; values [20, 90].
+    assert_eq!(json, r#"{"children":[[4,2],[20,90]]}"#);
+    let back: Node = serde_json::from_str(&json).expect("de");
+    assert_eq!(node, back);
+}
+
+#[test]
+fn compact_rejects_popcount_mismatch() {
+    // bitmap [4,2] has popcount 2, but only one value is supplied.
+    let bad = r#"{"children":[[4,2],[20]]}"#;
+    assert!(serde_json::from_str::<Node>(bad).is_err());
+    // wrong-length bitmap (BYTES must be 2 for Arity16).
+    let bad_len = r#"{"children":[[4,2,0],[20,90]]}"#;
+    assert!(serde_json::from_str::<Node>(bad_len).is_err());
+}
