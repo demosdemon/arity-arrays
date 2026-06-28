@@ -215,16 +215,22 @@ impl<T, A: Arity> Default for FixedArray<Option<T>, A> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "8")]
     use arity_index::U3;
+    #[cfg(feature = "16")]
     use arity_index::U4;
 
     use super::*;
+    #[cfg(feature = "8")]
     use crate::Arity8;
+    #[cfg(feature = "16")]
     use crate::Arity16;
 
     extern crate alloc;
+    #[cfg(any(feature = "8", feature = "16"))]
     use alloc::vec::Vec;
 
+    #[cfg(feature = "16")]
     #[test]
     fn from_fn_and_get() {
         let a = FixedArray::<u8, Arity16>::from_fn(U4::as_u8);
@@ -232,6 +238,7 @@ mod tests {
         assert_eq!(*a.get(U4::new_masked(15)), 15);
     }
 
+    #[cfg(feature = "8")]
     #[test]
     fn get_mut_and_replace() {
         let mut a = FixedArray::<u8, Arity8>::from_fn(|_| 0);
@@ -242,6 +249,7 @@ mod tests {
         assert_eq!(*a.get(U3::new_masked(2)), 7);
     }
 
+    #[cfg(feature = "16")]
     #[test]
     fn index_ops_and_deref() {
         let mut a = FixedArray::<u8, Arity16>::from_fn(U4::as_u8);
@@ -253,6 +261,7 @@ mod tests {
         assert_eq!(a.iter().copied().max(), Some(99));
     }
 
+    #[cfg(feature = "8")]
     #[test]
     fn into_iter_pairs_with_index() {
         let a = FixedArray::<u8, Arity8>::from_fn(|i| i.as_u8() * 2);
@@ -272,6 +281,7 @@ mod tests {
         assert_eq!(last, Some((7, 14)));
     }
 
+    #[cfg(feature = "8")]
     #[test]
     fn map_threads_index() {
         let a = FixedArray::<u8, Arity8>::from_fn(|_| 1);
@@ -280,6 +290,7 @@ mod tests {
         assert_eq!(got, alloc::vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
+    #[cfg(feature = "16")]
     #[test]
     fn option_new_count_take() {
         let mut a = FixedArray::<Option<u8>, Arity16>::new();
@@ -292,6 +303,7 @@ mod tests {
         assert_eq!(a.take(U4::new_masked(1)), None);
     }
 
+    #[cfg(feature = "16")]
     #[test]
     fn option_iter_present_ascending() {
         let mut a = FixedArray::<Option<u8>, Arity16>::new();
@@ -301,6 +313,7 @@ mod tests {
         assert_eq!(got, alloc::vec![(3, 3), (11, 11)]);
     }
 
+    #[cfg(feature = "16")]
     #[test]
     fn option_take_only_child() {
         let mut a = FixedArray::<Option<u8>, Arity16>::new();
@@ -317,6 +330,7 @@ mod tests {
         assert_eq!(a.count(), 2);
     }
 
+    #[cfg(feature = "8")]
     #[test]
     fn clone_eq_and_ord() {
         let a = FixedArray::<u8, Arity8>::from_fn(U3::as_u8);
@@ -331,6 +345,7 @@ mod tests {
         assert_eq!(a.cmp(&b), core::cmp::Ordering::Equal);
     }
 
+    #[cfg(feature = "8")]
     #[test]
     fn debug_renders_elements() {
         let a = FixedArray::<u8, Arity8>::from_fn(U3::as_u8);
@@ -339,6 +354,7 @@ mod tests {
         assert!(s.contains('0') && s.contains('7'));
     }
 
+    #[cfg(feature = "8")]
     #[test]
     fn hash_matches_for_equal_arrays() {
         extern crate std;

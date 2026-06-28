@@ -4,12 +4,26 @@
 use arity_bitmap::Bitmap;
 use arity_index::Niche;
 use hybrid_array::ArraySize;
+#[cfg(feature = "8")]
 use hybrid_array::typenum::U8;
+#[cfg(feature = "16")]
 use hybrid_array::typenum::U16;
+#[cfg(feature = "32")]
 use hybrid_array::typenum::U32;
+#[cfg(feature = "64")]
 use hybrid_array::typenum::U64;
+#[cfg(feature = "128")]
 use hybrid_array::typenum::U128;
+#[cfg(feature = "256")]
 use hybrid_array::typenum::U256;
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128",
+    feature = "256"
+))]
 use hybrid_array::typenum::Unsigned;
 
 /// A power-of-two arity (8, 16, 32, 64, 128, or 256) that ties together a niche
@@ -32,6 +46,14 @@ pub trait Arity: crate::Sealed {
     type Size: ArraySize;
 }
 
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128",
+    feature = "256"
+))]
 macro_rules! arity {
     ($name:ident, $len:literal, $index:ty, $bitmap:ty, $size:ty) => {
         #[doc = concat!("Arity ", stringify!($len), ".")]
@@ -53,11 +75,17 @@ macro_rules! arity {
     };
 }
 
+#[cfg(feature = "8")]
 arity!(Arity8, 8, arity_index::U3, u8, U8);
+#[cfg(feature = "16")]
 arity!(Arity16, 16, arity_index::U4, u16, U16);
+#[cfg(feature = "32")]
 arity!(Arity32, 32, arity_index::U5, u32, U32);
+#[cfg(feature = "64")]
 arity!(Arity64, 64, arity_index::U6, u64, U64);
+#[cfg(feature = "128")]
 arity!(Arity128, 128, arity_index::U7, u128, U128);
+#[cfg(feature = "256")]
 arity!(Arity256, 256, u8, arity_bitmap::U256, U256);
 
 #[cfg(test)]
@@ -66,12 +94,19 @@ mod tests {
 
     #[test]
     fn wiring_constants() {
+        #[cfg(feature = "8")]
         assert_eq!(Arity8::LEN, 8);
+        #[cfg(feature = "16")]
         assert_eq!(Arity16::LEN, 16);
+        #[cfg(feature = "256")]
         assert_eq!(Arity256::LEN, 256);
+        #[cfg(feature = "16")]
         assert_eq!(<Arity16 as Arity>::Size::USIZE, 16);
+        #[cfg(feature = "16")]
         assert_eq!(<<Arity16 as Arity>::Index as Niche>::COUNT, 16);
+        #[cfg(feature = "16")]
         assert_eq!(<<Arity16 as Arity>::Bitmap as Bitmap>::WIDTH, 16);
+        #[cfg(feature = "256")]
         assert_eq!(<<Arity256 as Arity>::Index as Niche>::COUNT, 256);
     }
 }

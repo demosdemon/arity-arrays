@@ -13,9 +13,18 @@ keywords = ["array", "sparse", "packed", "trie", "no-std"]
 categories = ["no-std", "data-structures", "memory-management"]
 
 [dependencies]
-arity-bitmap.workspace = true
-arity-index.workspace = true
+arity-bitmap = { workspace = true, default-features = false }
+arity-index = { workspace = true, default-features = false }
 hybrid-array = "0.4.12"
+
+[features]
+default = ["8", "16", "32", "64", "128", "256"]
+"8" = ["arity-index/8", "arity-bitmap/8"]
+"16" = ["arity-index/16", "arity-bitmap/16"]
+"32" = ["arity-index/32", "arity-bitmap/32"]
+"64" = ["arity-index/64", "arity-bitmap/64"]
+"128" = ["arity-index/128", "arity-bitmap/128"]
+"256" = ["arity-index/256", "arity-bitmap/256"]
 
 [lints]
 workspace = true
