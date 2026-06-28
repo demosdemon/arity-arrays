@@ -8,7 +8,7 @@ use crate::Sealed;
 
 /// A 256-bit bitmap: bit `i` lives in `lo` for `i < 128`, else in `hi` at
 /// `i - 128`. Only the [`Bitmap`] surface is implemented (no arithmetic).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct U256 {
     lo: u128,
     hi: u128,
@@ -261,6 +261,37 @@ mod tests {
         // bit 128 is the lowest bit of the high limb -> first byte of the second half.
         assert_eq!(buf[16], 0b0000_0001);
         assert_eq!(<U256 as Bitmap>::from_le_bytes(&buf), bm);
+    }
+
+    #[test]
+    fn u256_is_hash() {
+        use core::hash::{Hash, Hasher};
+
+        // Minimal no_std hasher: XOR-folds written bytes.
+        #[derive(Default)]
+        struct XorHasher(u64);
+        impl Hasher for XorHasher {
+            fn finish(&self) -> u64 {
+                self.0
+            }
+            fn write(&mut self, bytes: &[u8]) {
+                for &b in bytes {
+                    self.0 = self.0.rotate_left(8) ^ u64::from(b);
+                }
+            }
+        }
+
+        fn hash_of(v: U256) -> u64 {
+            let mut h = XorHasher::default();
+            v.hash(&mut h);
+            h.finish()
+        }
+
+        let a = U256::ZERO.with_bit(3).with_bit(200);
+        let b = U256::ZERO.with_bit(3).with_bit(200);
+        let c = U256::ZERO.with_bit(4);
+        assert_eq!(hash_of(a), hash_of(b)); // equal values hash equally
+        assert_ne!(hash_of(a), hash_of(c)); // different values differ here
     }
 
     extern crate alloc;
