@@ -59,3 +59,14 @@ ci: fmt-check lint features test doc
 # Run a fuzz target on the host (omit the CI-only gnu target pin). Default 60s.
 fuzz target time="60":
     cargo +nightly fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
+
+# Run a fuzz target inside a host-native Linux container (faithful glibc + ASAN
+# + libFuzzer). Builds the image on first use. Never forces emulation: amd64
+# under qemu aborts in ASAN. Default 60s.
+fuzz-linux target time="60":
+    docker build -q -f fuzz/Dockerfile -t arity-arrays-fuzz fuzz
+    docker run --rm \
+      -v {{justfile_directory()}}:/src \
+      -v arity-arrays-fuzz-registry:/usr/local/cargo/registry \
+      -w /src/fuzz arity-arrays-fuzz \
+      cargo fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
