@@ -24,6 +24,29 @@ let present: Vec<(u8, u32)> =
 assert_eq!(present, vec![(1, 10), (9, 90)]);
 ```
 
+## Cargo features
+
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| `8`, `16`, `32`, `64`, `128`, `256` | ✓ | Per-arity gating — compile only the `Arity{N}` markers you use. Forwards to the matching `arity-index`/`arity-bitmap` features. The hexary (firewood) shape is `default-features = false, features = ["16"]`. |
+| `serde` | | `Serialize`/`Deserialize` for `FixedArray` (a sequence of `LEN` elements) and `PackedArray` (a sequence of ascending `(index, value)` pairs, validated on decode). |
+| `serde_with` | | Adds the [`Compact`] adapter (`#[serde_as(as = "Compact")]`) — a compact, backing-independent `PackedArray` encoding (fixed little-endian bitmap + dense values). Implies `serde`. |
+| `ethnum` | | Forwards to `arity-bitmap/ethnum` (the arity-256 backing swap). |
+| `std` | | Forwards `std` to the optional std-capable dependencies; the crate is `no_std` + `alloc`. |
+
+The arity features are **additive**. The test suite runs only under the default
+(all-arity) feature set — run `cargo test`, not a per-arity `cargo test`.
+
+### Serialization stability
+
+The serde wire formats (the logical `(index, value)` form and the `Compact`
+form) are locked by snapshot tests so any drift is a reviewable diff, but they
+are **not yet guaranteed stable**: they may change before `1.0` if a production
+consumer's encoding needs differ. The `Compact` form is backing-independent — it
+is identical whether the arity-256 backing is the custom `U256` or `ethnum::U256`.
+
+[`Compact`]: https://docs.rs/arity-arrays/latest/arity_arrays/struct.Compact.html
+
 ## `no_std`
 
 This crate is `#![no_std]` but requires `alloc` (heap allocation for `PackedArray`).
