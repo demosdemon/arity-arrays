@@ -1,8 +1,8 @@
 //! [`Compact`]: a `serde_with` adapter that serializes a [`PackedArray`] as a
 //! fixed-width little-endian bitmap plus its dense values — a compact,
 //! backing-independent wire form (the bitmap goes through
-//! [`Bitmap::to_le_bytes`](arity_bitmap::Bitmap::to_le_bytes), so it is identical
-//! for the custom and `ethnum` 256-bit backings).
+//! [`Bitmap::to_le_bytes`](arity_bitmap::Bitmap::to_le_bytes), so it is
+//! identical for the custom and `ethnum` 256-bit backings).
 
 extern crate alloc;
 

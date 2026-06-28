@@ -406,18 +406,21 @@ Expected: matches only inside `mod custom` (the impl and its `from_le_bytes` cal
 
 - [ ] **Step 4: Verify both backings pass the same tests + clippy**
 
-Run:
+Run (consistent with the plan-2 decision — tests run only under the all-arity
+feature set, and isolated/lean configs are checked at the **library** level with
+`clippy` minus `--all-targets`, never `cargo test`):
 ```bash
-# Custom backing (default):
-cargo test -p arity-bitmap --features 256
-cargo clippy -p arity-bitmap --all-targets --features 256 -- -D warnings
-# ethnum backing:
-cargo test -p arity-bitmap --no-default-features --features "256,ethnum"
-cargo clippy -p arity-bitmap --all-targets --no-default-features --features "256,ethnum" -- -D warnings
-# Full default + ethnum:
+# Custom backing, all arities (default):
+cargo test -p arity-bitmap
+cargo clippy -p arity-bitmap --all-targets -- -D warnings
+# ethnum backing tested with all native arities present:
 cargo test -p arity-bitmap --features ethnum
+cargo clippy -p arity-bitmap --all-targets --features ethnum -- -D warnings
+# Isolated ethnum-only config: library compiles and lints clean (NOT --all-targets;
+# the cross-arity test modules compile only under the all-arity default).
+cargo clippy -p arity-bitmap --no-default-features --features "256,ethnum" -- -D warnings
 ```
-Expected: all green. The same `mod tests` passes under both backings (behavioral parity across the swap). If `trailing_zeros`/`leading_zeros` are not `const`, that is fine — they are used in non-const methods only.
+Expected: all green. The same `mod tests` passes under both backings (behavioral parity across the swap — `cargo test --features ethnum` runs the U256 test module against `ethnum::U256`). Do **not** add `#[cfg]` to test modules or `[[test]] required-features` to make a partial-feature `cargo test` compile — that is the declined option from plan 2. If `trailing_zeros`/`leading_zeros` are not `const`, that is fine — they are used in non-const methods only.
 
 - [ ] **Step 5: Commit**
 
@@ -888,11 +891,13 @@ Run:
 ```bash
 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-# ethnum backing column:
-cargo test -p arity-arrays --no-default-features --features "256,ethnum,serde_with,std"
+# Isolated ethnum + compact serde + std config: LIBRARY-level clippy only
+# (no --all-targets / no cargo test — the cross-arity test modules run only
+# under the all-arity default, per the plan-2 decision):
+cargo clippy --workspace --no-default-features --features "256,ethnum,serde_with,std" -- -D warnings
 cargo build --workspace --no-default-features --features "16,serde"
 ```
-Expected: all green. `--all-features` enables every arity + `ethnum` + `serde_with` + `std` together (confirms `ethnum::U256` and the serde stack compose).
+Expected: all green. `--all-features` enables every arity + `ethnum` + `serde_with` + `std` together (confirms `ethnum::U256` and the serde stack compose, and runs the full test suite incl. the ethnum backing).
 
 - [ ] **Step 6: Add the serde/ethnum columns to `.github/workflows/ci.yml`**
 

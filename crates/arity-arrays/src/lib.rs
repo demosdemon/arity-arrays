@@ -29,10 +29,10 @@
 extern crate alloc;
 
 pub mod arity;
-pub mod fixed;
-pub mod packed;
 #[cfg(feature = "serde_with")]
 mod compact;
+pub mod fixed;
+pub mod packed;
 
 pub use arity::Arity;
 #[cfg(feature = "8")]
@@ -49,10 +49,10 @@ pub use arity::Arity128;
 pub use arity::Arity256;
 pub use arity_bitmap as bitmap;
 pub use arity_index as index;
-pub use fixed::FixedArray;
-pub use packed::PackedArray;
 #[cfg(feature = "serde_with")]
 pub use compact::Compact;
+pub use fixed::FixedArray;
+pub use packed::PackedArray;
 
 /// Prevents downstream crates from implementing [`Arity`](crate::Arity).
 trait Sealed {}

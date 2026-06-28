@@ -1,8 +1,11 @@
 //! Logical serde round-trip + adversarial-decode tests.
 #![cfg(feature = "serde")]
 
+use arity_arrays::Arity16;
+use arity_arrays::Arity256;
+use arity_arrays::FixedArray;
+use arity_arrays::PackedArray;
 use arity_arrays::index::U4;
-use arity_arrays::{Arity16, Arity256, FixedArray, PackedArray};
 
 #[test]
 fn fixed_round_trip() {

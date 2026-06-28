@@ -1,9 +1,12 @@
 //! `serde_with::Compact` round-trip + adversarial-decode tests.
 #![cfg(feature = "serde_with")]
 
+use arity_arrays::Arity16;
+use arity_arrays::Compact;
+use arity_arrays::PackedArray;
 use arity_arrays::index::U4;
-use arity_arrays::{Arity16, Compact, PackedArray};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_with::serde_as;
 
 #[serde_as]
@@ -21,7 +24,8 @@ fn compact_round_trip() {
     let node = Node { children };
 
     let json = serde_json::to_string(&node).expect("ser");
-    // bitmap = bits 2 and 9 set = 0x0204, little-endian bytes [4, 2]; values [20, 90].
+    // bitmap = bits 2 and 9 set = 0x0204, little-endian bytes [4, 2]; values [20,
+    // 90].
     assert_eq!(json, r#"{"children":[[4,2],[20,90]]}"#);
     let back: Node = serde_json::from_str(&json).expect("de");
     assert_eq!(node, back);

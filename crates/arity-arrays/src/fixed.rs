@@ -108,8 +108,9 @@ impl<T: serde::Serialize, A: Arity> serde::Serialize for FixedArray<T, A> {
 #[cfg(feature = "serde")]
 impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for FixedArray<T, A> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let inner =
-            <hybrid_array::Array<T, A::Size> as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        let inner = <hybrid_array::Array<T, A::Size> as serde::Deserialize<'de>>::deserialize(
+            deserializer,
+        )?;
         Ok(Self(inner))
     }
 }

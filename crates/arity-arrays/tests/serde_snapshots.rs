@@ -2,8 +2,10 @@
 //! Compact bitmap encoding is backing-independent.
 #![cfg(feature = "serde_with")]
 
+use arity_arrays::Arity16;
+use arity_arrays::Compact;
+use arity_arrays::PackedArray;
 use arity_arrays::index::U4;
-use arity_arrays::{Arity16, Compact, PackedArray};
 use serde::Serialize;
 use serde_with::serde_as;
 
