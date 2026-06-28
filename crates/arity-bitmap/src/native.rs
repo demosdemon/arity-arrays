@@ -54,7 +54,6 @@ macro_rules! impl_native_bitmap {
         impl Bitmap for $ty {
             type Index = $idx;
             const WIDTH: usize = $width;
-            const BYTES: usize = $width / 8;
             const ZERO: Self = 0;
 
             fn is_zero(self) -> bool {

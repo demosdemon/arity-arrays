@@ -14,8 +14,8 @@ use crate::Niche;
 ///
 /// # Safety
 ///
-/// Internal invariant upheld by every method: the cursors `lo` and `hi` never
-/// exceed `N::COUNT`, and a value is only reconstructed from a cursor proven
+/// Internal invariant upheld by every method: the cursors `lo` and `hi` stay in
+/// `[0, N::COUNT - 1]`, and a value is only reconstructed from a cursor proven
 /// strictly `< N::COUNT` (`lo` when `lo < hi`, or `hi - 1` after a guarded
 /// decrement). The `unsafe { N::try_from_usize(..).unwrap_unchecked() }` in the
 /// iterator impls depends on this; any new method that mutates `lo`/`hi` must
