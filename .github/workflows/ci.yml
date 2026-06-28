@@ -98,8 +98,21 @@ jobs:
 
   fuzz:
     runs-on: ubuntu-26.04
-    # Don't burn a 60s fuzzer run on a tree the basic tests already reject.
+    # Don't burn a fuzzer run on a tree the basic tests already reject.
     needs: [test]
+    strategy:
+      # One target's crash must not cancel the others.
+      fail-fast: false
+      matrix:
+        target:
+          - mutation_8
+          - mutation_16
+          - mutation_32
+          - mutation_64
+          - mutation_128
+          - mutation_256
+          - compact_decode
+          - bitmap_roundtrip
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
@@ -111,12 +124,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      # Persist + grow the corpus across runs so later runs explore deeper.
+      # Persist + grow each target's corpus across runs so later runs explore
+      # deeper. Keyed per target so corpora do not collide.
       - uses: actions/cache@v6
         with:
-          path: fuzz/corpus/packed_ops
-          key: fuzz-corpus-packed_ops-${{ github.run_id }}
-          restore-keys: fuzz-corpus-packed_ops-
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
       # Smoke-level fuzzing: a fixed wall-clock budget catches regressions
       # without unbounded CI cost. Deeper soaks run out-of-band.
       #
@@ -125,7 +139,7 @@ jobs:
       # binstall binary is musl. Without this, the fuzz target builds for
       # x86_64-unknown-linux-musl, where ASAN cannot link against static musl
       # libc and the musl std is not installed.
-      - run: cargo +nightly fuzz run packed_ops --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
+      - run: cargo +nightly fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
 
   msrv:
     runs-on: ubuntu-26.04
