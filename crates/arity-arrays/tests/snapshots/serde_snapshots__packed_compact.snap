@@ -1,0 +1,5 @@
+---
+source: crates/arity-arrays/tests/serde_snapshots.rs
+expression: json
+---
+{"children":[[18,64],[11,44,14]]}

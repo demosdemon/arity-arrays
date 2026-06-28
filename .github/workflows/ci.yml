@@ -54,6 +54,10 @@ jobs:
       - run: cargo clippy --workspace --no-default-features --features 256 -- -D warnings
       # No arities selected: the crates still compile (empty of arity types), warning-free.
       - run: cargo clippy --workspace --no-default-features -- -D warnings
+      # Logical serde without serde_with (catches a misplaced serde_with cfg).
+      - run: cargo clippy --workspace --no-default-features --features "16,serde" -- -D warnings
+      # ethnum backing + compact serde + std together.
+      - run: cargo clippy --workspace --no-default-features --features "256,ethnum,serde_with,std" -- -D warnings
 
   miri:
     runs-on: ubuntu-26.04

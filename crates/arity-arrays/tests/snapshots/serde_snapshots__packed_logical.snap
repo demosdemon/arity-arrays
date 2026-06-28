@@ -1,0 +1,5 @@
+---
+source: crates/arity-arrays/tests/serde_snapshots.rs
+expression: json
+---
+[[1,11],[4,44],[14,14]]
