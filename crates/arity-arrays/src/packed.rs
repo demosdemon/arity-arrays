@@ -36,10 +36,10 @@ struct Inner<A: Arity, T> {
 /// Invariant upheld by every constructor and mutator: when `self.0` is
 /// `Some(ptr)`, `ptr` points to a live allocation from
 /// `alloc_layout::<A, T>(count)` whose `bitmap` field is initialised with
-/// `bitmap != A::Bitmap::ZERO`, and whose `count == bitmap.count_ones()` element
-/// slots are all initialised in ascending slot (rank) order. When `self.0` is
-/// `None`, there is no allocation. The `unsafe` reads throughout this module
-/// rely on this invariant.
+/// `bitmap != A::Bitmap::ZERO`, and whose `count == bitmap.count_ones()`
+/// element slots are all initialised in ascending slot (rank) order. When
+/// `self.0` is `None`, there is no allocation. The `unsafe` reads throughout
+/// this module rely on this invariant.
 pub struct PackedArray<T, A: Arity>(
     Option<NonNull<Inner<A, T>>>,
     PhantomData<alloc::boxed::Box<T>>,
@@ -53,7 +53,12 @@ type SizeWitness = crate::Arity8;
 type SizeWitness = crate::Arity16;
 #[cfg(all(not(feature = "8"), not(feature = "16"), feature = "32"))]
 type SizeWitness = crate::Arity32;
-#[cfg(all(not(feature = "8"), not(feature = "16"), not(feature = "32"), feature = "64"))]
+#[cfg(all(
+    not(feature = "8"),
+    not(feature = "16"),
+    not(feature = "32"),
+    feature = "64"
+))]
 type SizeWitness = crate::Arity64;
 #[cfg(all(
     not(feature = "8"),
@@ -82,8 +87,7 @@ type SizeWitness = crate::Arity256;
     feature = "256"
 ))]
 const _: () = assert!(
-    core::mem::size_of::<PackedArray<[u8; 32], SizeWitness>>()
-        == core::mem::size_of::<*const ()>()
+    core::mem::size_of::<PackedArray<[u8; 32], SizeWitness>>() == core::mem::size_of::<*const ()>()
 );
 
 /// Layout of the heap block for `count` elements: `Inner` header extended by a
@@ -274,8 +278,8 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// Inserts `value` at `index`, returning the previous value if the slot was
     /// already present (otherwise `None`).
     ///
-    /// On a new insertion the array reallocates to exactly hold one more element
-    /// (`O(count)` move). Overwriting a present slot is in place.
+    /// On a new insertion the array reallocates to exactly hold one more
+    /// element (`O(count)` move). Overwriting a present slot is in place.
     pub fn insert(&mut self, index: A::Index, value: T) -> Option<T> {
         let Some(ptr) = self.0 else {
             // Empty → fresh single-element block.
@@ -333,8 +337,8 @@ impl<T, A: Arity> PackedArray<T, A> {
 
     /// Removes and returns the element at `index`, or `None` if absent.
     ///
-    /// Reallocates to exactly hold one fewer element (`O(count)` move); removing
-    /// the last element deallocates and leaves the array empty.
+    /// Reallocates to exactly hold one fewer element (`O(count)` move);
+    /// removing the last element deallocates and leaves the array empty.
     pub fn remove(&mut self, index: A::Index) -> Option<T> {
         let ptr = self.0?;
         // SAFETY: `ptr` is valid per the type invariant.
@@ -344,37 +348,42 @@ impl<T, A: Arity> PackedArray<T, A> {
         }
         let rank = bm.rank(index) as usize;
         let old_count = bm.count_ones() as usize;
-        // SAFETY: `index` present ⇒ `rank < old_count`; `read` moves the element
-        // out (it is not dropped here — it is returned to the caller).
-        let removed = unsafe { data_ptr(ptr).add(rank).read() };
         let new_count = old_count - 1;
         if new_count == 0 {
             // Last element removed → deallocate, become empty (upholds
             // "allocated ⇒ bitmap != ZERO").
+            // SAFETY: `index` present ⇒ `rank < old_count`; `read` moves the sole
+            // element out (returned to the caller, not dropped here).
+            let removed = unsafe { data_ptr(ptr).add(rank).read() };
             // SAFETY: the sole element was moved out above; free the old block.
             unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
             self.0 = None;
-        } else {
-            let new_bm = bm.without_bit(index);
-            debug_assert_eq!(new_bm.count_ones() as usize, new_count);
-            // SAFETY: `new_count == new_bm.count_ones() > 0`; the two copies below
-            // initialise all `new_count` slots before any read.
-            let new_inner = unsafe { alloc_block::<A, T>(new_bm, new_count) };
-            // SAFETY: `ptr` is valid per the type invariant; base of `old_count`
-            // initialised elements.
-            let src = unsafe { data_ptr(ptr) };
-            // SAFETY: `new_inner` is freshly allocated; base of `new_count` slots.
-            let dst = unsafe { data_ptr(new_inner) };
-            // SAFETY: copy the survivors `[0, rank)` and `[rank+1, old_count)`
-            // around the already-read-out slot `rank`. Bitwise move, no drop.
-            unsafe {
-                core::ptr::copy_nonoverlapping(src, dst, rank);
-                core::ptr::copy_nonoverlapping(src.add(rank + 1), dst.add(rank), old_count - rank - 1);
-            }
-            // SAFETY: survivors moved, removed element read out; free the old block.
-            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
-            self.0 = Some(new_inner);
+            return Some(removed);
         }
+        let new_bm = bm.without_bit(index);
+        debug_assert_eq!(new_bm.count_ones() as usize, new_count);
+        // Allocate the new block BEFORE moving any element out, so there is no
+        // unwind window in which the moved-out slot could be double-dropped.
+        // SAFETY: `new_count == new_bm.count_ones() > 0`; the read + two copies
+        // below initialise all `new_count` slots before any read.
+        let new_inner = unsafe { alloc_block::<A, T>(new_bm, new_count) };
+        // SAFETY: `ptr` is valid per the type invariant; base of `old_count`
+        // initialised elements.
+        let src = unsafe { data_ptr(ptr) };
+        // SAFETY: `new_inner` is freshly allocated; base of `new_count` slots.
+        let dst = unsafe { data_ptr(new_inner) };
+        // SAFETY: `index` present ⇒ `rank < old_count`; `read` moves the removed
+        // element out (returned to the caller, not dropped here).
+        let removed = unsafe { src.add(rank).read() };
+        // SAFETY: copy the survivors `[0, rank)` and `[rank+1, old_count)` around
+        // the already-read-out slot `rank`. Bitwise move, no drop.
+        unsafe {
+            core::ptr::copy_nonoverlapping(src, dst, rank);
+            core::ptr::copy_nonoverlapping(src.add(rank + 1), dst.add(rank), old_count - rank - 1);
+        }
+        // SAFETY: survivors moved, removed element read out; free the old block.
+        unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+        self.0 = Some(new_inner);
         Some(removed)
     }
 }

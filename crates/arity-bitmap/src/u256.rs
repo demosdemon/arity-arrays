@@ -30,8 +30,8 @@ impl U256 {
     }
 
     /// Builds a `U256` from its two little-endian 128-bit limbs (`lo` is bits
-    /// `0..128`, `hi` is bits `128..256`). Internal helper for the byte surface;
-    /// not part of the public API.
+    /// `0..128`, `hi` is bits `128..256`). Internal helper for the byte
+    /// surface; not part of the public API.
     pub(crate) const fn from_limbs(lo: u128, hi: u128) -> Self {
         Self { lo, hi }
     }
@@ -232,7 +232,11 @@ mod tests {
 
     #[test]
     fn without_bit_across_limbs() {
-        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        let bm = U256::ZERO
+            .with_bit(3)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(254);
         let cleared = bm.without_bit(128);
         assert!(!cleared.test(128));
         assert!(cleared.test(127));
@@ -243,7 +247,11 @@ mod tests {
 
     #[test]
     fn select_spans_limbs() {
-        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        let bm = U256::ZERO
+            .with_bit(3)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(254);
         assert_eq!(bm.select(0), Some(3));
         assert_eq!(bm.select(1), Some(127));
         assert_eq!(bm.select(2), Some(128));
@@ -254,7 +262,11 @@ mod tests {
     #[test]
     fn le_bytes_round_trip_u256() {
         assert_eq!(<U256 as Bitmap>::BYTES, 32);
-        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        let bm = U256::ZERO
+            .with_bit(3)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(254);
         let mut buf = [0u8; 32];
         <U256 as Bitmap>::to_le_bytes(bm, &mut buf);
         // bit 128 is the lowest bit of the high limb -> first byte of the second half.
@@ -264,7 +276,8 @@ mod tests {
 
     #[test]
     fn u256_is_hash() {
-        use core::hash::{Hash, Hasher};
+        use core::hash::Hash;
+        use core::hash::Hasher;
 
         // Minimal no_std hasher: XOR-folds written bytes.
         #[derive(Default)]
