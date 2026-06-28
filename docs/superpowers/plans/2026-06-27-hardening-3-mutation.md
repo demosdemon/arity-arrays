@@ -135,9 +135,11 @@ In the same file, append a `# Safety` section to the `PackedAllIter` doc comment
 /// `back_consumed` counts those yielded from the back, with
 /// `front_rank + back_consumed <= count` at all times. Because `slots`
 /// partitions the index domain between the two ends, no present slot is counted
-/// by both, so each computed dense rank is `< count` — which
-/// [`PackedArray::elem_at_rank`] requires.
+/// by both, so each computed dense rank is `< count` — which the private
+/// `elem_at_rank` helper requires.
 ```
+
+(`elem_at_rank` is written as a plain code span, **not** an intra-doc link: it is a private method, and the `docs` CI job runs `RUSTDOCFLAGS="-D warnings"`, which rejects intra-doc links to private items.)
 
 - [ ] **Step 7: Verify the crate is clean (lib + docs)**
 
@@ -147,7 +149,7 @@ cargo test -p arity-arrays get_mut_mutates_present_only
 cargo clippy -p arity-arrays --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc -p arity-arrays --no-deps --all-features
 ```
-Expected: test passes; clippy clean; docs build with no warnings (the new `# Safety` sections render; `[`PackedArray::elem_at_rank`]` resolves — `elem_at_rank` is a private method, so use the plain text `elem_at_rank` without intra-doc link if rustdoc warns about a private-item link: if `RUSTDOCFLAGS="-D warnings"` fails on that link, change `[`PackedArray::elem_at_rank`]` to `` `elem_at_rank` `` in Step 6).
+Expected: test passes; clippy clean; docs build with no warnings (the new `# Safety` sections render; the `elem_at_rank` reference in Step 6 is a plain code span, not an intra-doc link, so `-D warnings` does not reject it).
 
 - [ ] **Step 8: Commit**
 
@@ -555,6 +557,12 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+# Make `fuzz/` its own workspace root so Cargo does not treat it as a stray
+# member of the parent workspace (whose `members = ["crates/*"]` excludes it).
+# Without this, `cargo fuzz build/run` aborts with "believes it's in a workspace
+# when it's not". This is the standard cargo-fuzz layout.
+[workspace]
+
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
@@ -605,8 +613,11 @@ enum Op {
 }
 
 fuzz_target!(|ops: Vec<Op>| {
-    // Heap-owning value type (`Vec<u8>`) so ASAN sees leaks / double-frees of
-    // element buffers across the realloc/copy/dealloc paths.
+    // Heap-owning value type (`Vec<u8>`) so the libFuzzer + AddressSanitizer /
+    // LeakSanitizer run catches drop bugs in the realloc/copy/dealloc paths: a
+    // forgotten drop surfaces as a leak, a double-drop as a double-free / UAF.
+    // (The deterministic "dropped exactly once" check lives in tests/mutation.rs;
+    // here ASAN provides the leak/double-free coverage the spec asks for.)
     let mut packed: PackedArray<Vec<u8>, Arity16> = PackedArray::new();
     let mut oracle: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
 
@@ -640,15 +651,20 @@ fuzz_target!(|ops: Vec<Op>| {
         }
     }
 
-    // Clone equivalence, then both drop (ASAN catches any leak / double-free).
+    // Clone equivalence (slot-by-slot), then both drop (ASAN catches any leak /
+    // double-free).
     let cloned = packed.clone();
     assert_eq!(cloned.count(), oracle.len());
+    for slot in 0..16u8 {
+        let i = U4::new_masked(slot);
+        assert_eq!(cloned.get(i), oracle.get(&i.as_u8()));
+    }
 });
 ```
 
 - [ ] **Step 4: Verify the fuzz target builds and runs a brief smoke pass**
 
-Requires `cargo-fuzz` (install with `cargo binstall cargo-fuzz` or `cargo install cargo-fuzz` if not present; the repo's `mise.toml` pins it as `cargo:cargo-fuzz`).
+Requires `cargo-fuzz` and a nightly toolchain. Provision `cargo-fuzz` from the pinned version in the repo's `mise.toml` with `mise install` (or `just setup`).
 
 Run:
 ```bash
@@ -690,12 +706,20 @@ Insert this job (after the `miri` job):
 ```yaml
   fuzz:
     runs-on: ubuntu-26.04
+    # Don't burn a 60s fuzzer run on a tree the basic tests already reject.
+    needs: [test]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       # Installs cargo-fuzz from mise.toml (the cargo:cargo-fuzz pin).
       - uses: jdx/mise-action@v2
+      # Persist + grow the corpus across runs so later runs explore deeper.
+      - uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/packed_ops
+          key: fuzz-corpus-packed_ops-${{ github.run_id }}
+          restore-keys: fuzz-corpus-packed_ops-
       # Smoke-level fuzzing: a fixed wall-clock budget catches regressions
       # without unbounded CI cost. Deeper soaks run out-of-band.
       - run: cargo +nightly fuzz run packed_ops -- -max_total_time=60 -rss_limit_mb=4096
