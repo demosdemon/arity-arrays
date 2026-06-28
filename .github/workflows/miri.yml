@@ -1,0 +1,56 @@
+name: Miri
+
+# Reusable Miri runner shared by the per-PR CI job (ci.yml) and the daily full
+# sweep (miri-full.yml). Callers vary only the proptest case count and the
+# per-shard timeout.
+#
+# The matrix is an exhaustive, non-overlapping partition of `--workspace
+# --tests`. The mutation binary dominates (~4h at 256 cases), so it is split by
+# arity: the Arity256 full-domain sweep gets its own shard.
+on:
+  workflow_call:
+    inputs:
+      proptest-cases:
+        description: Proptest cases per test (sets PROPTEST_CASES).
+        type: string
+        required: true
+      timeout-minutes:
+        description: Per-shard runaway guardrail, in minutes.
+        type: number
+        required: false
+        default: 300
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  miri:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lib
+            args: --workspace --lib
+          - name: roundtrip
+            args: -p arity-arrays --test roundtrip
+          - name: bitmap
+            args: -p arity-bitmap --test proptests --test generic_use
+          - name: mutation
+            args: -p arity-arrays --test mutation -- --skip _arity256
+          - name: mutation-256
+            args: -p arity-arrays --test mutation -- --exact packed_mutation_matches_btreemap_arity256
+    env:
+      # disable-isolation: the round-trip proptests read/write their regression
+      # files on disk and seed from host entropy; strict-provenance stays on.
+      MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
+      PROPTEST_CASES: ${{ inputs.proptest-cases }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly miri test ${{ matrix.args }}
