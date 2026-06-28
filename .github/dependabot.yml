@@ -9,3 +9,13 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # One grouped PR per week for the whole Cargo workspace, mirroring actions above.
+    groups:
+      cargo:
+        patterns:
+          - "*"
