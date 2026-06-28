@@ -44,7 +44,7 @@ jobs:
       MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
       PROPTEST_CASES: "256"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
