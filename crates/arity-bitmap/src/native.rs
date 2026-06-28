@@ -148,7 +148,6 @@ impl_native_bitmap!(u64, U6, 64);
 impl_native_bitmap!(u128, U7, 128);
 
 #[cfg(test)]
-#[cfg(all(feature = "8", feature = "16", feature = "128"))]
 mod tests {
     use super::*;
 
