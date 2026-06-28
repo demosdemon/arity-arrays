@@ -398,7 +398,11 @@ mod ethnum_backed {
 pub use ethnum_backed::U256;
 ```
 
-Leave the existing `#[cfg(test)] mod tests { … }` block in place — its tests use only the `Bitmap` surface (`ZERO`, `with_bit`, `test`, `rank`, `count_ones`, `bits`, `without_bit`, `select`, `to_le_bytes`/`from_le_bytes`, `Hash`), so they validate whichever backing is active. (If the test module has `use super::*;`, it resolves `U256` to the active backing; confirm it does not reference `from_limbs` — it must not, as that is custom-only.)
+Leave the existing `#[cfg(test)] mod tests { … }` block in place — its tests use only the `Bitmap` surface (`ZERO`, `with_bit`, `test`, `rank`, `count_ones`, `bits`, `without_bit`, `select`, `to_le_bytes`/`from_le_bytes`, `Hash`), so they validate whichever backing is active. (If the test module has `use super::*;`, it resolves `U256` to the active backing.) Confirm the test module does not reference the custom-only `from_limbs`:
+```bash
+grep -n 'from_limbs' crates/arity-bitmap/src/u256.rs
+```
+Expected: matches only inside `mod custom` (the impl and its `from_le_bytes` caller), never inside `#[cfg(test)] mod tests`. If a test does reference `from_limbs`, rewrite it to build via the `Bitmap` surface (`U256::ZERO.with_bit(..)`).
 
 - [ ] **Step 4: Verify both backings pass the same tests + clippy**
 
@@ -521,15 +525,18 @@ In `crates/arity-arrays/src/fixed.rs`, after the `AsRef<[T]>` impl (confirm with
 impl<T: serde::Serialize, A: Arity> serde::Serialize for FixedArray<T, A> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // The inner `Array<T, A::Size>` serializes as a fixed-length sequence of
-        // exactly `LEN` elements (hybrid-array's `serde` impl).
-        self.0.serialize(serializer)
+        // exactly `LEN` elements (hybrid-array's `serde` impl). UFCS because the
+        // `Serialize` trait is not otherwise in method-call scope here.
+        serde::Serialize::serialize(&self.0, serializer)
     }
 }
 
 #[cfg(feature = "serde")]
 impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for FixedArray<T, A> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self(hybrid_array::Array::deserialize(deserializer)?))
+        let inner =
+            <hybrid_array::Array<T, A::Size> as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        Ok(Self(inner))
     }
 }
 ```
@@ -539,7 +546,10 @@ impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for Fixe
 In `crates/arity-arrays/src/packed.rs`, near the other trait impls (after the `Debug` impl is a good spot; confirm with `grep -n 'impl<T: core::fmt::Debug' crates/arity-arrays/src/packed.rs`), add:
 ```rust
 #[cfg(feature = "serde")]
-impl<T: serde::Serialize, A: Arity> serde::Serialize for PackedArray<T, A> {
+impl<T: serde::Serialize, A: Arity> serde::Serialize for PackedArray<T, A>
+where
+    A::Index: serde::Serialize,
+{
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Logical form: a sequence of `(index, value)` pairs in ascending order.
         serializer.collect_seq(self.iter_present())
@@ -547,11 +557,17 @@ impl<T: serde::Serialize, A: Arity> serde::Serialize for PackedArray<T, A> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for PackedArray<T, A> {
+impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for PackedArray<T, A>
+where
+    A::Index: serde::Deserialize<'de>,
+{
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct PairsVisitor<T, A>(PhantomData<(T, A)>);
 
-        impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::de::Visitor<'de> for PairsVisitor<T, A> {
+        impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::de::Visitor<'de> for PairsVisitor<T, A>
+        where
+            A::Index: serde::Deserialize<'de>,
+        {
             type Value = PackedArray<T, A>;
 
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -774,7 +790,7 @@ Lock the wire formats with `insta` snapshots; add a cross-backing `Compact` byte
 
 - [ ] **Step 1: Add the `insta` dev-dependency**
 
-In `crates/arity-arrays`, run `cargo add --dev insta --features json`.
+In `crates/arity-arrays`, run `cargo add --dev insta`. (The snapshot tests use `insta::assert_snapshot!` on a `String`, so no extra `insta` features are needed.)
 
 - [ ] **Step 2: Write the snapshot + cross-backing tests**
 
@@ -819,16 +835,24 @@ fn snapshot_compact_form() {
 
 - [ ] **Step 3: Generate and review the snapshots, then run**
 
-Run:
+Generate the pending snapshots WITHOUT auto-accepting (so they can be reviewed before they become the baseline):
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-INSTA_UPDATE=always cargo test -p arity-arrays --features serde_with --test serde_snapshots
+cargo test -p arity-arrays --features serde_with --test serde_snapshots
 ```
-This writes `crates/arity-arrays/tests/snapshots/*.snap`. Inspect them — the logical form is `[[1,11],[4,44],[14,14]]`; the compact form is `{"children":[[<bitmap bytes>],[11,44,14]]}` where the bitmap bytes are the little-endian `u16` with bits 1, 4, 14 set (`0x4012` → `[0x12, 0x40]` = `[18, 64]`). Then re-run without updating to confirm they pass:
+The first run fails and writes `*.snap.new` files under `crates/arity-arrays/tests/snapshots/`. Inspect each `.snap.new` and confirm the values are correct:
+- logical form: `[[1,11],[4,44],[14,14]]`;
+- compact form: `{"children":[[<bitmap bytes>],[11,44,14]]}`, where the bitmap bytes are the little-endian `u16` with bits 1, 4, 14 set (`0x4012` → `[0x12, 0x40]` = `[18, 64]`).
+
+Accept them (`cargo insta` is pinned in `mise.toml`):
+```bash
+cargo insta accept
+```
+Then re-run to confirm they pass against the now-committed baseline:
 ```bash
 cargo test -p arity-arrays --features serde_with --test serde_snapshots
 ```
-Expected: PASS against the committed snapshots.
+Expected: PASS. (If `cargo-insta` is unavailable, rename each `*.snap.new` to `*.snap` only after confirming the values match the expectations above.)
 
 - [ ] **Step 4: Add a cross-backing Compact byte-identity test**
 

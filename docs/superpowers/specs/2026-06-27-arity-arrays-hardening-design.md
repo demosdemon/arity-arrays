@@ -371,9 +371,15 @@ Two optional features: `serde` (the logical default form) and `serde_with` (the
 
 ### Feature wiring
 
-- `serde` on each crate, forwarded:
-  `arity-arrays/serde = ["dep:serde", "arity-index/serde", "arity-bitmap/serde"]`.
-  The leaf-crate serde impls avoid `alloc` (they touch only fixed-size values).
+- `serde` is added only to the crates that serialize data — `arity-index` (the
+  niche types) and `arity-arrays` (the arrays). **`arity-bitmap` gets no serde**:
+  bitmap backings have no standalone `Serialize`/`Deserialize` (the `Compact`
+  adapter reconstructs any backing through the `Bitmap::to_le_bytes`/`from_le_bytes`
+  byte surface). Forwarded:
+  `arity-arrays/serde = ["dep:serde", "arity-index/serde", "hybrid-array/serde"]`
+  (`hybrid-array/serde` gives the inner `Array` its impls, which `FixedArray`
+  delegates to). The `arity-index` serde impls avoid `alloc` (they touch only the
+  one-byte index value).
 - `serde_with` lives on **`arity-arrays` only** — the `Compact` adapter needs
   `alloc` for deserialization, which only `arity-arrays` has.
 - All pulled `default-features = false`; `std` forwards `serde?/std` and
