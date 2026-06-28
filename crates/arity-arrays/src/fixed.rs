@@ -20,6 +20,13 @@ pub struct FixedArray<T, A: Arity>(Array<T, A::Size>);
 
 impl<T, A: Arity> FixedArray<T, A> {
     /// Builds a `FixedArray` by calling `f` for every index in ascending order.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic on its own: the internal `usize → A::Index`
+    /// reconstruction is total over `0..A::LEN`
+    /// (`A::Size::USIZE == A::LEN == Index::COUNT` for every [`Arity`]), so its
+    /// `expect` cannot fire. A panic from `f` propagates unchanged.
     pub fn from_fn(mut f: impl FnMut(A::Index) -> T) -> Self {
         Self(Array::from_fn(|i| {
             // `i` ranges over `0..A::Size::USIZE == A::LEN == Index::COUNT`.
@@ -54,6 +61,14 @@ impl<T, A: Arity> FixedArray<T, A> {
     }
 
     /// Maps each element to a new value, with its index, returning a new array.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic on its own: the index cursor [`A::Index::all()`] yields
+    /// exactly `A::LEN` values, one per element, so its `expect` cannot fire. A
+    /// panic from `f` propagates unchanged.
+    ///
+    /// [`A::Index::all()`]: arity_index::Niche::all
     pub fn map<O>(self, mut f: impl FnMut(A::Index, T) -> O) -> FixedArray<O, A> {
         let mut idx = A::Index::all();
         FixedArray(self.0.map(|t| {
