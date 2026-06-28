@@ -16,6 +16,8 @@ categories = ["no-std", "data-structures", "memory-management"]
 arity-bitmap = { workspace = true, default-features = false }
 arity-index = { workspace = true, default-features = false }
 hybrid-array = "0.4.12"
+serde = { version = "1", optional = true, default-features = false, features = ["alloc", "derive"] }
+serde_with = { version = "3.21", optional = true, default-features = false, features = ["alloc"] }
 
 [features]
 default = ["8", "16", "32", "64", "128", "256"]
@@ -25,9 +27,14 @@ default = ["8", "16", "32", "64", "128", "256"]
 "64" = ["arity-index/64", "arity-bitmap/64"]
 "128" = ["arity-index/128", "arity-bitmap/128"]
 "256" = ["arity-index/256", "arity-bitmap/256"]
+serde = ["dep:serde", "arity-index/serde", "hybrid-array/serde"]
+serde_with = ["dep:serde_with", "serde"]
+ethnum = ["arity-bitmap/ethnum"]
+std = ["serde?/std", "serde_with?/std", "arity-index/std", "arity-bitmap/std"]
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 proptest = "1.11.0"
+serde_json = "1"
