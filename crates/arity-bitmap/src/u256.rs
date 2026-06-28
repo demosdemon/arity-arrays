@@ -28,6 +28,13 @@ impl U256 {
             (true, (i - 128) as u32)
         }
     }
+
+    /// Builds a `U256` from its two little-endian 128-bit limbs (`lo` is bits
+    /// `0..128`, `hi` is bits `128..256`). Internal helper for the byte surface;
+    /// not part of the public API.
+    pub(crate) const fn from_limbs(lo: u128, hi: u128) -> Self {
+        Self { lo, hi }
+    }
 }
 
 impl Sealed for U256 {}
@@ -91,6 +98,7 @@ impl Raw for U256 {
 impl Bitmap for U256 {
     type Index = u8;
     const WIDTH: usize = 256;
+    const BYTES: usize = 32;
     const ZERO: Self = Self { lo: 0, hi: 0 };
 
     fn is_zero(self) -> bool {
@@ -147,6 +155,19 @@ impl Bitmap for U256 {
                 hi: self.hi,
             }
         }
+    }
+
+    fn to_le_bytes(self, buf: &mut [u8]) {
+        buf[..16].copy_from_slice(&self.lo.to_le_bytes());
+        buf[16..].copy_from_slice(&self.hi.to_le_bytes());
+    }
+
+    fn from_le_bytes(buf: &[u8]) -> Self {
+        let mut lo = [0u8; 16];
+        let mut hi = [0u8; 16];
+        lo.copy_from_slice(&buf[..16]);
+        hi.copy_from_slice(&buf[16..]);
+        Self::from_limbs(u128::from_le_bytes(lo), u128::from_le_bytes(hi))
     }
 }
 
@@ -229,6 +250,17 @@ mod tests {
         assert_eq!(bm.select(2), Some(128));
         assert_eq!(bm.select(3), Some(254));
         assert_eq!(bm.select(4), None);
+    }
+
+    #[test]
+    fn le_bytes_round_trip_u256() {
+        assert_eq!(<U256 as Bitmap>::BYTES, 32);
+        let bm = U256::ZERO.with_bit(3).with_bit(127).with_bit(128).with_bit(254);
+        let mut buf = [0u8; 32];
+        <U256 as Bitmap>::to_le_bytes(bm, &mut buf);
+        // bit 128 is the lowest bit of the high limb -> first byte of the second half.
+        assert_eq!(buf[16], 0b0000_0001);
+        assert_eq!(<U256 as Bitmap>::from_le_bytes(&buf), bm);
     }
 
     extern crate alloc;
