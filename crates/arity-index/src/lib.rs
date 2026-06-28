@@ -27,10 +27,15 @@ mod range;
 
 pub use niche::Niche;
 pub use niche::TryFromIntError;
+#[cfg(feature = "8")]
 pub use niche::U3;
+#[cfg(feature = "16")]
 pub use niche::U4;
+#[cfg(feature = "32")]
 pub use niche::U5;
+#[cfg(feature = "64")]
 pub use niche::U6;
+#[cfg(feature = "128")]
 pub use niche::U7;
 pub use range::NicheRange;
 pub use range::NicheRangeInclusive;
