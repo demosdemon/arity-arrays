@@ -1232,7 +1232,10 @@ mod tests {
         }
         assert_eq!(p.allocated_size(), 2 + 32 * 3);
         // Cross-check against the private layout helper in this module.
-        assert_eq!(p.allocated_size(), alloc_layout::<Arity16, [u8; 32]>(3).size());
+        assert_eq!(
+            p.allocated_size(),
+            alloc_layout::<Arity16, [u8; 32]>(3).size()
+        );
     }
 
     #[test]
