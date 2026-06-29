@@ -8,6 +8,7 @@ use std::sync::atomic::Ordering;
 
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use arity_arrays::index::U4;
 use proptest::prelude::*;
@@ -197,6 +198,105 @@ proptest! {
             for slot in 0..16u8 {
                 let i = U4::new_masked(slot);
                 prop_assert_eq!(packed.get(i).is_some(), oracle.contains(&i.as_u8()));
+            }
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn gapped_mutation_matches_btreemap(ops in proptest::collection::vec(op_strategy(), 0..200)) {
+        let mut g: GappedArray<u16, Arity16> = GappedArray::new();
+        let mut oracle: BTreeMap<u8, u16> = BTreeMap::new();
+        for op in ops {
+            match op {
+                Op::Insert(slot, val) => {
+                    let i = U4::new_masked(slot);
+                    prop_assert_eq!(g.insert(i, val), oracle.insert(i.as_u8(), val));
+                }
+                Op::Remove(slot) => {
+                    let i = U4::new_masked(slot);
+                    // delete-never-moves: capture a surviving element's address.
+                    let survivor = (0..16u8)
+                        .map(U4::new_masked)
+                        .find(|&j| j.as_u8() != slot && g.get(j).is_some());
+                    let before = survivor.and_then(|j| g.get(j)).map(|r| std::ptr::from_ref(r) as usize);
+                    prop_assert_eq!(g.remove(i), oracle.remove(&i.as_u8()));
+                    if let (Some(j), Some(addr)) = (survivor, before)
+                        && let Some(r) = g.get(j)
+                    {
+                        prop_assert_eq!(std::ptr::from_ref(r) as usize, addr, "remove moved a survivor");
+                    }
+                }
+                Op::GetMut(slot, val) => {
+                    let i = U4::new_masked(slot);
+                    if let Some(p) = g.get_mut(i) { *p = val; }
+                    if let Some(o) = oracle.get_mut(&i.as_u8()) { *o = val; }
+                }
+            }
+            // Structural invariants.
+            prop_assert_eq!(g.count(), oracle.len());
+            let cap = g.capacity();
+            if cap > 0 {
+                prop_assert!(cap.is_power_of_two() && cap <= 16 && cap >= g.count().max(1));
+            }
+            for slot in 0..16u8 {
+                let i = U4::new_masked(slot);
+                prop_assert_eq!(g.get(i), oracle.get(&i.as_u8()));
+            }
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn gapped_mutation_matches_btreemap_arity256(
+        ops in proptest::collection::vec(op256_strategy(), 0..200),
+    ) {
+        let mut g: GappedArray<u32, Arity256> = GappedArray::new();
+        let mut oracle: BTreeMap<u8, u32> = BTreeMap::new();
+        for op in ops {
+            match op {
+                Op256::Insert(slot, val) => prop_assert_eq!(g.insert(slot, val), oracle.insert(slot, val)),
+                Op256::Remove(slot) => prop_assert_eq!(g.remove(slot), oracle.remove(&slot)),
+                Op256::GetMut(slot, val) => {
+                    if let Some(p) = g.get_mut(slot) { *p = val; }
+                    if let Some(o) = oracle.get_mut(&slot) { *o = val; }
+                }
+            }
+            prop_assert_eq!(g.count(), oracle.len());
+            let cap = g.capacity();
+            if cap > 0 { prop_assert!(cap.is_power_of_two() && cap <= 256); }
+            for slot in [0u8, 1, 64, 127, 128, 129, 255] {
+                prop_assert_eq!(g.get(slot), oracle.get(&slot));
+            }
+        }
+        for slot in 0..=255u8 { prop_assert_eq!(g.get(slot), oracle.get(&slot)); }
+    }
+}
+
+proptest! {
+    #[test]
+    fn gapped_mutation_zst(ops in proptest::collection::vec(zst_op_strategy(), 0..200)) {
+        let mut g: GappedArray<(), Arity16> = GappedArray::new();
+        let mut oracle: BTreeSet<u8> = BTreeSet::new();
+        for op in ops {
+            match op {
+                ZstOp::Insert(slot) => {
+                    let i = U4::new_masked(slot);
+                    let was = oracle.contains(&i.as_u8());
+                    oracle.insert(i.as_u8());
+                    prop_assert_eq!(g.insert(i, ()).is_some(), was);
+                }
+                ZstOp::Remove(slot) => {
+                    let i = U4::new_masked(slot);
+                    let was = oracle.remove(&i.as_u8());
+                    prop_assert_eq!(g.remove(i).is_some(), was);
+                }
+            }
+            prop_assert_eq!(g.count(), oracle.len());
+            for slot in 0..16u8 {
+                prop_assert_eq!(g.get(U4::new_masked(slot)).is_some(), oracle.contains(&slot));
             }
         }
     }
