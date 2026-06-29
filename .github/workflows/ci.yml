@@ -9,51 +9,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  fmt:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+
   lint:
+    needs: [fmt]
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: cargo +nightly fmt --all --check
-      - run: cargo +stable clippy --workspace --all-targets --all-features -- -D warnings
-
-  test:
-    name: test ${{ matrix.os }} / ${{ matrix.toolchain }}
-    needs: [lint]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2025-vs2026, macos-26, ubuntu-26.04, ubuntu-26.04-arm]
-        toolchain:
-          - "1.92.0" # MSRV
-          - stable
-          - beta
-          - nightly
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features --all-targets
-      - run: cargo test --workspace --all-features --doc
-      # Default features (= the custom two-limb U256 backing): fast runtime
-      # coverage of the shipping default, which --all-features swaps to ethnum.
-      - run: cargo test --workspace
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   features:
     name: feature matrix ${{ matrix.os }} / ${{ matrix.toolchain }} / ${{ matrix.features }}
     needs: [lint]
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [windows-2025-vs2026, macos-26, ubuntu-26.04, ubuntu-26.04-arm]
         toolchain:
@@ -77,6 +60,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --no-default-features --features "${{ matrix.features }}" -- -D warnings
 
@@ -95,20 +79,45 @@ jobs:
       # that std-capable optional deps (serde, serde_with) exist.
       - run: cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
 
+  test:
+    name: test ${{ matrix.os }} / ${{ matrix.toolchain }}
+    needs: [features, nostd]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025-vs2026, macos-26, ubuntu-26.04, ubuntu-26.04-arm]
+        toolchain:
+          - "1.92.0" # MSRV
+          - stable
+          - beta
+          - nightly
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features --all-targets
+      - run: cargo test --workspace --all-features --doc
+      # Default features (= the custom two-limb U256 backing): fast runtime
+      # coverage of the shipping default, which --all-features swaps to ethnum.
+      - run: cargo test --workspace
+
   # Per-PR Miri smoke: the shared reusable workflow (miri.yml) at a reduced
   # proptest depth. Miri interprets ~100s per proptest case across these
   # binaries, so the full 256-case spread is ~7h — over GitHub's 6h job limit.
   # Keep PR/merge feedback fast here; the sharded daily run in miri-full.yml
   # covers the full 256-case spread.
   miri:
-    needs: [test, features, nostd]
+    needs: [test]
     uses: ./.github/workflows/miri.yml
     with:
       proptest-cases: "8"
       timeout-minutes: 30
 
   fuzz:
-    needs: [test, features, nostd]
+    needs: [test]
     runs-on: ubuntu-26.04
     strategy:
       # One target's crash must not cancel the others.
@@ -153,7 +162,7 @@ jobs:
 
   bench:
     name: bench ${{ matrix.os }} / ${{ matrix.toolchain }}
-    needs: [test, features, nostd]
+    needs: [test]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -174,7 +183,7 @@ jobs:
       - run: cargo bench --workspace --all-features
 
   docs:
-    needs: [test, features, nostd]
+    needs: [lint]
     runs-on: ubuntu-26.04
     env:
       RUSTDOCFLAGS: -D warnings
