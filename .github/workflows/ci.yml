@@ -12,21 +12,18 @@ jobs:
   fmt:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/setup-rust
         with:
+          toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
 
   lint:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   nostd:
@@ -34,11 +31,9 @@ jobs:
     needs: [fmt, lint]
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
         with:
           targets: thumbv7em-none-eabihf
-      - uses: Swatinem/rust-cache@v2
       # A no_std target (no std in the sysroot) fails to build if any dep or
       # feature transitively pulls std — locking the #![no_std] discipline now
       # that std-capable optional deps (serde, serde_with) exist.
@@ -50,9 +45,7 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-rust
       - run: cargo doc --workspace --no-deps --all-features
 
   features:
@@ -80,12 +73,10 @@ jobs:
           # ethnum backing + compact serde + std together.
           - "256,ethnum,serde_with,std"
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
-      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --no-default-features --features "${{ matrix.features }}" -- -D warnings
 
   test:
@@ -102,11 +93,9 @@ jobs:
           - beta
           - nightly
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --all-targets
       - run: cargo test --workspace --all-features --doc
       # Default features (= the custom two-limb U256 backing): fast runtime
@@ -142,9 +131,9 @@ jobs:
           - compact_decode
           - bitmap_roundtrip
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: nightly
       # Install a prebuilt cargo-fuzz instead of compiling it from source.
       # taiki-e/install-action verifies the binary is actually present each run,
       # so it is not fooled by the cargo install ledger (.crates2.json) that
@@ -183,10 +172,8 @@ jobs:
           - beta
           - nightly
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-features --benches
       - run: cargo bench --workspace --all-features

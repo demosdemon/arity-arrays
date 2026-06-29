@@ -51,9 +51,8 @@ jobs:
       MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
       PROPTEST_CASES: ${{ inputs.proptest-cases }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/setup-rust
         with:
+          toolchain: nightly
           components: miri
-      - uses: Swatinem/rust-cache@v2
       - run: cargo +nightly miri test ${{ matrix.args }}
