@@ -228,6 +228,57 @@ impl<T, A: Arity> GappedArray<T, A> {
         self.0
             .map_or(0, |_| alloc_layout::<A, T>(self.capacity()).size())
     }
+
+    /// Returns a reference to the element at `index`, or `None` if absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal bitmap invariant is violated (i.e., `occupancy`
+    /// and `live` have mismatched popcount). This cannot happen through the
+    /// public API.
+    #[must_use]
+    pub fn get(&self, index: A::Index) -> Option<&T> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        if !occ.test(index) {
+            return None;
+        }
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let r = occ.rank(index);
+        let p = live
+            .select(r)
+            .expect("present ⇒ rank < count == live popcount")
+            .as_usize();
+        // SAFETY: `p` is a set `live` bit (a physical slot < cap), so
+        // `data_ptr(ptr).add(p)` is an initialised element.
+        Some(unsafe { &*data_ptr(ptr).add(p) })
+    }
+
+    /// Returns a mutable reference to the element at `index`, or `None` if
+    /// absent. Does not change which slots are present.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal bitmap invariant is violated (i.e., `occupancy`
+    /// and `live` have mismatched popcount). This cannot happen through the
+    /// public API.
+    pub fn get_mut(&mut self, index: A::Index) -> Option<&mut T> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        if !occ.test(index) {
+            return None;
+        }
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let r = occ.rank(index);
+        let p = live.select(r).expect("present ⇒ rank < count").as_usize();
+        // SAFETY: `p` is a physical slot < cap with an initialised element;
+        // the borrow is tied to `&mut self`, giving exclusive access.
+        Some(unsafe { &mut *data_ptr(ptr).add(p) })
+    }
 }
 
 impl<T, A: Arity> Default for GappedArray<T, A> {
@@ -434,6 +485,24 @@ mod tests {
         assert!(r.is_err());
         // All four destructors ran despite the panic on the second.
         assert_eq!(drops.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn get_and_get_mut_present_only() {
+        let mut src = FixedArray::<Option<u16>, Arity16>::new();
+        src[U4::new_masked(1)] = Some(10);
+        src[U4::new_masked(8)] = Some(80);
+        src[U4::new_masked(15)] = Some(150);
+        let mut g = GappedArray::from(src);
+        assert_eq!(g.get(U4::new_masked(1)), Some(&10));
+        assert_eq!(g.get(U4::new_masked(8)), Some(&80));
+        assert_eq!(g.get(U4::new_masked(15)), Some(&150));
+        assert_eq!(g.get(U4::new_masked(0)), None);
+        if let Some(v) = g.get_mut(U4::new_masked(8)) {
+            *v = 88;
+        }
+        assert_eq!(g.get(U4::new_masked(8)), Some(&88));
+        assert!(g.get_mut(U4::new_masked(2)).is_none());
     }
 
     #[test]
