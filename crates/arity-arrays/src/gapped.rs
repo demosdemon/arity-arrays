@@ -279,6 +279,29 @@ impl<T, A: Arity> GappedArray<T, A> {
         // the borrow is tied to `&mut self`, giving exclusive access.
         Some(unsafe { &mut *data_ptr(ptr).add(p) })
     }
+
+    /// Iterates present elements as `(A::Index, &T)`, ascending. Double-ended.
+    /// `O(1)` per step (co-advances the occupancy and live bit cursors).
+    #[must_use]
+    pub fn iter_present(&self) -> GappedPresentIter<'_, T, A> {
+        self.0.map_or_else(
+            || GappedPresentIter {
+                occ_bits: A::Bitmap::ZERO.bits(),
+                live_bits: A::Bitmap::ZERO.bits(),
+                data: core::ptr::null(),
+                _marker: PhantomData,
+            },
+            // SAFETY: `Some` ↔ a valid allocation with initialised header/elements.
+            |ptr| unsafe {
+                GappedPresentIter {
+                    occ_bits: ptr.as_ref().occupancy.bits(),
+                    live_bits: ptr.as_ref().live.bits(),
+                    data: data_ptr(ptr).cast_const(),
+                    _marker: PhantomData,
+                }
+            },
+        )
+    }
 }
 
 impl<T, A: Arity> Default for GappedArray<T, A> {
@@ -393,6 +416,54 @@ impl<T, A: Arity> Drop for GappedArray<T, A> {
     }
 }
 
+/// Iterator over present elements of a [`GappedArray`]. See
+/// [`GappedArray::iter_present`].
+///
+/// The occupancy cursor supplies the logical index; the live cursor supplies
+/// the physical slot. The two are advanced in lockstep, so the `r`-th of one
+/// pairs with the `r`-th of the other.
+pub struct GappedPresentIter<'a, T, A: Arity> {
+    occ_bits: arity_bitmap::BitIter<A::Bitmap>,
+    live_bits: arity_bitmap::BitIter<A::Bitmap>,
+    data: *const T,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T, A: Arity> Iterator for GappedPresentIter<'a, T, A> {
+    type Item = (A::Index, &'a T);
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.occ_bits.next()?;
+        let p = self
+            .live_bits
+            .next()
+            .expect("live and occupancy have equal count")
+            .as_usize();
+        // SAFETY: `p` is a set live bit (physical slot < cap) with an
+        // initialised element bounded by `&'a self`.
+        Some((i, unsafe { &*self.data.add(p) }))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.occ_bits.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for GappedPresentIter<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.occ_bits.next_back()?;
+        let p = self.live_bits.next_back().expect("equal count").as_usize();
+        // SAFETY: as in `next`.
+        Some((i, unsafe { &*self.data.add(p) }))
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for GappedPresentIter<'_, T, A> {
+    fn len(&self) -> usize {
+        self.occ_bits.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for GappedPresentIter<'_, T, A> {}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -503,6 +574,23 @@ mod tests {
         }
         assert_eq!(g.get(U4::new_masked(8)), Some(&88));
         assert!(g.get_mut(U4::new_masked(2)).is_none());
+    }
+
+    #[test]
+    fn iter_present_ascending_and_double_ended() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for s in [1u8, 4, 14] {
+            src[U4::new_masked(s)] = Some(s);
+        }
+        let g = GappedArray::from(src);
+        let fwd: std::vec::Vec<(u8, u8)> = g.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(fwd, std::vec![(1, 1), (4, 4), (14, 14)]);
+        let mut it = g.iter_present();
+        assert_eq!(it.len(), 3);
+        assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((1, 1)));
+        assert_eq!(it.next_back().map(|(i, &v)| (i.as_u8(), v)), Some((14, 14)));
+        assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((4, 4)));
+        assert_eq!(it.next(), None);
     }
 
     #[test]
