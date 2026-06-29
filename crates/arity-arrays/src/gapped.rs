@@ -40,12 +40,57 @@ struct Inner<A: Arity, T> {
 /// elements in ascending logical order with gaps so deletes are move-free and
 /// inserts move only to reach a nearby hole.
 ///
+/// # Two-bitmap model
+///
+/// Each `GappedArray` heap block holds two bitmaps of type `A::Bitmap` in its
+/// header:
+///
+/// - **`occupancy`** — logical membership over `[0, N)`. Bit `i` is set when
+///   logical index `i` has a present element.
+/// - **`live`** — physical fill over `[0, capacity)`. Bit `p` is set when
+///   physical slot `p` of the element array is initialised.
+///
+/// Both bitmaps always have equal popcount (`count`). The `r`-th set bit of
+/// `occupancy` names the logical index of the `r`-th present element; the
+/// `r`-th set bit of `live` gives its physical slot. Their rank order is always
+/// consistent: the physical slot of logical index `i` is
+/// `live.select(occupancy.rank(i))`.
+///
+/// # Capacity and exponent
+///
+/// Capacity is always a power of two, stored as an exponent `cap_exp` such that
+/// `capacity == 1 << cap_exp`, bounded by `A::LEN`. It starts at 1 on the first
+/// insert and doubles when the array is full. The exponent representation fits
+/// in one byte (since `A::LEN ≤ 256 = 1 << 8`) and makes doubling a single byte
+/// increment.
+///
+/// # Gap invariants
+///
+/// **Delete never moves.** Removing an element clears both its `occupancy` bit
+/// and its `live` slot bit, then reads the value out — no other element moves.
+///
+/// **Insert uses min(shift, respread).** A new absent element is placed at the
+/// lowest cost among three strategies:
+///
+/// 1. **Hole between neighbors** — if a hole exists strictly between the
+///    predecessor and successor physical slots, write the element there (zero
+///    element moves).
+/// 2. **Shift to nearest hole** — if no such hole exists, slide the shorter of
+///    the left or right live run to an adjacent hole (linear in run length, not
+///    total occupancy).
+/// 3. **Full respread** — rebuild the block with all elements at even-spread
+///    positions; chosen when the block is full (triggering a capacity doubling)
+///    or when a respread is cheaper than any available shift.
+///
+/// # Allocation model
+///
 /// `None` ↔ unallocated (`count == 0`, `capacity == 0`); pointer-sized via the
 /// `NonNull` niche. `Some(ptr)` ↔ a live allocation of `capacity` slots, of
 /// which `count == occupancy.count_ones() == live.count_ones() ∈ [0, capacity]`
-/// are filled. Unlike [`PackedArray`], `Some` with
-/// `count == 0` is legal — removing all elements retains the allocation
-/// (shrinks are never automatic).
+/// are filled. Unlike [`PackedArray`], `Some` with `count == 0` is legal —
+/// removing all elements retains the allocation (shrinks are never automatic;
+/// call [`shrink_to_fit`] or convert to [`PackedArray`] via `From` for the
+/// exact-fit escape hatch).
 ///
 /// # Trait implementations
 ///
@@ -57,14 +102,51 @@ struct Inner<A: Arity, T> {
 /// `Ord` and `PartialOrd` are intentionally **not** implemented: a sparse map
 /// has no canonical total order, and adding them later is non-breaking.
 ///
-/// # Safety
+/// # Safety: physical vs. logical index domain
 ///
-/// Invariant: when `self.0` is `Some(ptr)`, `ptr` is a live allocation from
-/// `alloc_layout::<A, T>(1 << cap_exp)` whose header is initialised, with
-/// `occupancy.count_ones() == live.count_ones()`, the set bits of `live` being
-/// exactly the initialised element slots, and the `r`-th set bit of `live`
-/// holding the `r`-th present logical index (ascending). Every physical slot
-/// read in this module relies on this.
+/// This module uses two distinct index domains that share the `A::Index` type:
+///
+/// - **Logical** — values produced by `occupancy` bit operations and exposed to
+///   callers; range `[0, N)`.
+/// - **Physical** — slot offsets into the element array; range `[0, capacity)`.
+///
+/// `live.select(r)` returns an `Option<A::Index>` representing a **physical**
+/// slot offset. Its `.as_usize()` yields the `usize` used to address the
+/// element array (`data_ptr(ptr).add(p)`). Converting a physical position `p`
+/// back to `A::Index` via
+/// `<A::Index as Niche>::try_from_usize(p).expect("p < capacity ≤ N")` is sound
+/// because `capacity ≤ A::LEN == A::Index::COUNT`, guaranteeing `p` is in
+/// range.
+///
+/// Structural invariant: when `self.0` is `Some(ptr)`, `ptr` is a live
+/// allocation from `alloc_layout::<A, T>(1 << cap_exp)` whose header is
+/// initialised with `occupancy.count_ones() == live.count_ones()`, the set bits
+/// of `live` being exactly the initialised element slots, and the `r`-th set
+/// bit of `live` (in ascending order) holding the physical slot of the `r`-th
+/// present element. Every physical slot read in this module relies on this
+/// invariant.
+///
+/// # Example
+///
+/// ```
+/// # extern crate alloc;
+/// use arity_arrays::{Arity16, GappedArray};
+/// use arity_arrays::index::{Niche, U4};
+///
+/// // Mutations operate in place: inserts open nearby gaps; deletes leave holes.
+/// let mut g = GappedArray::<u32, Arity16>::new();
+/// g.insert(U4::new_masked(1), 10);
+/// g.insert(U4::new_masked(9), 90);
+/// assert_eq!(g.count(), 2);
+/// assert_eq!(g.get(U4::new_masked(9)), Some(&90));
+/// assert_eq!(g.get(U4::new_masked(0)), None);
+///
+/// let present: alloc::vec::Vec<(u8, u32)> =
+///     g.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+/// assert_eq!(present, alloc::vec![(1, 10), (9, 90)]);
+/// ```
+///
+/// [`shrink_to_fit`]: GappedArray::shrink_to_fit
 pub struct GappedArray<T, A: Arity>(
     Option<NonNull<Inner<A, T>>>,
     PhantomData<alloc::boxed::Box<T>>,

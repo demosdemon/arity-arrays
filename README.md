@@ -7,16 +7,20 @@ This workspace generalizes the hexary (16-ary) trie child-storage layout from
 [`ava-labs/firewood#2100`](https://github.com/ava-labs/firewood/pull/2100) from a
 single 16-wide layout to arbitrary power-of-two arities `N ∈ {8, 16, 32, 64, 128, 256}`.
 
-## Two representations
+## Three representations
 
 A branch node stores its children in a fixed array indexed by a small integer.
-Two layouts are useful, and both are provided:
+Three layouts are provided:
 
 - **Full-width** (`FixedArray<T, A>`) — one slot per index, every slot
   materialized. Cheap random access, fixed size regardless of occupancy.
 - **Packed** (`PackedArray<T, A>`) — only the present entries stored, addressed by
   a bitmap via rank-select. Pointer-sized (and zero-heap) when empty; heap cost
   proportional to occupancy.
+- **Gapped** (`GappedArray<T, A>`) — heap-backed with spare capacity kept at a
+  geometric (power-of-two) size and gaps between elements so deletes are always
+  move-free and inserts minimise moves. The write-throughput corner: trades
+  memory for lower mutation cost.
 
 The packed form is the memory-amplification mitigation from firewood#2100: a
 16-slot `FixedArray<Option<[u8; 32]>>` occupies a constant **528 bytes**
@@ -27,15 +31,15 @@ memory_report`:
 
 ### Cell A — Arity16 + [u8; 32]
 
-| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |
-|----------:|------------:|-----------:|-----------------:|
-| 0 | 8 | 528 | 544 |
-| 1 | 42 | 528 | 544 |
-| 4 | 138 | 528 | 544 |
-| 8 | 266 | 528 | 544 |
-| 16 | 522 | 528 | 544 |
+| occupancy | PackedArray | GappedArray | FixedArray | Box<[Option<T>]> |
+|----------:|------------:|------------:|-----------:|-----------------:|
+| 0 | 8 | 8 | 528 | 544 |
+| 1 | 42 | 46 | 528 | 544 |
+| 4 | 138 | 142 | 528 | 544 |
+| 8 | 266 | 270 | 528 | 544 |
+| 16 | 522 | 526 | 528 | 544 |
 
-Both rely on a **niche integer index** — a small type whose value is statically
+All three rely on a **niche integer index** — a small type whose value is statically
 known to be in `0..N`, which (a) makes `Option<Index>` one byte via niche
 optimization and (b) lets the compiler elide bounds checks when indexing.
 
@@ -68,7 +72,7 @@ In dependency order:
 | :--- | :--- |
 | [`arity-index`](crates/arity-index) | Bounds-check-free niche integer index types (`U3`–`U7`, and `u8` for arity-256) with double-ended range iterators. No `alloc`. |
 | [`arity-bitmap`](crates/arity-bitmap) | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by the niche integers, with a double-ended set-bit iterator. **No `unsafe` code.** No `alloc`. |
-| [`arity-arrays`](crates/arity-arrays) | `FixedArray` and `PackedArray` over the sealed `Arity` trait. The only crate that needs `alloc`, and the only one with `unsafe`. |
+| [`arity-arrays`](crates/arity-arrays) | `FixedArray`, `PackedArray`, and `GappedArray` over the sealed `Arity` trait. The only crate that needs `alloc`, and the only one with `unsafe`. |
 
 Splitting this way keeps the primitive types reusable and lets their tests run
 without touching the allocator. `arity-bitmap` depends on `arity-index` so the

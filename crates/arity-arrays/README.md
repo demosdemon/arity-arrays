@@ -1,8 +1,8 @@
 # arity-arrays
 
-Fixed and pointer-sized heap-packed arrays over a generic arity, indexed without bounds checks.
+Fixed, pointer-sized heap-packed, and gapped arrays over a generic arity, indexed without bounds checks.
 
-`FixedArray<T, A>` is a full-width inline array (one slot per index); `PackedArray<T, A>` is a pointer-sized, heap-packed representation that stores only the present elements. Both are generic over the `Arity` trait, which pairs an index type with a bitmap backing and a `hybrid-array` size. Six concrete arities are provided: `Arity8`, `Arity16`, `Arity32`, `Arity64`, `Arity128`, and `Arity256`.
+`FixedArray<T, A>` is a full-width inline array (one slot per index); `PackedArray<T, A>` is a pointer-sized, heap-packed representation that stores only the present elements; `GappedArray<T, A>` is a pointer-sized, heap-backed representation with spare capacity and gaps that minimises mutation cost. All three are generic over the `Arity` trait, which pairs an index type with a bitmap backing and a `hybrid-array` size. Six concrete arities are provided: `Arity8`, `Arity16`, `Arity32`, `Arity64`, `Arity128`, and `Arity256`.
 
 ## Usage
 
@@ -34,13 +34,13 @@ memory_report`:
 
 ### Cell A — Arity16 + [u8; 32]
 
-| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |
-|----------:|------------:|-----------:|-----------------:|
-| 0 | 8 | 528 | 544 |
-| 1 | 42 | 528 | 544 |
-| 4 | 138 | 528 | 544 |
-| 8 | 266 | 528 | 544 |
-| 16 | 522 | 528 | 544 |
+| occupancy | PackedArray | GappedArray | FixedArray | Box<[Option<T>]> |
+|----------:|------------:|------------:|-----------:|-----------------:|
+| 0 | 8 | 8 | 528 | 544 |
+| 1 | 42 | 46 | 528 | 544 |
+| 4 | 138 | 142 | 528 | 544 |
+| 8 | 266 | 270 | 528 | 544 |
+| 16 | 522 | 526 | 528 | 544 |
 
 ## Cargo features
 
@@ -77,8 +77,8 @@ Minimum Supported Rust Version: **1.92**.
 
 Throughput measured with [`divan`](https://crates.io/crates/divan) over the two
 representative cells (Arity16 + 32-byte hash; Arity256 + 8-byte pointer
-stand-in) against `FixedArray`, `Box<[Option<T>]>`, `BTreeMap`, and `HashMap`.
-Reproduce with `just bench`.
+stand-in) against `GappedArray`, `FixedArray`, `Box<[Option<T>]>`, `BTreeMap`,
+and `HashMap`. Reproduce with `just bench`.
 
 > measured on: Apple M3 Max, rustc 1.98.0-nightly (f428d123a 2026-06-19), 2026-06-28
 
