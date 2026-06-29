@@ -20,7 +20,6 @@ jobs:
       - run: cargo fmt --all --check
 
   lint:
-    needs: [fmt]
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
@@ -30,9 +29,35 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  nostd:
+    name: no_std bare-metal build
+    needs: [fmt, lint]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      # A no_std target (no std in the sysroot) fails to build if any dep or
+      # feature transitively pulls std — locking the #![no_std] discipline now
+      # that std-capable optional deps (serde, serde_with) exist.
+      - run: cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
+
+  docs:
+    needs: [fmt, lint]
+    runs-on: ubuntu-26.04
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --all-features
+
   features:
     name: feature matrix ${{ matrix.os }} / ${{ matrix.toolchain }} / ${{ matrix.features }}
-    needs: [lint]
+    needs: [nostd, docs]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -63,24 +88,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --no-default-features --features "${{ matrix.features }}" -- -D warnings
 
-  nostd:
-    name: no_std bare-metal build
-    needs: [lint]
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: thumbv7em-none-eabihf
-      - uses: Swatinem/rust-cache@v2
-      # A no_std target (no std in the sysroot) fails to build if any dep or
-      # feature transitively pulls std — locking the #![no_std] discipline now
-      # that std-capable optional deps (serde, serde_with) exist.
-      - run: cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
-
   test:
     name: test ${{ matrix.os }} / ${{ matrix.toolchain }}
-    needs: [features, nostd]
+    needs: [features]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -180,14 +190,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-features --benches
       - run: cargo bench --workspace --all-features
-
-  docs:
-    needs: [lint]
-    runs-on: ubuntu-26.04
-    env:
-      RUSTDOCFLAGS: -D warnings
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --no-deps --all-features
