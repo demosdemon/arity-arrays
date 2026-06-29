@@ -280,6 +280,17 @@ impl<T, A: Arity> GappedArray<T, A> {
         Some(unsafe { &mut *data_ptr(ptr).add(p) })
     }
 
+    /// Iterates all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
+    /// Double-ended.
+    #[must_use]
+    pub fn iter(&self) -> GappedAllIter<'_, T, A> {
+        GappedAllIter {
+            present: self.iter_present(),
+            bitmap: self.bitmap(),
+            slots: <A::Index as Niche>::all(),
+        }
+    }
+
     /// Iterates present elements as `(A::Index, &T)`, ascending. Double-ended.
     /// `O(1)` per step (co-advances the occupancy and live bit cursors).
     #[must_use]
@@ -464,6 +475,71 @@ impl<T, A: Arity> ExactSizeIterator for GappedPresentIter<'_, T, A> {
 
 impl<T, A: Arity> core::iter::FusedIterator for GappedPresentIter<'_, T, A> {}
 
+/// Iterator over all slots of a [`GappedArray`]. See [`GappedArray::iter`].
+///
+/// Drives off the index range (`slots`) and an `occupancy` snapshot, pulling
+/// the element for a present slot from the front or back of the present-element
+/// stream as the range crosses it — mirroring `PackedAllIter`. Each step is a
+/// range advance plus, for a present slot, one `present` advance: `O(1)`, no
+/// per-slot `select`. Because `slots` partitions the index domain between the
+/// two ends and `present` holds exactly the present elements in order, the
+/// front and back draws never cross.
+pub struct GappedAllIter<'a, T, A: Arity> {
+    present: GappedPresentIter<'a, T, A>,
+    bitmap: A::Bitmap,
+    slots: arity_index::NicheRangeInclusive<A::Index>,
+}
+
+impl<'a, T, A: Arity> Iterator for GappedAllIter<'a, T, A> {
+    type Item = (A::Index, Option<&'a T>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.slots.next()?;
+        if self.bitmap.test(i) {
+            let (_, v) = self
+                .present
+                .next()
+                .expect("a set occupancy bit has a matching present element");
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slots.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for GappedAllIter<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.slots.next_back()?;
+        if self.bitmap.test(i) {
+            let (_, v) = self
+                .present
+                .next_back()
+                .expect("a set occupancy bit has a matching present element");
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for GappedAllIter<'_, T, A> {
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for GappedAllIter<'_, T, A> {}
+
+impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
+    type Item = (A::Index, Option<&'a T>);
+    type IntoIter = GappedAllIter<'a, T, A>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -591,6 +667,46 @@ mod tests {
         assert_eq!(it.next_back().map(|(i, &v)| (i.as_u8(), v)), Some((14, 14)));
         assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((4, 4)));
         assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn iter_all_slots_and_into_iter() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for s in [1u8, 5, 14] {
+            src[U4::new_masked(s)] = Some(s * 10);
+        }
+        let g = GappedArray::from(src);
+        // Forward-only must surface every present element (regression guard: an
+        // earlier design lost trailing present elements on forward-only traversal).
+        let fwd: std::vec::Vec<(u8, Option<u8>)> = (&g)
+            .into_iter()
+            .map(|(i, o)| (i.as_u8(), o.copied()))
+            .collect();
+        assert_eq!(fwd.len(), 16);
+        assert_eq!(fwd[0], (0, None));
+        assert_eq!(fwd[1], (1, Some(10)));
+        assert_eq!(fwd[5], (5, Some(50)));
+        assert_eq!(fwd[14], (14, Some(140)));
+        // Backward-only must surface the same.
+        let mut bwd: std::vec::Vec<(u8, Option<u8>)> = g
+            .iter()
+            .rev()
+            .map(|(i, o)| (i.as_u8(), o.copied()))
+            .collect();
+        bwd.reverse();
+        assert_eq!(bwd, fwd);
+        // Interleaved double-ended visits every slot exactly once.
+        let mut it = g.iter();
+        let mut got: std::vec::Vec<(u8, Option<u8>)> = std::vec::Vec::new();
+        let mut front = true;
+        while let Some((i, o)) = if front { it.next() } else { it.next_back() } {
+            got.push((i.as_u8(), o.copied()));
+            front = !front;
+        }
+        got.sort_by_key(|(i, _)| *i);
+        assert_eq!(got.len(), 16);
+        assert_eq!(got[5], (5, Some(50)));
+        assert_eq!(got[14], (14, Some(140)));
     }
 
     #[test]
