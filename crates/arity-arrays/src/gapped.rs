@@ -13,6 +13,7 @@ use arity_index::Niche;
 
 use crate::Arity;
 use crate::FixedArray;
+use crate::PackedArray;
 
 /// Heap header: two bitmaps and the capacity exponent, followed (after
 /// alignment padding) by the element array. `#[repr(C)]` makes `data` the
@@ -877,6 +878,125 @@ impl<T: Clone, A: Arity> Clone for GappedArray<T, A> {
         }
         core::mem::forget(guard);
         Self(Some(new_inner), PhantomData)
+    }
+}
+
+/// Clones each present element of a `&FixedArray<Option<T>, A>` into a spread
+/// gapped block.
+impl<T: Clone, A: Arity> From<&FixedArray<Option<T>, A>> for GappedArray<T, A> {
+    fn from(src: &FixedArray<Option<T>, A>) -> Self {
+        let mut occupancy = A::Bitmap::ZERO;
+        for (i, slot) in src {
+            if slot.is_some() {
+                occupancy = occupancy.with_bit(i);
+            }
+        }
+        let count = occupancy.count_ones() as usize;
+        if count == 0 {
+            return Self::new();
+        }
+        let cap = pow2_cap_for::<A>(count);
+        let cap_exp = cap_exp_of(cap);
+        let mut live = A::Bitmap::ZERO;
+        for r in 0..count {
+            let p = spread_pos(r, count, cap);
+            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap <= N");
+            live = live.with_bit(p_idx);
+        }
+        // SAFETY: `cap > 0`; the guarded fill initialises exactly the `live`
+        // slots (or the guard cleans up on a `T::clone` panic).
+        let inner = unsafe { alloc_block::<A, T>(occupancy, live, cap_exp, cap) };
+        // SAFETY: `inner` is a live allocation from `alloc_block` above.
+        let dp = unsafe { data_ptr(inner) };
+        let mut guard = GappedFillGuard::<A, T> {
+            inner,
+            initialized: A::Bitmap::ZERO,
+            cap,
+        };
+        for (r, (_i, v)) in src.iter_present().enumerate() {
+            let p = spread_pos(r, count, cap);
+            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap <= N");
+            // SAFETY: `p` is a fresh `live` slot; `write` initialises it.
+            unsafe { dp.add(p).write(v.clone()) };
+            guard.initialized = guard.initialized.with_bit(p_idx);
+        }
+        core::mem::forget(guard);
+        Self(Some(inner), PhantomData)
+    }
+}
+
+/// Moves each present element back into a `FixedArray<Option<T>, A>`.
+impl<T, A: Arity> From<GappedArray<T, A>> for FixedArray<Option<T>, A> {
+    fn from(src: GappedArray<T, A>) -> Self {
+        let mut out = Self::new();
+        let src = core::mem::ManuallyDrop::new(src);
+        if let Some(ptr) = src.0 {
+            // SAFETY: `ptr` valid per the invariant; header is initialised.
+            let occ = unsafe { ptr.as_ref().occupancy };
+            // SAFETY: `ptr` valid per the invariant; header is initialised.
+            let live = unsafe { ptr.as_ref().live };
+            // SAFETY: `ptr` valid per the invariant; header is initialised.
+            let cap = 1usize << unsafe { ptr.as_ref().cap_exp };
+            // SAFETY: `ptr` is a live allocation from `alloc_layout(cap)`.
+            let dp = unsafe { data_ptr(ptr) };
+            // The r-th occupancy index pairs with the r-th live slot.
+            for (logical, physical) in occ.bits().zip(live.bits()) {
+                // SAFETY: `physical` is a set live slot (initialised); `read`
+                // moves it out once. `ManuallyDrop` prevents a double free.
+                let v = unsafe { dp.add(physical.as_usize()).read() };
+                out[logical] = Some(v);
+            }
+            // SAFETY: elements moved out; sole deallocation.
+            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(cap)) };
+        }
+        out
+    }
+}
+
+/// Clones each present element into a `FixedArray<Option<T>, A>`.
+impl<T: Clone, A: Arity> From<&GappedArray<T, A>> for FixedArray<Option<T>, A> {
+    fn from(src: &GappedArray<T, A>) -> Self {
+        let mut out = Self::new();
+        for (i, v) in src.iter_present() {
+            out[i] = Some(v.clone());
+        }
+        out
+    }
+}
+
+/// Adopts a `PackedArray` into a gapped block (capacity = next power of two ≥
+/// count, spread). Moves elements (no `T: Clone`).
+impl<T, A: Arity> From<PackedArray<T, A>> for GappedArray<T, A> {
+    fn from(src: PackedArray<T, A>) -> Self {
+        // PackedArray -> FixedArray moves elements out; FixedArray -> Gapped
+        // moves them into the spread layout. Two moves, no clone.
+        let fixed: FixedArray<Option<T>, A> = src.into();
+        fixed.into()
+    }
+}
+
+/// Clones a `&PackedArray` into a gapped block.
+impl<T: Clone, A: Arity> From<&PackedArray<T, A>> for GappedArray<T, A> {
+    fn from(src: &PackedArray<T, A>) -> Self {
+        let fixed: FixedArray<Option<T>, A> = src.into();
+        (&fixed).into()
+    }
+}
+
+/// Compacts a `GappedArray` into an exactly-sized `PackedArray` (the exact-fit
+/// escape hatch). Moves elements (no `T: Clone`).
+impl<T, A: Arity> From<GappedArray<T, A>> for PackedArray<T, A> {
+    fn from(src: GappedArray<T, A>) -> Self {
+        let fixed: FixedArray<Option<T>, A> = src.into();
+        fixed.into()
+    }
+}
+
+/// Clones a `&GappedArray` into an exactly-sized `PackedArray`.
+impl<T: Clone, A: Arity> From<&GappedArray<T, A>> for PackedArray<T, A> {
+    fn from(src: &GappedArray<T, A>) -> Self {
+        let fixed: FixedArray<Option<T>, A> = src.into();
+        (&fixed).into()
     }
 }
 

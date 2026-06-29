@@ -62,3 +62,38 @@ roundtrip_for!(arity32, arity_arrays::Arity32, 32);
 roundtrip_for!(arity64, arity_arrays::Arity64, 64);
 roundtrip_for!(arity128, arity_arrays::Arity128, 128);
 roundtrip_for!(arity256, arity_arrays::Arity256, 256);
+
+#[test]
+fn gapped_roundtrips() {
+    use arity_arrays::Arity16;
+    use arity_arrays::FixedArray;
+    use arity_arrays::GappedArray;
+    use arity_arrays::PackedArray;
+    use arity_arrays::index::U4;
+    let mut src = FixedArray::<Option<u16>, Arity16>::new();
+    for s in [0u8, 7, 15] {
+        src[U4::new_masked(s)] = Some(u16::from(s) * 3);
+    }
+
+    // FixedArray (ref clone) -> Gapped -> FixedArray (owned)
+    let g = GappedArray::<u16, Arity16>::from(&src);
+    let back: FixedArray<Option<u16>, Arity16> = g.into();
+    for s in 0..16u8 {
+        let expected = matches!(s, 0 | 7 | 15).then(|| u16::from(s) * 3);
+        assert_eq!(*back.get(U4::new_masked(s)), expected, "slot {s}");
+    }
+
+    // Packed <-> Gapped
+    let p = PackedArray::<u16, Arity16>::from(&src);
+    let g2 = GappedArray::<u16, Arity16>::from(&p);
+    assert_eq!(g2.count(), 3);
+    let p2: PackedArray<u16, Arity16> = g2.into();
+    // exact-fit: PackedArray block holds exactly `count` elements.
+    assert_eq!(p2.count(), 3);
+    for s in 0..16u8 {
+        assert_eq!(
+            p2.get(U4::new_masked(s)).copied(),
+            p.get(U4::new_masked(s)).copied()
+        );
+    }
+}
