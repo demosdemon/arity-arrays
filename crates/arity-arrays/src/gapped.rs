@@ -47,6 +47,16 @@ struct Inner<A: Arity, T> {
 /// `count == 0` is legal — removing all elements retains the allocation
 /// (shrinks are never automatic).
 ///
+/// # Trait implementations
+///
+/// [`PartialEq`], [`Eq`], [`core::hash::Hash`], and [`core::fmt::Debug`] are
+/// all gap-agnostic: two arrays with the same logical content (same bitmap,
+/// same values in the same order) compare equal and hash identically regardless
+/// of capacity or hole placement.
+///
+/// `Ord` and `PartialOrd` are intentionally **not** implemented: a sparse map
+/// has no canonical total order, and adding them later is non-breaking.
+///
 /// # Safety
 ///
 /// Invariant: when `self.0` is `Some(ptr)`, `ptr` is a live allocation from
@@ -1179,6 +1189,55 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
     }
 }
 
+impl<T: PartialEq, A: Arity> PartialEq for GappedArray<T, A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.bitmap() == other.bitmap()
+            && self
+                .iter_present()
+                .map(|(_, v)| v)
+                .eq(other.iter_present().map(|(_, v)| v))
+    }
+}
+impl<T: Eq, A: Arity> Eq for GappedArray<T, A> {}
+
+impl<T: core::hash::Hash, A: Arity> core::hash::Hash for GappedArray<T, A> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.count().hash(state);
+        for (i, v) in self.iter_present() {
+            i.as_usize().hash(state);
+            v.hash(state);
+        }
+    }
+}
+
+impl<T: core::fmt::Debug, A: Arity> core::fmt::Debug for GappedArray<T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_map()
+            .entries(self.iter_present().map(|(i, v)| (i.as_usize(), v)))
+            .finish()
+    }
+}
+
+// SAFETY: `GappedArray` exclusively owns its allocation; sound to send when `T:
+// Send`.
+unsafe impl<T: Send, A: Arity> Send for GappedArray<T, A> {}
+// SAFETY: `&GappedArray` yields only `&T`; no interior mutability.
+unsafe impl<T: Sync, A: Arity> Sync for GappedArray<T, A> {}
+
+impl<T: core::panic::UnwindSafe, A: Arity> core::panic::UnwindSafe for GappedArray<T, A> {}
+impl<T: core::panic::RefUnwindSafe, A: Arity> core::panic::RefUnwindSafe for GappedArray<T, A> {}
+
+// `GappedPresentIter` holds `*const T` but yields only `&T` (slice-like), so it
+// is Send/Sync exactly when `T: Sync`.
+#[expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "bit cursors iterate primitive bitmaps; clippy cannot see the assoc-type bound"
+)]
+// SAFETY: the raw pointer is used only for shared reads bounded by `&'a self`.
+unsafe impl<T: Sync, A: Arity> Send for GappedPresentIter<'_, T, A> {}
+// SAFETY: shared, read-only access; no interior mutability.
+unsafe impl<T: Sync, A: Arity> Sync for GappedPresentIter<'_, T, A> {}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1546,5 +1605,34 @@ mod tests {
         assert_eq!(spread_pos(2, 3, 8), 5);
         // dense when count == cap
         assert_eq!(spread_pos(2, 4, 4), 2);
+    }
+
+    #[test]
+    fn eq_hash_debug_are_logical() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::Hash;
+        use std::hash::Hasher;
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        let mut s1 = FixedArray::<Option<u16>, Arity16>::new();
+        s1[U4::new_masked(2)] = Some(20);
+        s1[U4::new_masked(9)] = Some(90);
+        // Same logical content but built so capacities/holes differ.
+        let mut a = GappedArray::from(s1);
+        let mut b = GappedArray::<u16, Arity16>::with_capacity(16);
+        b.insert(U4::new_masked(9), 90);
+        b.insert(U4::new_masked(2), 20);
+        assert_eq!(a, b); // gap-agnostic equality
+        let h = |g: &GappedArray<u16, Arity16>| {
+            let mut s = DefaultHasher::new();
+            g.hash(&mut s);
+            s.finish()
+        };
+        assert_eq!(h(&a), h(&b));
+        a.remove(U4::new_masked(2));
+        assert_ne!(a, b);
+        let dbg = std::format!("{a:?}");
+        assert!(dbg.contains("90"));
+        assert_send_sync::<GappedArray<u16, Arity16>>();
     }
 }
