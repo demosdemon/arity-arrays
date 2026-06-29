@@ -32,6 +32,7 @@ pub mod arity;
 #[cfg(feature = "serde_with")]
 mod compact;
 pub mod fixed;
+pub mod gapped;
 pub mod packed;
 
 pub use arity::Arity;
@@ -52,6 +53,7 @@ pub use arity_index as index;
 #[cfg(feature = "serde_with")]
 pub use compact::Compact;
 pub use fixed::FixedArray;
+pub use gapped::GappedArray;
 pub use packed::PackedArray;
 
 /// Prevents downstream crates from implementing [`Arity`](crate::Arity).
