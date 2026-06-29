@@ -330,6 +330,250 @@ impl<T, A: Arity> GappedArray<T, A> {
         }
     }
 
+    /// Reallocates to a fresh `new_cap`-slot block with all live elements
+    /// re-laid at even spread positions, then frees the old block. Used by grow
+    /// and respread. `new_cap` must be a power of two `≥ count`. No-op shape
+    /// when unallocated with `new_cap` chosen for `count == 0` is not allowed;
+    /// callers handle the empty case separately.
+    #[expect(
+        dead_code,
+        reason = "used by upcoming shrink_to_fit and reserve implementations"
+    )]
+    fn rebuild_to(&mut self, new_cap: usize) {
+        let Some(old_ptr) = self.0 else { return };
+        // SAFETY: `old_ptr` valid per the invariant.
+        let occ = unsafe { old_ptr.as_ref().occupancy };
+        // SAFETY: `old_ptr` valid per the invariant.
+        let old_live = unsafe { old_ptr.as_ref().live };
+        let old_cap = self.capacity();
+        let count = occ.count_ones() as usize;
+        debug_assert!(count <= new_cap && new_cap.is_power_of_two());
+        let new_cap_exp = cap_exp_of(new_cap);
+        // New live bitmap from the fresh spread positions.
+        let mut new_live = A::Bitmap::ZERO;
+        for r in 0..count {
+            let p = spread_pos(r, count, new_cap);
+            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < new_cap <= N");
+            new_live = new_live.with_bit(p_idx);
+        }
+        // SAFETY: `new_cap > 0` (count >= 1 in the reachable callers); the copy
+        // loop initialises exactly the `new_live` slots before any read.
+        let new_ptr = unsafe { alloc_block::<A, T>(occ, new_live, new_cap_exp, new_cap) };
+        // SAFETY: `old_ptr` valid per the invariant; distinct from `new_ptr`.
+        let src = unsafe { data_ptr(old_ptr) };
+        // SAFETY: `new_ptr` is the freshly allocated block above.
+        let dst = unsafe { data_ptr(new_ptr) };
+        // Copy the r-th live element from its old physical slot to its new one.
+        for (r, old_i) in old_live.bits().enumerate() {
+            let op = old_i.as_usize();
+            let np = spread_pos(r, count, new_cap);
+            // SAFETY: `op` is a set old-live slot (initialised); `np < new_cap`
+            // is a fresh slot. Distinct allocations ⇒ non-overlapping bitwise
+            // move (no drop, no user code).
+            unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
+        }
+        self.0 = Some(new_ptr);
+        // SAFETY: live elements moved out; old block came from
+        // `alloc_layout(old_cap)`; freed exactly once.
+        unsafe { dealloc(old_ptr.as_ptr().cast(), alloc_layout::<A, T>(old_cap)) };
+    }
+
+    /// Replaces the block with a fresh `new_cap`-slot block holding all current
+    /// elements **plus** the new `(index, value)`, each at its spread position
+    /// for the new count. This is "full respread including the new element": it
+    /// always succeeds (no hole search), so it is the correct fallback when no
+    /// between-neighbors hole exists and the grow path's placement. Requires
+    /// `index` absent and `count + 1 <= new_cap`, `new_cap` a power of two.
+    ///
+    /// Panic-safe: the only fallible step is `alloc_block` (before any move);
+    /// element relocation is `copy_nonoverlapping` (bitwise, no drop/user code)
+    /// and the new value is written by move, so no fill guard is needed.
+    fn rebuild_with_insert(&mut self, index: A::Index, value: T, new_cap: usize) {
+        let old_ptr = self.0.expect("rebuild_with_insert requires an allocation");
+        // SAFETY: `old_ptr` valid per the invariant.
+        let occ = unsafe { old_ptr.as_ref().occupancy };
+        // SAFETY: `old_ptr` valid per the invariant.
+        let old_live = unsafe { old_ptr.as_ref().live };
+        let old_cap = self.capacity();
+        debug_assert!(!occ.test(index));
+        let new_occ = occ.with_bit(index);
+        let new_count = new_occ.count_ones() as usize; // == count + 1
+        debug_assert!(new_count <= new_cap && new_cap.is_power_of_two());
+        let new_rank = new_occ.rank(index) as usize; // rank of the inserted index
+        let new_cap_exp = cap_exp_of(new_cap);
+        // New live bitmap from the spread of `new_count` across `new_cap`.
+        let mut new_live = A::Bitmap::ZERO;
+        for r in 0..new_count {
+            let p = spread_pos(r, new_count, new_cap);
+            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < new_cap <= N");
+            new_live = new_live.with_bit(p_idx);
+        }
+        // SAFETY: `new_cap > 0`; the copies + the write below initialise exactly
+        // the `new_live` slots before any read.
+        let new_ptr = unsafe { alloc_block::<A, T>(new_occ, new_live, new_cap_exp, new_cap) };
+        // SAFETY: `old_ptr` valid per the invariant; distinct from `new_ptr`.
+        let src = unsafe { data_ptr(old_ptr) };
+        // SAFETY: `new_ptr` is the freshly allocated block above.
+        let dst = unsafe { data_ptr(new_ptr) };
+        // Move each old element to its new spread slot. Its new rank is its old
+        // rank, shifted by one once past the inserted rank.
+        for (old_r, old_i) in old_live.bits().enumerate() {
+            let op = old_i.as_usize();
+            let nr = if old_r < new_rank { old_r } else { old_r + 1 };
+            let np = spread_pos(nr, new_count, new_cap);
+            // SAFETY: `op` is a set old-live slot (initialised); `np < new_cap`
+            // is a fresh slot in a distinct allocation; bitwise move, no drop.
+            unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
+        }
+        // Write the new element at its spread slot.
+        let np_new = spread_pos(new_rank, new_count, new_cap);
+        // SAFETY: `np_new < new_cap` is the fresh slot for the new live bit.
+        unsafe { dst.add(np_new).write(value) };
+        self.0 = Some(new_ptr);
+        // SAFETY: all old elements moved out; old block from `alloc_layout(old_cap)`.
+        unsafe { dealloc(old_ptr.as_ptr().cast(), alloc_layout::<A, T>(old_cap)) };
+    }
+
+    /// Inserts `value` at `index`, returning the previous value if the slot was
+    /// already present.
+    ///
+    /// Overwrite is in place. A new insertion fills a hole between its
+    /// rank-neighbors when one exists; otherwise capacity grows (doubling, a
+    /// power of two bounded by `A::LEN`) or the block is respread to open a
+    /// gap.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal bitmap invariant is violated (i.e., `occupancy`
+    /// and `live` have mismatched popcount). This cannot happen through the
+    /// public API.
+    pub fn insert(&mut self, index: A::Index, value: T) -> Option<T> {
+        // Empty → fresh single-slot block.
+        let Some(ptr) = self.0 else {
+            let occ = A::Bitmap::ZERO.with_bit(index);
+            let live =
+                A::Bitmap::ZERO.with_bit(<A::Index as Niche>::try_from_usize(0).expect("0 < N"));
+            // SAFETY: cap == 1 > 0; the write below initialises slot 0 (the sole
+            // live bit) before any read.
+            let inner = unsafe { alloc_block::<A, T>(occ, live, 0, 1) };
+            // SAFETY: `inner` valid; slot 0 is the sole uninitialised element.
+            unsafe { data_ptr(inner).write(value) };
+            self.0 = Some(inner);
+            return None;
+        };
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        // Present → overwrite in place.
+        if occ.test(index) {
+            // SAFETY: `ptr` valid.
+            let live = unsafe { ptr.as_ref().live };
+            let r = occ.rank(index);
+            let p = live.select(r).expect("present ⇒ rank < count").as_usize();
+            // SAFETY: `p` is a set live slot with an initialised element;
+            // `&mut self` gives exclusive access.
+            return Some(unsafe { core::mem::replace(&mut *data_ptr(ptr).add(p), value) });
+        }
+        let count = occ.count_ones() as usize;
+        let cap = self.capacity();
+        // Full → grow (double, bounded by N) and respread *including* the new
+        // element. `count < A::LEN` here (an absent index exists), so
+        // `pow2_cap_for(count + 1) == 2 * cap` and `count + 1 <= new_cap`.
+        if count == cap {
+            let new_cap = pow2_cap_for::<A>(count + 1);
+            self.rebuild_with_insert(index, value, new_cap);
+            return None;
+        }
+        self.place_absent(index, value);
+        None
+    }
+
+    /// Places `value` at an absent `index` given spare capacity (`count <
+    /// cap`). Correctness-first: fill a hole strictly between the
+    /// rank-neighbors if one exists, otherwise respread the whole block
+    /// including the new element (`rebuild_with_insert`), which always
+    /// succeeds. Task 10 replaces the respread fallback with the cheaper
+    /// `min(shift, respread)` rule.
+    fn place_absent(&mut self, index: A::Index, value: T) {
+        let ptr = self.0.expect("place_absent requires an allocation");
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let cap = self.capacity();
+        let (p_lo, p_hi) = self.neighbor_bounds(index);
+        // Look for a hole strictly between p_lo and p_hi.
+        // `p_lo >= -1` (sentinel) so `p_lo + 1 >= 0`; cast to usize is safe.
+        let mut hole: Option<usize> = None;
+        let mut p = (p_lo + 1).cast_unsigned();
+        while p < p_hi {
+            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap <= N");
+            if !live.test(p_idx) {
+                hole = Some(p);
+                break;
+            }
+            p += 1;
+        }
+        if let Some(hp) = hole {
+            self.write_into_hole(index, hp, value);
+        } else {
+            // No between-neighbors hole. Respread including the new element —
+            // capacity is unchanged (count < cap ⇒ count + 1 <= cap).
+            self.rebuild_with_insert(index, value, cap);
+        }
+    }
+
+    /// Physical-slot bounds bracketing the rank of an absent `index`: the
+    /// predecessor live slot (`-1` sentinel when the index is the new minimum)
+    /// and the successor live slot (`cap` sentinel when it is the new maximum).
+    fn neighbor_bounds(&self, index: A::Index) -> (isize, usize) {
+        let ptr = self.0.expect("allocation present");
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let cap = self.capacity();
+        let count = occ.count_ones() as usize;
+        let r = occ.rank(index) as usize; // target rank in [0, count]
+        // Physical slots are < cap <= N <= 256, so they fit in isize without wrap.
+        let p_lo: isize = if r == 0 {
+            -1
+        } else {
+            live.select(u32::try_from(r - 1).expect("r <= 256 fits u32"))
+                .expect("r-1 < count")
+                .as_usize()
+                .cast_signed()
+        };
+        let p_hi: usize = if r == count {
+            cap
+        } else {
+            live.select(u32::try_from(r).expect("r <= 256 fits u32"))
+                .expect("r < count")
+                .as_usize()
+        };
+        (p_lo, p_hi)
+    }
+
+    /// Writes `value` at physical hole `hp` and sets the membership/live bits.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "mutation occurs through raw pointer derived from self.0; \
+                  clippy cannot see through the raw-pointer write"
+    )]
+    fn write_into_hole(&mut self, index: A::Index, hp: usize, value: T) {
+        let ptr = self.0.expect("allocation present");
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let hp_idx = <A::Index as Niche>::try_from_usize(hp).expect("hp < cap <= N");
+        debug_assert!(!live.test(hp_idx));
+        // SAFETY: `hp` is a hole (uninitialised slot < cap); `write` initialises
+        // it. Header fields are initialised and `Copy`.
+        unsafe {
+            data_ptr(ptr).add(hp).write(value);
+            (*ptr.as_ptr()).occupancy = occ.with_bit(index);
+            (*ptr.as_ptr()).live = live.with_bit(hp_idx);
+        }
+    }
+
     /// Iterates present elements as `(A::Index, &T)`, ascending. Double-ended.
     /// `O(1)` per step (co-advances the occupancy and live bit cursors).
     #[must_use]
@@ -774,6 +1018,40 @@ mod tests {
         assert_eq!(g.remove(U4::new_masked(9)), Some(90));
         assert!(g.is_empty());
         assert_eq!(g.capacity(), cap_before);
+    }
+
+    #[test]
+    fn insert_empty_overwrite_and_grow() {
+        let mut g = GappedArray::<u16, Arity16>::new();
+        assert_eq!(g.insert(U4::new_masked(7), 70), None); // empty -> cap 1
+        assert_eq!(g.capacity(), 1);
+        assert_eq!(g.get(U4::new_masked(7)), Some(&70));
+        assert_eq!(g.insert(U4::new_masked(7), 77), Some(70)); // overwrite in place
+        assert_eq!(g.capacity(), 1);
+        // Out-of-order inserts keep logical order and grow by powers of two.
+        assert_eq!(g.insert(U4::new_masked(2), 20), None);
+        assert_eq!(g.insert(U4::new_masked(9), 90), None);
+        assert_eq!(g.insert(U4::new_masked(0), 0), None);
+        assert_eq!(g.count(), 4);
+        assert!(g.capacity() >= 4 && g.capacity().is_power_of_two());
+        let present: std::vec::Vec<(u8, u16)> =
+            g.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(present, std::vec![(0, 0), (2, 20), (7, 77), (9, 90)]);
+    }
+
+    #[test]
+    fn insert_matches_btreemap_small() {
+        use std::collections::BTreeMap;
+        let mut g = GappedArray::<u16, Arity16>::new();
+        let mut oracle: BTreeMap<u8, u16> = BTreeMap::new();
+        for (slot, val) in [(3u8, 30u16), (1, 10), (3, 33), (14, 140), (8, 80), (1, 11)] {
+            let i = U4::new_masked(slot);
+            assert_eq!(g.insert(i, val), oracle.insert(slot, val));
+            assert_eq!(g.count(), oracle.len());
+            for s in 0..16u8 {
+                assert_eq!(g.get(U4::new_masked(s)).copied(), oracle.get(&s).copied());
+            }
+        }
     }
 
     #[test]
