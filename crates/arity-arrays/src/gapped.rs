@@ -463,12 +463,14 @@ impl<T, A: Arity> GappedArray<T, A> {
         // SAFETY: `new_ptr` is the freshly allocated block above.
         let dst = unsafe { data_ptr(new_ptr) };
         // Copy the r-th live element from its old physical slot to its new one.
-        for (r, old_i) in old_live.bits().enumerate() {
+        // The r-th set bit of `new_live` is the rank-r spread position, so
+        // reading it here avoids recomputing `spread_pos` per element.
+        for (old_i, new_i) in old_live.bits().zip(new_live.bits()) {
             let op = old_i.as_usize();
-            let np = spread_pos(r, count, new_cap);
-            // SAFETY: `op` is a set old-live slot (initialised); `np < new_cap`
-            // is a fresh slot. Distinct allocations ⇒ non-overlapping bitwise
-            // move (no drop, no user code).
+            let np = new_i.as_usize();
+            // SAFETY: `op` is a set old-live slot (initialised); `np` is a set
+            // new-live slot (`< new_cap`). Distinct allocations ⇒ non-overlapping
+            // bitwise move (no drop, no user code).
             unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
         }
         self.0 = Some(new_ptr);
@@ -514,20 +516,31 @@ impl<T, A: Arity> GappedArray<T, A> {
         let src = unsafe { data_ptr(old_ptr) };
         // SAFETY: `new_ptr` is the freshly allocated block above.
         let dst = unsafe { data_ptr(new_ptr) };
-        // Move each old element to its new spread slot. Its new rank is its old
-        // rank, shifted by one once past the inserted rank.
-        for (old_r, old_i) in old_live.bits().enumerate() {
-            let op = old_i.as_usize();
-            let nr = if old_r < new_rank { old_r } else { old_r + 1 };
-            let np = spread_pos(nr, new_count, new_cap);
-            // SAFETY: `op` is a set old-live slot (initialised); `np < new_cap`
-            // is a fresh slot in a distinct allocation; bitwise move, no drop.
-            unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
+        // Fill each new slot in rank order, reading destinations from `new_live`
+        // (its r-th set bit is the rank-r spread position) instead of recomputing
+        // `spread_pos`. The inserted rank takes the new value by move; every
+        // other rank takes the next old element in order.
+        let mut value = Some(value);
+        let mut old_slots = old_live.bits();
+        for (nr, new_i) in new_live.bits().enumerate() {
+            let np = new_i.as_usize();
+            if nr == new_rank {
+                // SAFETY: `np < new_cap` is the fresh slot for the inserted rank,
+                // visited exactly once (so `take` yields the value).
+                unsafe {
+                    dst.add(np)
+                        .write(value.take().expect("inserted rank visited once"));
+                }
+            } else {
+                let op = old_slots
+                    .next()
+                    .expect("an old element for each non-inserted rank")
+                    .as_usize();
+                // SAFETY: `op` is a set old-live slot (initialised); `np < new_cap`
+                // is a fresh slot in a distinct allocation; bitwise move, no drop.
+                unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
+            }
         }
-        // Write the new element at its spread slot.
-        let np_new = spread_pos(new_rank, new_count, new_cap);
-        // SAFETY: `np_new < new_cap` is the fresh slot for the new live bit.
-        unsafe { dst.add(np_new).write(value) };
         self.0 = Some(new_ptr);
         // SAFETY: all old elements moved out; old block from `alloc_layout(old_cap)`.
         unsafe { dealloc(old_ptr.as_ptr().cast(), alloc_layout::<A, T>(old_cap)) };
@@ -592,12 +605,16 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// respread (`rebuild_with_insert`, cost ≈ count).
     fn place_absent(&mut self, index: A::Index, value: T) {
         let ptr = self.0.expect("place_absent requires an allocation");
+        // Read the header snapshot once and thread it into the bounds/hole
+        // searches below, which would otherwise re-read it. The shared reference
+        // is dropped here, before the later mutations through `ptr`.
         // SAFETY: `ptr` valid per the invariant.
-        let live = unsafe { ptr.as_ref().live };
-        let cap = self.capacity();
-        // SAFETY: `ptr` valid per the invariant.
-        let count = unsafe { ptr.as_ref().occupancy }.count_ones() as usize;
-        let (p_lo, p_hi) = self.neighbor_bounds(index);
+        let (occ, live, cap) = unsafe {
+            let inner = ptr.as_ref();
+            (inner.occupancy, inner.live, 1usize << inner.cap_exp)
+        };
+        let count = occ.count_ones() as usize;
+        let (p_lo, p_hi) = Self::neighbor_bounds(occ, live, cap, count, index);
         // Hole strictly between the neighbors → place with no move.
         // `p_lo >= -1` (sentinel) so `p_lo + 1 >= 0`; cast_unsigned is safe.
         let mut p = (p_lo + 1).cast_unsigned();
@@ -614,8 +631,8 @@ impl<T, A: Arity> GappedArray<T, A> {
         // respread the whole block including the new element (cost ≈ count).
         // With `count < cap` there is always ≥ 1 hole, so at least one shift is
         // finite; the respread branch is a correct tie-break, never a panic.
-        let left = self.nearest_hole_left(p_lo); // Option<(hole_pos, dist)>
-        let right = self.nearest_hole_right(p_hi, cap); // Option<(hole_pos, dist)>
+        let left = Self::nearest_hole_left(live, p_lo); // Option<(hole_pos, dist)>
+        let right = Self::nearest_hole_right(live, p_hi, cap); // Option<(hole_pos, dist)>
         let respread_cost = count;
         let left_cost = left.map_or(usize::MAX, |(_, d)| d);
         let right_cost = right.map_or(usize::MAX, |(_, d)| d);
@@ -633,11 +650,9 @@ impl<T, A: Arity> GappedArray<T, A> {
     }
 
     /// Nearest hole at a physical slot `< from` (scanning down). Returns
-    /// `(hole_pos, live_elements_crossed)`.
-    fn nearest_hole_left(&self, from: isize) -> Option<(usize, usize)> {
-        let ptr = self.0?;
-        // SAFETY: `ptr` valid.
-        let live = unsafe { ptr.as_ref().live };
+    /// `(hole_pos, live_elements_crossed)`. Pure over `live` so the caller's
+    /// header snapshot is reused.
+    fn nearest_hole_left(live: A::Bitmap, from: isize) -> Option<(usize, usize)> {
         let mut p = from; // from == p_lo (a live slot or -1)
         let mut crossed = 0usize;
         while p >= 0 {
@@ -652,11 +667,9 @@ impl<T, A: Arity> GappedArray<T, A> {
     }
 
     /// Nearest hole at a physical slot `>= from` (scanning up to `cap`).
-    /// Returns `(hole_pos, live_elements_crossed)`.
-    fn nearest_hole_right(&self, from: usize, cap: usize) -> Option<(usize, usize)> {
-        let ptr = self.0?;
-        // SAFETY: `ptr` valid.
-        let live = unsafe { ptr.as_ref().live };
+    /// Returns `(hole_pos, live_elements_crossed)`. Pure over `live` so the
+    /// caller's header snapshot is reused.
+    fn nearest_hole_right(live: A::Bitmap, from: usize, cap: usize) -> Option<(usize, usize)> {
         let mut crossed = 0usize;
         let mut p = from; // from == p_hi (a live slot or cap)
         while p < cap {
@@ -735,14 +748,15 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Physical-slot bounds bracketing the rank of an absent `index`: the
     /// predecessor live slot (`-1` sentinel when the index is the new minimum)
     /// and the successor live slot (`cap` sentinel when it is the new maximum).
-    fn neighbor_bounds(&self, index: A::Index) -> (isize, usize) {
-        let ptr = self.0.expect("allocation present");
-        // SAFETY: `ptr` valid per the invariant.
-        let occ = unsafe { ptr.as_ref().occupancy };
-        // SAFETY: `ptr` valid per the invariant.
-        let live = unsafe { ptr.as_ref().live };
-        let cap = self.capacity();
-        let count = occ.count_ones() as usize;
+    /// Pure over the supplied header snapshot (`occ`, `live`, `cap`, `count`),
+    /// so a caller that already read the header does not re-read it.
+    fn neighbor_bounds(
+        occ: A::Bitmap,
+        live: A::Bitmap,
+        cap: usize,
+        count: usize,
+        index: A::Index,
+    ) -> (isize, usize) {
         let r = occ.rank(index) as usize; // target rank in [0, count]
         // Physical slots are < cap <= N <= 256, so they fit in isize without wrap.
         let p_lo: isize = if r == 0 {

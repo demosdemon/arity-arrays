@@ -23,6 +23,22 @@ use crate::PackedArray;
 /// `#[serde_as(as = "Compact")]` on a `PackedArray<T, A>` field.
 pub struct Compact;
 
+/// Serializes present values as a sequence without collecting them into a
+/// temporary `Vec`. Holds a closure so `serialize` (which borrows `&self`) can
+/// produce a fresh iterator each call.
+struct PresentValues<F>(F);
+
+impl<F, I> Serialize for PresentValues<F>
+where
+    F: Fn() -> I,
+    I: Iterator,
+    I::Item: Serialize,
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq((self.0)())
+    }
+}
+
 impl<T: Serialize, A: Arity> SerializeAs<PackedArray<T, A>> for Compact {
     fn serialize_as<S: serde::Serializer>(
         source: &PackedArray<T, A>,
@@ -67,8 +83,7 @@ impl<T: Serialize, A: Arity> SerializeAs<GappedArray<T, A>> for Compact {
     ) -> Result<S::Ok, S::Error> {
         let mut buf = alloc::vec![0u8; <A::Bitmap as Bitmap>::BYTES];
         source.bitmap().to_le_bytes(&mut buf);
-        let values: Vec<&T> = source.iter_present().map(|(_, v)| v).collect();
-        (buf, values).serialize(serializer)
+        (buf, PresentValues(|| source.iter_present().map(|(_, v)| v))).serialize(serializer)
     }
 }
 
