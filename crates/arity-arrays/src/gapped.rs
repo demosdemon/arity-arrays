@@ -1142,8 +1142,9 @@ impl<T, A: Arity> From<PackedArray<T, A>> for GappedArray<T, A> {
 /// Clones a `&PackedArray` into a gapped block.
 impl<T: Clone, A: Arity> From<&PackedArray<T, A>> for GappedArray<T, A> {
     fn from(src: &PackedArray<T, A>) -> Self {
+        // Clone once into FixedArray, then move into the spread layout.
         let fixed: FixedArray<Option<T>, A> = src.into();
-        (&fixed).into()
+        fixed.into()
     }
 }
 
@@ -1159,8 +1160,9 @@ impl<T, A: Arity> From<GappedArray<T, A>> for PackedArray<T, A> {
 /// Clones a `&GappedArray` into an exactly-sized `PackedArray`.
 impl<T: Clone, A: Arity> From<&GappedArray<T, A>> for PackedArray<T, A> {
     fn from(src: &GappedArray<T, A>) -> Self {
+        // Clone once into FixedArray, then move into the exact-fit packed block.
         let fixed: FixedArray<Option<T>, A> = src.into();
-        (&fixed).into()
+        fixed.into()
     }
 }
 
