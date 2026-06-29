@@ -5,7 +5,7 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
-## [0.1.0] - 2026-06-27
+## [0.1.0] - 2026-06-28
 
 Initial release of three `no_std` crates for fixed-arity storage indexed by
 bounds-check-free niche integers, generalizing the hexary trie child-storage
