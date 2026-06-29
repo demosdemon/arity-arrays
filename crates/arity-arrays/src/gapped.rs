@@ -280,6 +280,45 @@ impl<T, A: Arity> GappedArray<T, A> {
         Some(unsafe { &mut *data_ptr(ptr).add(p) })
     }
 
+    /// Removes and returns the element at `index`, or `None` if absent.
+    ///
+    /// Move-free: clears the membership/live bits and reads the value out,
+    /// leaving a hole. The allocation is retained even when the array becomes
+    /// empty (shrinks are never automatic; use [`shrink_to_fit`] or convert).
+    ///
+    /// [`shrink_to_fit`]: GappedArray::shrink_to_fit
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal bitmap invariant is violated (i.e., `occupancy`
+    /// and `live` have mismatched popcount). This cannot happen through the
+    /// public API.
+    pub fn remove(&mut self, index: A::Index) -> Option<T> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        if !occ.test(index) {
+            return None;
+        }
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let r = occ.rank(index);
+        let p = live.select(r).expect("present ⇒ rank < count").as_usize();
+        let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap <= N");
+        // Clear bits FIRST (bitmap ops cannot panic). This closes the
+        // double-drop window: if the returned value's destructor later panics
+        // in the caller, `Drop` already sees `live[p]` clear.
+        // SAFETY: `ptr` valid; the header fields are initialised and `Copy`.
+        unsafe {
+            (*ptr.as_ptr()).occupancy = occ.without_bit(index);
+            (*ptr.as_ptr()).live = live.without_bit(p_idx);
+        }
+        // SAFETY: `p` was a set live bit; `read` moves the element out without
+        // dropping it (returned to the caller). The slot is now logically
+        // uninitialised and its live bit is clear, so it is never touched again.
+        Some(unsafe { data_ptr(ptr).add(p).read() })
+    }
+
     /// Iterates all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
     /// Double-ended.
     #[must_use]
@@ -707,6 +746,34 @@ mod tests {
         assert_eq!(got.len(), 16);
         assert_eq!(got[5], (5, Some(50)));
         assert_eq!(got[14], (14, Some(140)));
+    }
+
+    #[test]
+    fn remove_is_move_free_and_retains_capacity() {
+        let mut src = FixedArray::<Option<u16>, Arity16>::new();
+        for s in [1u8, 5, 9] {
+            src[U4::new_masked(s)] = Some(u16::from(s) * 10);
+        }
+        let mut g = GappedArray::from(src);
+        let cap_before = g.capacity();
+        // Capture the physical slot of slot 9 via its address; removing slot 5 must
+        // not move slot 9 (its &T address is unchanged).
+        let addr9 =
+            core::ptr::from_ref::<u16>(g.get(U4::new_masked(9)).expect("slot 9 present")) as usize;
+        assert_eq!(g.remove(U4::new_masked(5)), Some(50));
+        assert_eq!(g.remove(U4::new_masked(5)), None); // absent
+        assert_eq!(g.count(), 2);
+        assert_eq!(g.get(U4::new_masked(1)), Some(&10));
+        assert_eq!(g.get(U4::new_masked(9)), Some(&90));
+        let addr9_after =
+            core::ptr::from_ref::<u16>(g.get(U4::new_masked(9)).expect("slot 9 still present"))
+                as usize;
+        assert_eq!(addr9, addr9_after, "delete must not move other elements");
+        // Removing all keeps the allocation (no auto-shrink).
+        assert_eq!(g.remove(U4::new_masked(1)), Some(10));
+        assert_eq!(g.remove(U4::new_masked(9)), Some(90));
+        assert!(g.is_empty());
+        assert_eq!(g.capacity(), cap_before);
     }
 
     #[test]
