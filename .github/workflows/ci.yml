@@ -12,6 +12,7 @@ jobs:
   fmt:
     runs-on: ubuntu-26.04
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: nightly
@@ -21,6 +22,7 @@ jobs:
   lint:
     runs-on: ubuntu-26.04
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
@@ -31,6 +33,7 @@ jobs:
     needs: [fmt, lint]
     runs-on: ubuntu-26.04
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           targets: thumbv7em-none-eabihf
@@ -45,6 +48,7 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - run: cargo doc --workspace --no-deps --all-features
 
@@ -73,6 +77,7 @@ jobs:
           # ethnum backing + compact serde + std together.
           - "256,ethnum,serde_with,std"
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
@@ -93,6 +98,7 @@ jobs:
           - beta
           - nightly
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
@@ -131,6 +137,7 @@ jobs:
           - compact_decode
           - bitmap_roundtrip
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: nightly
@@ -172,6 +179,7 @@ jobs:
           - beta
           - nightly
     steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
