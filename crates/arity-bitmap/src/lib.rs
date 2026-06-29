@@ -125,7 +125,7 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// `n >= count_ones()`. The inverse of [`rank`](Bitmap::rank):
     /// `select(rank(i)) == Some(i)` for every set `i`.
     ///
-    /// Runs in `O(log WIDTH)` per limb via [`Raw::raw_select`].
+    /// Runs in `O(log WIDTH)` per limb.
     fn select(self, n: u32) -> Option<Self::Index> {
         let pos = self.raw_select(n)?;
         // `raw_select` yields `pos < WIDTH == Self::Index::COUNT`, so the
