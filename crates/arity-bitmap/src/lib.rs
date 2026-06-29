@@ -65,8 +65,8 @@ trait Raw: Sealed + Copy + Eq {
     fn raw_clear_highest(self) -> Self;
     /// Returns the bit position (`< WIDTH`) of the `n`-th set bit (0-based), or
     /// `None` if `n >= raw_popcount()`. Runs in `O(log WIDTH)` per limb (a
-    /// popcount-guided binary search). Required: every backend implements it
-    /// directly; there is no `O(n)` fallback.
+    /// popcount-guided binary search). Every backend implements this directly;
+    /// there is no `O(n)` fallback.
     fn raw_select(self, n: u32) -> Option<usize>;
 }
 
