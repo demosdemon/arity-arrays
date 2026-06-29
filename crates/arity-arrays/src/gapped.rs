@@ -156,51 +156,7 @@ pub struct GappedArray<T, A: Arity>(
     PhantomData<alloc::boxed::Box<T>>,
 );
 
-// Compile-time guarantee: pointer-sized. The property is generic over `A`; the
-// witness is whichever arity is enabled (mirrors `packed.rs`'s `SizeWitness`
-// chain so the assertion fires under any non-empty feature subset).
-#[cfg(feature = "8")]
-type SizeWitness = crate::Arity8;
-#[cfg(all(not(feature = "8"), feature = "16"))]
-type SizeWitness = crate::Arity16;
-#[cfg(all(not(feature = "8"), not(feature = "16"), feature = "32"))]
-type SizeWitness = crate::Arity32;
-#[cfg(all(
-    not(feature = "8"),
-    not(feature = "16"),
-    not(feature = "32"),
-    feature = "64"
-))]
-type SizeWitness = crate::Arity64;
-#[cfg(all(
-    not(feature = "8"),
-    not(feature = "16"),
-    not(feature = "32"),
-    not(feature = "64"),
-    feature = "128"
-))]
-type SizeWitness = crate::Arity128;
-#[cfg(all(
-    not(feature = "8"),
-    not(feature = "16"),
-    not(feature = "32"),
-    not(feature = "64"),
-    not(feature = "128"),
-    feature = "256"
-))]
-type SizeWitness = crate::Arity256;
-
-#[cfg(any(
-    feature = "8",
-    feature = "16",
-    feature = "32",
-    feature = "64",
-    feature = "128",
-    feature = "256"
-))]
-const _: () = assert!(
-    core::mem::size_of::<GappedArray<[u8; 32], SizeWitness>>() == core::mem::size_of::<*const ()>()
-);
+impl_size_witness!(GappedArray);
 
 /// Smallest power-of-two capacity that holds `n` elements, capped at `A::LEN`.
 /// Returns `0` for `n == 0` (the unallocated state). `A::LEN` is itself a power

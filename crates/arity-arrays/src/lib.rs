@@ -34,6 +34,8 @@ pub mod arity;
 #[cfg(feature = "serde_with")]
 mod compact;
 pub mod fixed;
+#[macro_use]
+mod macros;
 pub mod gapped;
 pub mod packed;
 mod raw;

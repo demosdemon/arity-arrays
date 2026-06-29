@@ -53,50 +53,7 @@ pub struct PackedArray<T, A: Arity>(
     PhantomData<alloc::boxed::Box<T>>,
 );
 
-// Compile-time guarantee: pointer-sized. Witnessed by whichever arity is
-// enabled (the property is generic over `A`; the marker is only a witness).
-#[cfg(feature = "8")]
-type SizeWitness = crate::Arity8;
-#[cfg(all(not(feature = "8"), feature = "16"))]
-type SizeWitness = crate::Arity16;
-#[cfg(all(not(feature = "8"), not(feature = "16"), feature = "32"))]
-type SizeWitness = crate::Arity32;
-#[cfg(all(
-    not(feature = "8"),
-    not(feature = "16"),
-    not(feature = "32"),
-    feature = "64"
-))]
-type SizeWitness = crate::Arity64;
-#[cfg(all(
-    not(feature = "8"),
-    not(feature = "16"),
-    not(feature = "32"),
-    not(feature = "64"),
-    feature = "128"
-))]
-type SizeWitness = crate::Arity128;
-#[cfg(all(
-    not(feature = "8"),
-    not(feature = "16"),
-    not(feature = "32"),
-    not(feature = "64"),
-    not(feature = "128"),
-    feature = "256"
-))]
-type SizeWitness = crate::Arity256;
-
-#[cfg(any(
-    feature = "8",
-    feature = "16",
-    feature = "32",
-    feature = "64",
-    feature = "128",
-    feature = "256"
-))]
-const _: () = assert!(
-    core::mem::size_of::<PackedArray<[u8; 32], SizeWitness>>() == core::mem::size_of::<*const ()>()
-);
+impl_size_witness!(PackedArray);
 
 /// Base address of the element array within an `Inner` allocation.
 ///
