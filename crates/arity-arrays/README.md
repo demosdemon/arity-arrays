@@ -24,6 +24,24 @@ let present: Vec<(u8, u32)> =
 assert_eq!(present, vec![(1, 10), (9, 90)]);
 ```
 
+## Memory layout
+
+A 16-slot `FixedArray<Option<[u8; 32]>>` occupies a constant **528 bytes**
+regardless of how many slots are filled, while `PackedArray` costs one pointer
+when empty and `bitmap + occupancy × size_of::<T>` (plus header padding) when
+populated. Exact figures (handle + heap), computed by `cargo test --test
+memory_report`:
+
+### Cell A — Arity16 + [u8; 32]
+
+| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |
+|----------:|------------:|-----------:|-----------------:|
+| 0 | 8 | 528 | 544 |
+| 1 | 42 | 528 | 544 |
+| 4 | 138 | 528 | 544 |
+| 8 | 266 | 528 | 544 |
+| 16 | 522 | 528 | 544 |
+
 ## Cargo features
 
 | Feature | Default | Description |
@@ -54,6 +72,27 @@ This crate is `#![no_std]` but requires `alloc` (heap allocation for `PackedArra
 ## MSRV
 
 Minimum Supported Rust Version: **1.92**.
+
+## Performance
+
+Throughput measured with [`divan`](https://crates.io/crates/divan) over the two
+representative cells (Arity16 + 32-byte hash; Arity256 + 8-byte pointer
+stand-in) against `FixedArray`, `Box<[Option<T>]>`, `BTreeMap`, and `HashMap`.
+Reproduce with `just bench`.
+
+> measured on: Apple M3 Max, rustc 1.98.0-nightly (f428d123a 2026-06-19), 2026-06-28
+
+Absolute nanoseconds are machine-specific; the comparison *between*
+representations is the durable signal. Highlights (median latency):
+
+| benchmark | occupancy | PackedArray | FixedArray | Box<[Option<T>]> | BTreeMap | HashMap |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cell A `get_hit` | 8/16 | 1.10 ns | 0.69 ns | 0.78 ns | 2.16 ns | 10.05 ns |
+| Cell A `insert_new` | 4/16 | 35.24 ns | 9.36 ns | 13.75 ns | 23.19 ns | 25.55 ns |
+| Cell A `churn` | – | 7.915 µs | 333 ns | 276 ns | 2.87 µs | 3.34 µs |
+| Cell B `get_hit` | 128/256 | 1.43 ns | 0.50 ns | 0.74 ns | 4.56 ns | 7.29 ns |
+| Cell B `insert_new` | 64/256 | 47.61 ns | 68.11 ns | 11.51 ns | 150.8 ns | 26.12 ns |
+| Cell B `churn` | – | 90.56 µs | 958 ns | 903 ns | 35.79 µs | 42.70 µs |
 
 ## License
 

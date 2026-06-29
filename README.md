@@ -19,8 +19,21 @@ Two layouts are useful, and both are provided:
   proportional to occupancy.
 
 The packed form is the memory-amplification mitigation from firewood#2100: a
-16-slot `Children<Option<HashType>>` costs ~528 bytes even when empty, while the
-packed form costs one pointer when empty, else `bitmap + occupancy × size_of::<T>()`.
+16-slot `FixedArray<Option<[u8; 32]>>` occupies a constant **528 bytes**
+regardless of how many slots are filled, while `PackedArray` costs one pointer
+when empty and `bitmap + occupancy × size_of::<T>` (plus header padding) when
+populated. Exact figures (handle + heap), computed by `cargo test --test
+memory_report`:
+
+### Cell A — Arity16 + [u8; 32]
+
+| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |
+|----------:|------------:|-----------:|-----------------:|
+| 0 | 8 | 528 | 544 |
+| 1 | 42 | 528 | 544 |
+| 4 | 138 | 528 | 544 |
+| 8 | 266 | 528 | 544 |
+| 16 | 522 | 528 | 544 |
 
 Both rely on a **niche integer index** — a small type whose value is statically
 known to be in `0..N`, which (a) makes `Option<Index>` one byte via niche

@@ -70,3 +70,8 @@ fuzz-linux target time="60":
       -v arity-arrays-fuzz-registry:/usr/local/cargo/registry \
       -w /src/fuzz arity-arrays-fuzz \
       cargo fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
+
+# Run the divan throughput benchmarks (default features cover both cells).
+# Pass divan args after `--`, e.g. `just bench -- --sample-count 3`.
+bench *args:
+    cargo bench -p arity-arrays --bench throughput {{ args }}
