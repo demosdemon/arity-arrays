@@ -83,6 +83,7 @@ fn compact_gapped_round_trip() {
     assert_eq!(node, back);
     // popcount mismatch is rejected.
     assert!(serde_json::from_str::<GappedNode>(r#"{"children":[[4,2],[20]]}"#).is_err());
-    // wrong-length bitmap is rejected (BYTES must be 2 for Arity16); mirrors PackedArray.
+    // wrong-length bitmap is rejected (BYTES must be 2 for Arity16); mirrors
+    // PackedArray.
     assert!(serde_json::from_str::<GappedNode>(r#"{"children":[[4,2,0],[20,90]]}"#).is_err());
 }
