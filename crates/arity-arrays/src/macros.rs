@@ -120,3 +120,73 @@ macro_rules! impl_dense_common {
         unsafe impl<T: Sync, A: Arity> Sync for $Iter<'_, T, A> {}
     };
 }
+
+/// Emits the logical-form serde impls (a sequence of ascending `(index, value)`
+/// pairs) for an array representation. `$label` prefixes the strictly-ascending
+/// error message. Gated on `feature = "serde"`. Requires `FixedArray`, `Arity`,
+/// and `::core::marker::PhantomData` in scope at the invocation site.
+macro_rules! impl_logical_serde {
+    ($Ty:ident, $label:literal) => {
+        #[cfg(feature = "serde")]
+        impl<T: ::serde::Serialize, A: Arity> ::serde::Serialize for $Ty<T, A>
+        where
+            A::Index: ::serde::Serialize,
+        {
+            fn serialize<S: ::serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> ::core::result::Result<S::Ok, S::Error> {
+                // Logical form: a sequence of `(index, value)` pairs, ascending.
+                serializer.collect_seq(self.iter_present())
+            }
+        }
+
+        #[cfg(feature = "serde")]
+        impl<'de, T: ::serde::Deserialize<'de>, A: Arity> ::serde::Deserialize<'de> for $Ty<T, A>
+        where
+            A::Index: ::serde::Deserialize<'de>,
+        {
+            fn deserialize<D: ::serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> ::core::result::Result<Self, D::Error> {
+                struct PairsVisitor<T, A>(::core::marker::PhantomData<(T, A)>);
+
+                impl<'de, T: ::serde::Deserialize<'de>, A: Arity> ::serde::de::Visitor<'de>
+                    for PairsVisitor<T, A>
+                where
+                    A::Index: ::serde::Deserialize<'de>,
+                {
+                    type Value = $Ty<T, A>;
+
+                    fn expecting(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        f.write_str(
+                            "a sequence of (index, value) pairs with strictly ascending indices",
+                        )
+                    }
+
+                    fn visit_seq<S: ::serde::de::SeqAccess<'de>>(
+                        self,
+                        mut seq: S,
+                    ) -> ::core::result::Result<Self::Value, S::Error> {
+                        let mut out = FixedArray::<Option<T>, A>::new();
+                        let mut last: Option<usize> = None;
+                        while let Some((index, value)) = seq.next_element::<(A::Index, T)>()? {
+                            let i = index.as_usize();
+                            if last.is_some_and(|prev| i <= prev) {
+                                return Err(::serde::de::Error::custom(concat!(
+                                    $label,
+                                    " indices must be strictly ascending"
+                                )));
+                            }
+                            last = Some(i);
+                            out[index] = Some(value);
+                        }
+                        Ok($Ty::from(out))
+                    }
+                }
+
+                deserializer.deserialize_seq(PairsVisitor(::core::marker::PhantomData))
+            }
+        }
+    };
+}

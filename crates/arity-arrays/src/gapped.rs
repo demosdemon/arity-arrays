@@ -1278,57 +1278,7 @@ impl_dense_common!(
     "bit cursors iterate primitive bitmaps; clippy cannot see the assoc-type bound"
 );
 
-#[cfg(feature = "serde")]
-impl<T: serde::Serialize, A: Arity> serde::Serialize for GappedArray<T, A>
-where
-    A::Index: serde::Serialize,
-{
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.iter_present())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for GappedArray<T, A>
-where
-    A::Index: serde::Deserialize<'de>,
-{
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct PairsVisitor<T, A>(PhantomData<(T, A)>);
-
-        impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::de::Visitor<'de> for PairsVisitor<T, A>
-        where
-            A::Index: serde::Deserialize<'de>,
-        {
-            type Value = GappedArray<T, A>;
-
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("a sequence of (index, value) pairs with strictly ascending indices")
-            }
-
-            fn visit_seq<S: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: S,
-            ) -> Result<Self::Value, S::Error> {
-                let mut out = FixedArray::<Option<T>, A>::new();
-                let mut last: Option<usize> = None;
-                while let Some((index, value)) = seq.next_element::<(A::Index, T)>()? {
-                    let i = index.as_usize();
-                    if last.is_some_and(|prev| i <= prev) {
-                        return Err(serde::de::Error::custom(
-                            "GappedArray indices must be strictly ascending",
-                        ));
-                    }
-                    last = Some(i);
-                    out[index] = Some(value);
-                }
-                Ok(GappedArray::from(out))
-            }
-        }
-
-        deserializer.deserialize_seq(PairsVisitor(PhantomData))
-    }
-}
+impl_logical_serde!(GappedArray, "GappedArray");
 
 #[cfg(test)]
 mod tests {
