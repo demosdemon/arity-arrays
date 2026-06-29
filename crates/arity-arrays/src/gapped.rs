@@ -449,8 +449,10 @@ impl<T, A: Arity> GappedArray<T, A> {
             let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < new_cap <= N");
             new_live = new_live.with_bit(p_idx);
         }
-        // SAFETY: `new_cap > 0` (count >= 1 in the reachable callers); the copy
-        // loop initialises exactly the `new_live` slots before any read.
+        // SAFETY: `new_cap >= 1` because callers only pass `new_cap > capacity >= 1`
+        // (an allocated block has capacity >= 1); the 0..count copy loops degenerate
+        // harmlessly when count == 0. The copy initialises exactly the `new_live`
+        // slots before any read.
         let new_ptr = unsafe { alloc_block::<A, T>(occ, new_live, new_cap_exp, new_cap) };
         // SAFETY: `old_ptr` valid per the invariant; distinct from `new_ptr`.
         let src = unsafe { data_ptr(old_ptr) };
@@ -677,7 +679,11 @@ impl<T, A: Arity> GappedArray<T, A> {
         let n = p_hi - hole - 1; // elements in (hole, p_hi) to shift down by one
         // SAFETY: slots (hole, p_hi) are initialised live elements; copying them
         // one slot toward `hole` is an overlap-safe bitwise move (no drop/user
-        // code runs). The vacated slot is `p_hi - 1`, where `value` is written.
+        // code runs). The vacated slot is `p_hi - 1`, where `value` is written
+        // via `ptr::write` (not `replace`): this is not a double-drop because the
+        // `ptr::copy` bitwise-moved the run down by one, so the former occupant of
+        // `p_hi - 1` now lives at `p_hi - 2`; slot `p_hi - 1` holds a bitwise
+        // duplicate that is overwritten (correct — it was moved, not cloned).
         // After the copy, exactly one new physical slot is live — the former
         // hole — so the live bitmap gains `hole_idx` and is otherwise unchanged.
         unsafe {
@@ -1181,7 +1187,8 @@ impl<'a, T, A: Arity> Iterator for GappedPresentIter<'a, T, A> {
             .expect("live and occupancy have equal count")
             .as_usize();
         // SAFETY: `p` is a set live bit (physical slot < cap) with an
-        // initialised element bounded by `&'a self`.
+        // initialised element; the reference is bounded by `'a` (the
+        // originating `&'a GappedArray` borrow, carried via `PhantomData<&'a T>`).
         Some((i, unsafe { &*self.data.add(p) }))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1306,6 +1313,8 @@ unsafe impl<T: Send, A: Arity> Send for GappedArray<T, A> {}
 // SAFETY: `&GappedArray` yields only `&T`; no interior mutability.
 unsafe impl<T: Sync, A: Arity> Sync for GappedArray<T, A> {}
 
+// `NonNull` is `!UnwindSafe`; `GappedArray` owns its data with no shared/cyclic
+// state, so these hold whenever `T` does.
 impl<T: core::panic::UnwindSafe, A: Arity> core::panic::UnwindSafe for GappedArray<T, A> {}
 impl<T: core::panic::RefUnwindSafe, A: Arity> core::panic::RefUnwindSafe for GappedArray<T, A> {}
 
