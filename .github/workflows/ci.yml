@@ -134,6 +134,12 @@ jobs:
           - mutation_64
           - mutation_128
           - mutation_256
+          - gapped_8
+          - gapped_16
+          - gapped_32
+          - gapped_64
+          - gapped_128
+          - gapped_256
           - compact_decode
           - bitmap_roundtrip
     steps:

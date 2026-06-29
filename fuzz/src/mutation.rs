@@ -71,3 +71,40 @@ pub fn mutation_run<A: Arity>(ops: Vec<Op>) {
         assert_eq!(cloned.get(i), oracle.get(&k));
     }
 }
+
+use arity_arrays::GappedArray;
+
+/// Replay `ops` against a `GappedArray<Vec<u8>, A>` and a `BTreeMap` oracle,
+/// mirroring `mutation_run` but exercising the gapped representation.
+pub fn mutation_run_gapped<A: Arity>(ops: Vec<Op>) {
+    let mut g: GappedArray<Vec<u8>, A> = GappedArray::new();
+    let mut oracle: BTreeMap<usize, Vec<u8>> = BTreeMap::new();
+    for op in ops {
+        let i = match &op {
+            Op::Insert(slot, _) | Op::Remove(slot) | Op::GetMut(slot, _) => idx::<A>(*slot),
+        };
+        match op {
+            Op::Insert(_, val) => {
+                assert_eq!(g.insert(i, val.clone()), oracle.insert(i.as_usize(), val));
+            }
+            Op::Remove(_) => assert_eq!(g.remove(i), oracle.remove(&i.as_usize())),
+            Op::GetMut(_, val) => {
+                if let Some(p) = g.get_mut(i) {
+                    *p = val.clone();
+                }
+                if let Some(o) = oracle.get_mut(&i.as_usize()) {
+                    *o = val;
+                }
+            }
+        }
+        assert_eq!(g.count(), oracle.len());
+        assert_eq!(g.get(i), oracle.get(&i.as_usize()));
+    }
+    let cloned = g.clone();
+    assert_eq!(cloned.count(), oracle.len());
+    for i in <A::Index as Niche>::all() {
+        let k = i.as_usize();
+        assert_eq!(g.get(i), oracle.get(&k));
+        assert_eq!(cloned.get(i), oracle.get(&k));
+    }
+}

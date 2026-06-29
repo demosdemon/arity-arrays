@@ -65,6 +65,48 @@ doc = false
 bench = false
 
 [[bin]]
+name = "gapped_16"
+path = "fuzz_targets/gapped_16.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gapped_8"
+path = "fuzz_targets/gapped_8.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gapped_32"
+path = "fuzz_targets/gapped_32.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gapped_64"
+path = "fuzz_targets/gapped_64.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gapped_128"
+path = "fuzz_targets/gapped_128.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gapped_256"
+path = "fuzz_targets/gapped_256.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "compact_decode"
 path = "fuzz_targets/compact_decode.rs"
 test = false
