@@ -12,6 +12,7 @@ use core::mem::size_of;
 
 use arity_arrays::Arity;
 use arity_arrays::FixedArray;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 
@@ -32,6 +33,19 @@ const fn boxed_bytes<T, A: Arity>() -> usize {
     size_of::<Box<[Option<T>]>>() + A::LEN * size_of::<Option<T>>()
 }
 
+/// Build a `GappedArray` with `occupancy` contiguous slots present and report
+/// its total bytes: the pointer-sized handle plus the live heap block (capacity
+/// is the next power-of-two ≥ occupancy, so the number differs from packed's
+/// exact sizing).
+fn gapped_bytes<T: Copy, A: Arity>(occupancy: usize, make: impl Fn(usize) -> T) -> usize {
+    let mut g = GappedArray::<T, A>::new();
+    for i in 0..occupancy {
+        let idx = <A::Index as Niche>::try_from_usize(i).expect("i < occupancy <= LEN");
+        g.insert(idx, make(i));
+    }
+    size_of::<GappedArray<T, A>>() + g.allocated_size()
+}
+
 fn render_cell<T: Copy, A: Arity>(
     title: &str,
     occupancies: &[usize],
@@ -41,11 +55,12 @@ fn render_cell<T: Copy, A: Arity>(
     let boxed = boxed_bytes::<T, A>();
     let mut out = String::new();
     let _ = write!(out, "### {title}\n\n");
-    out.push_str("| occupancy | PackedArray | FixedArray | Box<[Option<T>]> |\n");
-    out.push_str("|----------:|------------:|-----------:|-----------------:|\n");
+    out.push_str("| occupancy | PackedArray | GappedArray | FixedArray | Box<[Option<T>]> |\n");
+    out.push_str("|----------:|------------:|------------:|-----------:|-----------------:|\n");
     for &o in occupancies {
         let packed = packed_bytes::<T, A>(o, &make);
-        let _ = writeln!(out, "| {o} | {packed} | {fixed} | {boxed} |");
+        let gapped = gapped_bytes::<T, A>(o, &make);
+        let _ = writeln!(out, "| {o} | {packed} | {gapped} | {fixed} | {boxed} |");
     }
     out.push('\n');
     out
@@ -56,7 +71,8 @@ fn memory_table() {
     let mut table = String::new();
     table.push_str(
         "Exact bytes (handle + heap). PackedArray heap = bitmap + occupancy × \
-         size_of::<T> + padding. FixedArray and Box are occupancy-independent. \
+         size_of::<T> + padding. GappedArray heap = layout for next pow2 capacity ≥ \
+         occupancy. FixedArray and Box are occupancy-independent. \
          Maps (BTreeMap/HashMap) are omitted: their heap use is impl-defined \
          per-entry overhead, not an analytic function.\n\n",
     );

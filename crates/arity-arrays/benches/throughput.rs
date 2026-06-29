@@ -13,6 +13,7 @@ use arity_arrays::Arity;
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
 use arity_arrays::FixedArray;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use support::BenchContainer;
 use support::BoxArr;
@@ -103,6 +104,7 @@ single_op_benches!(
     cell_a, [u8; 32], Arity16, OCC_A, OCC_A_PARTIAL,
     [
         PackedArray<[u8; 32], Arity16>,
+        GappedArray<[u8; 32], Arity16>,
         FixedArray<Option<[u8; 32]>, Arity16>,
         BoxArr<[u8; 32], Arity16>,
         BTreeMap<usize, [u8; 32]>,
@@ -114,6 +116,7 @@ single_op_benches!(
     cell_b, u64, Arity256, OCC_B, OCC_B_PARTIAL,
     [
         PackedArray<u64, Arity256>,
+        GappedArray<u64, Arity256>,
         FixedArray<Option<u64>, Arity256>,
         BoxArr<u64, Arity256>,
         BTreeMap<usize, u64>,
@@ -214,6 +217,7 @@ workload_benches!(
     workload_a, [u8; 32], Arity16,
     [
         PackedArray<[u8; 32], Arity16>,
+        GappedArray<[u8; 32], Arity16>,
         FixedArray<Option<[u8; 32]>, Arity16>,
         BoxArr<[u8; 32], Arity16>,
         BTreeMap<usize, [u8; 32]>,
@@ -225,6 +229,7 @@ workload_benches!(
     workload_b, u64, Arity256,
     [
         PackedArray<u64, Arity256>,
+        GappedArray<u64, Arity256>,
         FixedArray<Option<u64>, Arity256>,
         BoxArr<u64, Arity256>,
         BTreeMap<usize, u64>,

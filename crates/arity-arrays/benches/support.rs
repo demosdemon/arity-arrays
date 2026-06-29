@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use arity_arrays::Arity;
 use arity_arrays::FixedArray;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 
@@ -91,6 +92,24 @@ pub trait BenchContainer<T: Payload> {
 }
 
 impl<T: Payload, A: Arity> BenchContainer<T> for PackedArray<T, A> {
+    fn empty() -> Self {
+        Self::new()
+    }
+    fn lookup(&self, index: usize) -> Option<&T> {
+        self.get(masked_index::<A>(index))
+    }
+    fn set(&mut self, index: usize, value: T) -> Option<T> {
+        self.insert(masked_index::<A>(index), value)
+    }
+    fn del(&mut self, index: usize) -> Option<T> {
+        self.remove(masked_index::<A>(index))
+    }
+    fn fold(&self) -> u64 {
+        self.iter_present().fold(0, |acc, (_, v)| acc ^ v.fold())
+    }
+}
+
+impl<T: Payload, A: Arity> BenchContainer<T> for GappedArray<T, A> {
     fn empty() -> Self {
         Self::new()
     }
