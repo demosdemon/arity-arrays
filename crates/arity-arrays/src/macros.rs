@@ -6,7 +6,8 @@
 
 /// Emits the compile-time pointer-size witness for an array representation:
 /// a feature-gated `SizeWitness` arity alias plus a `const _` assertion that
-/// `$Ty<[u8; 32], SizeWitness>` is pointer-sized. Invoked once per module.
+/// `$Ty<[u8; 32], SizeWitness>` is pointer-sized. Invoked once per
+/// representation.
 macro_rules! impl_size_witness {
     ($Ty:ident) => {
         // Compile-time guarantee: pointer-sized. Witnessed by whichever arity is
@@ -60,8 +61,9 @@ macro_rules! impl_size_witness {
 /// Emits the gap-agnostic value impls (`PartialEq`/`Eq`/`Hash`/`Debug`) and the
 /// thread-safety impls (`Send`/`Sync`/`UnwindSafe`/`RefUnwindSafe` for the
 /// array, `Send`/`Sync` for its present-iterator `$Iter`). `$reason` is the
-/// `#[expect]` justification for the iterator's raw pointer. Depends on the
-/// inherent `bitmap()`, `count()`, and `iter_present()` methods of `$Ty`.
+/// `#[expect]` justification for the iterator's raw pointer. Depends on `Arity`
+/// being in scope and on the inherent `bitmap()`, `count()`, and
+/// `iter_present()` methods of `$Ty`.
 macro_rules! impl_dense_common {
     ($Ty:ident, $Iter:ident, $reason:literal) => {
         impl<T: PartialEq, A: Arity> PartialEq for $Ty<T, A> {
@@ -114,18 +116,21 @@ macro_rules! impl_dense_common {
         // `&$Ty`, so it derives `Send`/`Sync` automatically once the array is
         // `Sync`.
         #[expect(clippy::non_send_fields_in_send_ty, reason = $reason)]
-        // SAFETY: the raw pointer is used only for shared reads bounded by `&'a self`.
+        // SAFETY: the raw pointer is used only for shared reads for the lifetime
+        // the iterator borrows its source array; it never aliases a mutable reference.
         unsafe impl<T: Sync, A: Arity> Send for $Iter<'_, T, A> {}
-        // SAFETY: as above — shared, read-only access; no interior mutability.
+        // SAFETY: shared, read-only access; no interior mutability.
         unsafe impl<T: Sync, A: Arity> Sync for $Iter<'_, T, A> {}
     };
 }
 
 /// Emits the `serde_with` `Compact` wire-form adapter (`SerializeAs` +
-/// `DeserializeAs`) for an array representation. Both serialize by streaming
-/// `iter_present()` via `PresentValues` (no temporary `Vec`). Requires
-/// `Compact`, `PresentValues`, `Bitmap`, `Arity`, `FixedArray`, the `serde`/
-/// `serde_with` traits, and `COMPACT_LEN_ERR`/`COMPACT_POPCOUNT_ERR` in scope.
+/// `DeserializeAs`) for an array representation. `SerializeAs` streams
+/// `iter_present()` via `PresentValues` without a temporary value `Vec`;
+/// `DeserializeAs` reads a `(Vec<u8>, Vec<T>)` tuple, validates the bitmap
+/// length and popcount, then reconstructs the array. Requires `Compact`,
+/// `PresentValues`, `Bitmap`, `Arity`, `FixedArray`, the `serde`/`serde_with`
+/// traits, and `COMPACT_LEN_ERR`/`COMPACT_POPCOUNT_ERR` in scope.
 #[cfg(feature = "serde_with")]
 macro_rules! impl_compact_adapter {
     ($Ty:ident) => {
@@ -163,8 +168,9 @@ macro_rules! impl_compact_adapter {
     };
 }
 
-/// Emits the logical-form serde impls (a sequence of ascending `(index, value)`
-/// pairs) for an array representation. `$label` prefixes the strictly-ascending
+/// Emits the logical-form serde impls (a sequence of strictly ascending
+/// `(index, value)` pairs) for an array representation. `$label` prefixes the
+/// strictly-ascending
 /// error message. Gated on `feature = "serde"`. Requires `FixedArray` and
 /// `Arity` in scope at the invocation site.
 macro_rules! impl_logical_serde {

@@ -1,6 +1,6 @@
-//! [`Compact`]: a `serde_with` adapter that serializes a [`PackedArray`] as a
-//! fixed-width little-endian bitmap plus its dense values — a compact,
-//! backing-independent wire form (the bitmap goes through
+//! [`Compact`]: a `serde_with` adapter that serializes a [`PackedArray`] or
+//! [`GappedArray`] as a fixed-width little-endian bitmap plus its dense values
+//! — a compact, backing-independent wire form (the bitmap goes through
 //! [`Bitmap::to_le_bytes`](arity_bitmap::Bitmap::to_le_bytes), so it is
 //! identical for the custom and `ethnum` 256-bit backings).
 
@@ -19,8 +19,9 @@ use crate::FixedArray;
 use crate::GappedArray;
 use crate::PackedArray;
 
-/// `serde_with` adapter for the compact `PackedArray` wire form. Use as
-/// `#[serde_as(as = "Compact")]` on a `PackedArray<T, A>` field.
+/// `serde_with` adapter for the compact wire form of [`PackedArray`] and
+/// [`GappedArray`]. Use as `#[serde_as(as = "Compact")]` on a
+/// `PackedArray<T, A>` or `GappedArray<T, A>` field.
 pub struct Compact;
 
 /// Serializes present values as a sequence without collecting them into a
@@ -39,9 +40,12 @@ where
     }
 }
 
-/// Error operand for a compact bitmap of the wrong byte length.
+/// The `Expected` descriptor passed to `serde::de::Error::invalid_length` when
+/// the bitmap byte slice has the wrong length; the message reads
+/// `"invalid length N, expected the bitmap byte length (WIDTH / 8)"`.
 const COMPACT_LEN_ERR: &str = "the bitmap byte length (WIDTH / 8)";
-/// Error for a compact bitmap whose popcount disagrees with the value count.
+/// The complete message passed to `serde::de::Error::custom` when the bitmap
+/// popcount disagrees with the number of decoded values.
 const COMPACT_POPCOUNT_ERR: &str = "Compact: bitmap popcount does not match the number of values";
 
 impl_compact_adapter!(PackedArray);
