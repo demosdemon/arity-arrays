@@ -48,6 +48,27 @@ mod custom {
         }
     }
 
+    /// Position (`< 128`) of the `n`-th set bit of a `u128` limb. Precondition:
+    /// `n < limb.count_ones()`. Popcount-guided binary search, `O(log 128)`.
+    const fn select_in_u128(limb: u128, n: u32) -> usize {
+        let mut n = n;
+        let mut x = limb;
+        let mut pos = 0usize;
+        let mut size: u32 = 64;
+        loop {
+            let lo_count = (x & ((1u128 << size) - 1)).count_ones();
+            if n >= lo_count {
+                n -= lo_count;
+                x >>= size;
+                pos += size as usize;
+            }
+            if size == 1 {
+                return pos;
+            }
+            size /= 2;
+        }
+    }
+
     impl Sealed for U256 {}
 
     impl Raw for U256 {
@@ -97,6 +118,19 @@ mod custom {
                 }
             } else {
                 self
+            }
+        }
+        fn raw_select(self, n: u32) -> Option<usize> {
+            let lo_pop = self.lo.count_ones();
+            if n < lo_pop {
+                Some(select_in_u128(self.lo, n))
+            } else {
+                let n_hi = n - lo_pop;
+                if n_hi < self.hi.count_ones() {
+                    Some(128 + select_in_u128(self.hi, n_hi))
+                } else {
+                    None
+                }
             }
         }
     }
@@ -215,6 +249,31 @@ mod ethnum_backed {
                 self
             } else {
                 self & !(ONE << (255 - self.leading_zeros()))
+            }
+        }
+        fn raw_select(self, n: u32) -> Option<usize> {
+            // `Self::count_ones` binds to ethnum's inherent method.
+            if n >= Self::count_ones(self) {
+                return None;
+            }
+            // Popcount-guided binary search over the full 256-bit value; `size`
+            // starts at 128 so no shift reaches the 256-bit width.
+            let mut n = n;
+            let mut x = self;
+            let mut pos = 0usize;
+            let mut size: u32 = 128;
+            loop {
+                let lo_mask = (ONE << size) - ONE;
+                let lo_count = Self::count_ones(x & lo_mask);
+                if n >= lo_count {
+                    n -= lo_count;
+                    x >>= size;
+                    pos += size as usize;
+                }
+                if size == 1 {
+                    return Some(pos);
+                }
+                size /= 2;
             }
         }
     }
@@ -367,6 +426,23 @@ mod tests {
         // bit 128 is the lowest bit of the high limb -> first byte of the second half.
         assert_eq!(buf[16], 0b0000_0001);
         assert_eq!(<U256 as Bitmap>::from_le_bytes(&buf), bm);
+    }
+
+    #[test]
+    fn select_spans_limbs_inverse_of_rank() {
+        let bm = U256::ZERO
+            .with_bit(0)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(255);
+        assert_eq!(bm.select(0), Some(0));
+        assert_eq!(bm.select(1), Some(127));
+        assert_eq!(bm.select(2), Some(128));
+        assert_eq!(bm.select(3), Some(255));
+        assert_eq!(bm.select(4), None);
+        for i in bm.bits() {
+            assert_eq!(bm.select(bm.rank(i)), Some(i));
+        }
     }
 
     #[test]
