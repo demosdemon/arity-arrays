@@ -19,7 +19,7 @@ Three layouts are provided:
   proportional to occupancy.
 - **Gapped** (`GappedArray<T, A>`) — heap-backed with spare capacity kept at a
   geometric (power-of-two) size and gaps between elements so deletes are always
-  move-free and inserts minimise moves. The write-throughput corner: trades
+  move-free and inserts minimize moves. The write-throughput corner: trades
   memory for lower mutation cost.
 
 The packed form is the memory-amplification mitigation from firewood#2100: a

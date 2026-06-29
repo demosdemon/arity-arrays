@@ -5,7 +5,7 @@
 //! [`FixedArray`] is a full-width inline array (one slot per index);
 //! [`PackedArray`] is a pointer-sized, heap-packed representation that stores
 //! only the present elements; [`GappedArray`] is a pointer-sized, heap-backed
-//! representation with spare capacity and gaps that minimises mutation cost.
+//! representation with spare capacity and gaps that minimizes mutation cost.
 //! All three are generic over the [`Arity`] trait, which pairs an index type
 //! with a bitmap backing and a `hybrid-array` size.
 //!

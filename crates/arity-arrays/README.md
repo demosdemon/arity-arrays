@@ -2,7 +2,7 @@
 
 Fixed, pointer-sized heap-packed, and gapped arrays over a generic arity, indexed without bounds checks.
 
-`FixedArray<T, A>` is a full-width inline array (one slot per index); `PackedArray<T, A>` is a pointer-sized, heap-packed representation that stores only the present elements; `GappedArray<T, A>` is a pointer-sized, heap-backed representation with spare capacity and gaps that minimises mutation cost. All three are generic over the `Arity` trait, which pairs an index type with a bitmap backing and a `hybrid-array` size. Six concrete arities are provided: `Arity8`, `Arity16`, `Arity32`, `Arity64`, `Arity128`, and `Arity256`.
+`FixedArray<T, A>` is a full-width inline array (one slot per index); `PackedArray<T, A>` is a pointer-sized, heap-packed representation that stores only the present elements; `GappedArray<T, A>` is a pointer-sized, heap-backed representation with spare capacity and gaps that minimizes mutation cost. All three are generic over the `Arity` trait, which pairs an index type with a bitmap backing and a `hybrid-array` size. Six concrete arities are provided: `Arity8`, `Arity16`, `Arity32`, `Arity64`, `Arity128`, and `Arity256`.
 
 ## Usage
 
@@ -67,7 +67,7 @@ is identical whether the arity-256 backing is the custom `U256` or `ethnum::U256
 
 ## `no_std`
 
-This crate is `#![no_std]` but requires `alloc` (heap allocation for `PackedArray`).
+This crate is `#![no_std]` but requires `alloc` (heap allocation for `PackedArray` and `GappedArray`).
 
 ## MSRV
 
@@ -77,8 +77,10 @@ Minimum Supported Rust Version: **1.92**.
 
 Throughput measured with [`divan`](https://crates.io/crates/divan) over the two
 representative cells (Arity16 + 32-byte hash; Arity256 + 8-byte pointer
-stand-in) against `GappedArray`, `FixedArray`, `Box<[Option<T>]>`, `BTreeMap`,
-and `HashMap`. Reproduce with `just bench`.
+stand-in), comparing `PackedArray` against `FixedArray`, `Box<[Option<T>]>`,
+`BTreeMap`, and `HashMap`. `GappedArray` is also a benchmark subject in the
+full suite but is omitted from the snapshot below; reproduce all results with
+`just bench`.
 
 > measured on: Apple M3 Max, rustc 1.98.0-nightly (f428d123a 2026-06-19), 2026-06-28
 
