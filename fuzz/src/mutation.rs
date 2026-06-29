@@ -1,13 +1,16 @@
-//! Shared harness for the `mutation_*` fuzz targets: drive `PackedArray`
-//! insert/remove/get_mut against a `BTreeMap` oracle, generic over arity.
+//! Shared harness for the `mutation_*` and `gapped_*` fuzz targets: drive
+//! `PackedArray` or `GappedArray` insert/remove/get_mut against a `BTreeMap`
+//! oracle, generic over both arity and container type.
 //!
-//! `#[path]`-included by each `fuzz_targets/mutation_*.rs`; the fuzz crate has
-//! no `[lib]`, so this is a per-binary module include.
+//! `#[path]`-included by each `fuzz_targets/mutation_*.rs` and
+//! `fuzz_targets/gapped_*.rs`; the fuzz crate has no `[lib]`, so this is a
+//! per-binary module include.
 
 use std::collections::BTreeMap;
 
 use arbitrary::Arbitrary;
 use arity_arrays::Arity;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 
@@ -26,12 +29,70 @@ fn idx<A: Arity>(slot: u8) -> A::Index {
     <A::Index as Niche>::try_from_usize((slot as usize) & (A::LEN - 1)).unwrap()
 }
 
-/// Replay `ops` against a `PackedArray<Vec<u8>, A>` and a `BTreeMap` oracle.
+/// Abstraction over `PackedArray<Vec<u8>, A>` and `GappedArray<Vec<u8>, A>`
+/// that exposes the operations exercised by the mutation harness.
+trait ArrayOracle<A: Arity>: Clone + Default {
+    fn insert(&mut self, i: A::Index, v: Vec<u8>) -> Option<Vec<u8>>;
+    fn remove(&mut self, i: A::Index) -> Option<Vec<u8>>;
+    fn get_mut(&mut self, i: A::Index) -> Option<&mut Vec<u8>>;
+    fn get(&self, i: A::Index) -> Option<&Vec<u8>>;
+    fn count(&self) -> usize;
+}
+
+impl<A: Arity> ArrayOracle<A> for PackedArray<Vec<u8>, A> {
+    fn insert(&mut self, i: A::Index, v: Vec<u8>) -> Option<Vec<u8>> {
+        PackedArray::insert(self, i, v)
+    }
+    fn remove(&mut self, i: A::Index) -> Option<Vec<u8>> {
+        PackedArray::remove(self, i)
+    }
+    fn get_mut(&mut self, i: A::Index) -> Option<&mut Vec<u8>> {
+        PackedArray::get_mut(self, i)
+    }
+    fn get(&self, i: A::Index) -> Option<&Vec<u8>> {
+        PackedArray::get(self, i)
+    }
+    fn count(&self) -> usize {
+        PackedArray::count(self)
+    }
+}
+
+impl<A: Arity> ArrayOracle<A> for GappedArray<Vec<u8>, A> {
+    fn insert(&mut self, i: A::Index, v: Vec<u8>) -> Option<Vec<u8>> {
+        GappedArray::insert(self, i, v)
+    }
+    fn remove(&mut self, i: A::Index) -> Option<Vec<u8>> {
+        GappedArray::remove(self, i)
+    }
+    fn get_mut(&mut self, i: A::Index) -> Option<&mut Vec<u8>> {
+        GappedArray::get_mut(self, i)
+    }
+    fn get(&self, i: A::Index) -> Option<&Vec<u8>> {
+        GappedArray::get(self, i)
+    }
+    fn count(&self) -> usize {
+        GappedArray::count(self)
+    }
+}
+
+/// Replay `ops` against a `C` container and a `BTreeMap` oracle, where `C`
+/// implements `ArrayOracle<A>`.
+///
 /// Per-op cross-check is O(1) (count + the touched slot); the full `0..A::LEN`
 /// sweep runs once at end-of-run so wide arities keep op-sequence depth under
 /// the fixed fuzz budget. `Vec<u8>` values let ASAN/LSan catch drop bugs.
-pub fn mutation_run<A: Arity>(ops: Vec<Op>) {
-    let mut packed: PackedArray<Vec<u8>, A> = PackedArray::new();
+// `ArrayOracle` is crate-internal: callers supply concrete types (PackedArray
+// or GappedArray) and never need to name the trait. The private_bounds lint
+// fires because `pub fn` appears to promise something callers cannot satisfy,
+// but in practice this file is #[path]-included per binary and every call site
+// already passes a fully-concrete type argument.
+#[expect(
+    private_bounds,
+    reason = "ArrayOracle is an internal seam between the two array impls; \
+              callers pass a concrete type and never need to name the trait"
+)]
+pub fn mutation_run<A: Arity, C: ArrayOracle<A>>(ops: Vec<Op>) {
+    let mut arr: C = C::default();
     let mut oracle: BTreeMap<usize, Vec<u8>> = BTreeMap::new();
 
     for op in ops {
@@ -40,15 +101,15 @@ pub fn mutation_run<A: Arity>(ops: Vec<Op>) {
         };
         match op {
             Op::Insert(_, val) => {
-                let prev_p = packed.insert(i, val.clone());
+                let prev_a = arr.insert(i, val.clone());
                 let prev_o = oracle.insert(i.as_usize(), val);
-                assert_eq!(prev_p, prev_o);
+                assert_eq!(prev_a, prev_o);
             }
             Op::Remove(_) => {
-                assert_eq!(packed.remove(i), oracle.remove(&i.as_usize()));
+                assert_eq!(arr.remove(i), oracle.remove(&i.as_usize()));
             }
             Op::GetMut(_, val) => {
-                if let Some(p) = packed.get_mut(i) {
+                if let Some(p) = arr.get_mut(i) {
                     *p = val.clone();
                 }
                 if let Some(o) = oracle.get_mut(&i.as_usize()) {
@@ -57,54 +118,17 @@ pub fn mutation_run<A: Arity>(ops: Vec<Op>) {
             }
         }
         // O(1) post-op check: count plus the single touched slot.
-        assert_eq!(packed.count(), oracle.len());
-        assert_eq!(packed.get(i), oracle.get(&i.as_usize()));
+        assert_eq!(arr.count(), oracle.len());
+        assert_eq!(arr.get(i), oracle.get(&i.as_usize()));
     }
 
     // End-of-run: clone equivalence + full-domain sweep. Both drop after, so
     // ASAN catches any leak / double-free.
-    let cloned = packed.clone();
+    let cloned = arr.clone();
     assert_eq!(cloned.count(), oracle.len());
     for i in <A::Index as Niche>::all() {
         let k = i.as_usize();
-        assert_eq!(packed.get(i), oracle.get(&k));
-        assert_eq!(cloned.get(i), oracle.get(&k));
-    }
-}
-
-use arity_arrays::GappedArray;
-
-/// Replay `ops` against a `GappedArray<Vec<u8>, A>` and a `BTreeMap` oracle,
-/// mirroring `mutation_run` but exercising the gapped representation.
-pub fn mutation_run_gapped<A: Arity>(ops: Vec<Op>) {
-    let mut g: GappedArray<Vec<u8>, A> = GappedArray::new();
-    let mut oracle: BTreeMap<usize, Vec<u8>> = BTreeMap::new();
-    for op in ops {
-        let i = match &op {
-            Op::Insert(slot, _) | Op::Remove(slot) | Op::GetMut(slot, _) => idx::<A>(*slot),
-        };
-        match op {
-            Op::Insert(_, val) => {
-                assert_eq!(g.insert(i, val.clone()), oracle.insert(i.as_usize(), val));
-            }
-            Op::Remove(_) => assert_eq!(g.remove(i), oracle.remove(&i.as_usize())),
-            Op::GetMut(_, val) => {
-                if let Some(p) = g.get_mut(i) {
-                    *p = val.clone();
-                }
-                if let Some(o) = oracle.get_mut(&i.as_usize()) {
-                    *o = val;
-                }
-            }
-        }
-        assert_eq!(g.count(), oracle.len());
-        assert_eq!(g.get(i), oracle.get(&i.as_usize()));
-    }
-    let cloned = g.clone();
-    assert_eq!(cloned.count(), oracle.len());
-    for i in <A::Index as Niche>::all() {
-        let k = i.as_usize();
-        assert_eq!(g.get(i), oracle.get(&k));
+        assert_eq!(arr.get(i), oracle.get(&k));
         assert_eq!(cloned.get(i), oracle.get(&k));
     }
 }
