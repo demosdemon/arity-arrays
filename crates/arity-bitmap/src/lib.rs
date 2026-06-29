@@ -65,22 +65,9 @@ trait Raw: Sealed + Copy + Eq {
     fn raw_clear_highest(self) -> Self;
     /// Returns the bit position (`< WIDTH`) of the `n`-th set bit (0-based), or
     /// `None` if `n >= raw_popcount()`. Runs in `O(log WIDTH)` per limb (a
-    /// popcount-guided binary search), replacing the `O(n)` `bits().nth(n)`
-    /// fallback now that `select` is a hot path for gapped storage.
-    ///
-    /// The default body is an `O(n)` fallback via `raw_clear_lowest` iteration;
-    /// native-width implementations override this with the O(log WIDTH)
-    /// version.
-    fn raw_select(self, n: u32) -> Option<usize> {
-        if n >= self.raw_popcount() {
-            return None;
-        }
-        let mut x = self;
-        for _ in 0..n {
-            x = x.raw_clear_lowest();
-        }
-        Some(x.raw_lowest_pos())
-    }
+    /// popcount-guided binary search). Required: every backend implements it
+    /// directly; there is no `O(n)` fallback.
+    fn raw_select(self, n: u32) -> Option<usize>;
 }
 
 /// A fixed-width bitmap addressed by a [`Niche`] index type.
