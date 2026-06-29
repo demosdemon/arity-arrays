@@ -97,7 +97,7 @@ macro_rules! impl_dense_common {
         // SAFETY: the array exclusively owns its allocation; sending it across
         // threads is sound when `T: Send`.
         unsafe impl<T: Send, A: Arity> Send for $Ty<T, A> {}
-        // SAFETY: `&$Ty` yields only `&T`; no interior mutability.
+        // SAFETY: a shared reference yields only `&T`; no interior mutability.
         unsafe impl<T: Sync, A: Arity> Sync for $Ty<T, A> {}
 
         // `NonNull` is `!UnwindSafe`; the array owns its data with no
@@ -165,8 +165,8 @@ macro_rules! impl_compact_adapter {
 
 /// Emits the logical-form serde impls (a sequence of ascending `(index, value)`
 /// pairs) for an array representation. `$label` prefixes the strictly-ascending
-/// error message. Gated on `feature = "serde"`. Requires `FixedArray`, `Arity`,
-/// and `::core::marker::PhantomData` in scope at the invocation site.
+/// error message. Gated on `feature = "serde"`. Requires `FixedArray` and
+/// `Arity` in scope at the invocation site.
 macro_rules! impl_logical_serde {
     ($Ty:ident, $label:literal) => {
         #[cfg(feature = "serde")]
