@@ -56,3 +56,67 @@ macro_rules! impl_size_witness {
         );
     };
 }
+
+/// Emits the gap-agnostic value impls (`PartialEq`/`Eq`/`Hash`/`Debug`) and the
+/// thread-safety impls (`Send`/`Sync`/`UnwindSafe`/`RefUnwindSafe` for the
+/// array, `Send`/`Sync` for its present-iterator `$Iter`). `$reason` is the
+/// `#[expect]` justification for the iterator's raw pointer. Depends on the
+/// inherent `bitmap()`, `count()`, and `iter_present()` methods of `$Ty`.
+macro_rules! impl_dense_common {
+    ($Ty:ident, $Iter:ident, $reason:literal) => {
+        impl<T: PartialEq, A: Arity> PartialEq for $Ty<T, A> {
+            fn eq(&self, other: &Self) -> bool {
+                self.bitmap() == other.bitmap()
+                    && self
+                        .iter_present()
+                        .map(|(_, v)| v)
+                        .eq(other.iter_present().map(|(_, v)| v))
+            }
+        }
+
+        impl<T: Eq, A: Arity> Eq for $Ty<T, A> {}
+
+        impl<T: ::core::hash::Hash, A: Arity> ::core::hash::Hash for $Ty<T, A> {
+            fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+                self.count().hash(state);
+                for (i, v) in self.iter_present() {
+                    i.as_usize().hash(state);
+                    v.hash(state);
+                }
+            }
+        }
+
+        impl<T: ::core::fmt::Debug, A: Arity> ::core::fmt::Debug for $Ty<T, A> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                f.debug_map()
+                    .entries(self.iter_present().map(|(i, v)| (i.as_usize(), v)))
+                    .finish()
+            }
+        }
+
+        // SAFETY: the array exclusively owns its allocation; sending it across
+        // threads is sound when `T: Send`.
+        unsafe impl<T: Send, A: Arity> Send for $Ty<T, A> {}
+        // SAFETY: `&$Ty` yields only `&T`; no interior mutability.
+        unsafe impl<T: Sync, A: Arity> Sync for $Ty<T, A> {}
+
+        // `NonNull` is `!UnwindSafe`; the array owns its data with no
+        // shared/cyclic state, so these hold whenever `T` does.
+        impl<T: ::core::panic::UnwindSafe, A: Arity> ::core::panic::UnwindSafe for $Ty<T, A> {}
+        impl<T: ::core::panic::RefUnwindSafe, A: Arity> ::core::panic::RefUnwindSafe
+            for $Ty<T, A>
+        {
+        }
+
+        // The present-iterator holds a `*const T` (which suppresses the
+        // auto-impls) but only ever yields `&T` (slice-like), so it is
+        // `Send`/`Sync` exactly when `T: Sync`. The all-slots iterator borrows
+        // `&$Ty`, so it derives `Send`/`Sync` automatically once the array is
+        // `Sync`.
+        #[expect(clippy::non_send_fields_in_send_ty, reason = $reason)]
+        // SAFETY: the raw pointer is used only for shared reads bounded by `&'a self`.
+        unsafe impl<T: Sync, A: Arity> Send for $Iter<'_, T, A> {}
+        // SAFETY: as above — shared, read-only access; no interior mutability.
+        unsafe impl<T: Sync, A: Arity> Sync for $Iter<'_, T, A> {}
+    };
+}

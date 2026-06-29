@@ -676,35 +676,12 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
     }
 }
 
-impl<T: PartialEq, A: Arity> PartialEq for PackedArray<T, A> {
-    fn eq(&self, other: &Self) -> bool {
-        self.bitmap() == other.bitmap()
-            && self
-                .iter_present()
-                .map(|(_, v)| v)
-                .eq(other.iter_present().map(|(_, v)| v))
-    }
-}
-
-impl<T: Eq, A: Arity> Eq for PackedArray<T, A> {}
-
-impl<T: core::hash::Hash, A: Arity> core::hash::Hash for PackedArray<T, A> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.count().hash(state);
-        for (i, v) in self.iter_present() {
-            i.as_usize().hash(state);
-            v.hash(state);
-        }
-    }
-}
-
-impl<T: core::fmt::Debug, A: Arity> core::fmt::Debug for PackedArray<T, A> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_map()
-            .entries(self.iter_present().map(|(i, v)| (i.as_usize(), v)))
-            .finish()
-    }
-}
+impl_dense_common!(
+    PackedArray,
+    PackedPresentIter,
+    "`bits` iterates over `A::Bitmap`, a primitive type that is always Send; \
+     clippy cannot verify the associated-type bound statically"
+);
 
 #[cfg(feature = "serde")]
 impl<T: serde::Serialize, A: Arity> serde::Serialize for PackedArray<T, A>
@@ -758,32 +735,6 @@ where
         deserializer.deserialize_seq(PairsVisitor(PhantomData))
     }
 }
-
-// SAFETY: `PackedArray` exclusively owns its allocation; sending it across
-// threads is sound when `T: Send`.
-unsafe impl<T: Send, A: Arity> Send for PackedArray<T, A> {}
-// SAFETY: `&PackedArray` yields only `&T`; no interior mutability.
-unsafe impl<T: Sync, A: Arity> Sync for PackedArray<T, A> {}
-
-// `NonNull` is `!UnwindSafe`; `PackedArray` owns its data with no shared/cyclic
-// state, so these hold whenever `T` does.
-impl<T: core::panic::UnwindSafe, A: Arity> core::panic::UnwindSafe for PackedArray<T, A> {}
-impl<T: core::panic::RefUnwindSafe, A: Arity> core::panic::RefUnwindSafe for PackedArray<T, A> {}
-
-// `PackedPresentIter` holds a `*const T` (which suppresses the auto-impls) but
-// only ever yields `&T` — it behaves like a `slice::Iter`, so it is
-// `Send`/`Sync` exactly when `T: Sync`. (`PackedAllIter` borrows
-// `&PackedArray`, so it derives `Send`/`Sync` automatically once `PackedArray:
-// Sync`.)
-#[expect(
-    clippy::non_send_fields_in_send_ty,
-    reason = "`bits` iterates over `A::Bitmap`, a primitive type that is always Send; \
-              clippy cannot verify the associated-type bound statically"
-)]
-// SAFETY: the raw pointer is used only for shared reads bounded by `&'a self`.
-unsafe impl<T: Sync, A: Arity> Send for PackedPresentIter<'_, T, A> {}
-// SAFETY: as above — shared, read-only access; no interior mutability.
-unsafe impl<T: Sync, A: Arity> Sync for PackedPresentIter<'_, T, A> {}
 
 #[cfg(test)]
 mod tests {

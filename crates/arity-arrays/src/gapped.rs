@@ -1272,56 +1272,11 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
     }
 }
 
-impl<T: PartialEq, A: Arity> PartialEq for GappedArray<T, A> {
-    fn eq(&self, other: &Self) -> bool {
-        self.bitmap() == other.bitmap()
-            && self
-                .iter_present()
-                .map(|(_, v)| v)
-                .eq(other.iter_present().map(|(_, v)| v))
-    }
-}
-impl<T: Eq, A: Arity> Eq for GappedArray<T, A> {}
-
-impl<T: core::hash::Hash, A: Arity> core::hash::Hash for GappedArray<T, A> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.count().hash(state);
-        for (i, v) in self.iter_present() {
-            i.as_usize().hash(state);
-            v.hash(state);
-        }
-    }
-}
-
-impl<T: core::fmt::Debug, A: Arity> core::fmt::Debug for GappedArray<T, A> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_map()
-            .entries(self.iter_present().map(|(i, v)| (i.as_usize(), v)))
-            .finish()
-    }
-}
-
-// SAFETY: `GappedArray` exclusively owns its allocation; sound to send when `T:
-// Send`.
-unsafe impl<T: Send, A: Arity> Send for GappedArray<T, A> {}
-// SAFETY: `&GappedArray` yields only `&T`; no interior mutability.
-unsafe impl<T: Sync, A: Arity> Sync for GappedArray<T, A> {}
-
-// `NonNull` is `!UnwindSafe`; `GappedArray` owns its data with no shared/cyclic
-// state, so these hold whenever `T` does.
-impl<T: core::panic::UnwindSafe, A: Arity> core::panic::UnwindSafe for GappedArray<T, A> {}
-impl<T: core::panic::RefUnwindSafe, A: Arity> core::panic::RefUnwindSafe for GappedArray<T, A> {}
-
-// `GappedPresentIter` holds `*const T` but yields only `&T` (slice-like), so it
-// is Send/Sync exactly when `T: Sync`.
-#[expect(
-    clippy::non_send_fields_in_send_ty,
-    reason = "bit cursors iterate primitive bitmaps; clippy cannot see the assoc-type bound"
-)]
-// SAFETY: the raw pointer is used only for shared reads bounded by `&'a self`.
-unsafe impl<T: Sync, A: Arity> Send for GappedPresentIter<'_, T, A> {}
-// SAFETY: shared, read-only access; no interior mutability.
-unsafe impl<T: Sync, A: Arity> Sync for GappedPresentIter<'_, T, A> {}
+impl_dense_common!(
+    GappedArray,
+    GappedPresentIter,
+    "bit cursors iterate primitive bitmaps; clippy cannot see the assoc-type bound"
+);
 
 #[cfg(feature = "serde")]
 impl<T: serde::Serialize, A: Arity> serde::Serialize for GappedArray<T, A>
