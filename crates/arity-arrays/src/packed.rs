@@ -4,7 +4,6 @@
 use alloc::alloc::alloc;
 use alloc::alloc::dealloc;
 use alloc::alloc::handle_alloc_error;
-use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
@@ -12,6 +11,7 @@ use arity_bitmap::Bitmap;
 
 use crate::Arity;
 use crate::FixedArray;
+use crate::raw::alloc_layout;
 
 /// Header of the heap block: the bitmap followed (after alignment padding) by
 /// the element array. `#[repr(C)]` makes `data` the canonical element-array
@@ -35,8 +35,8 @@ struct Inner<A: Arity, T> {
 ///
 /// Invariant upheld by every constructor and mutator: when `self.0` is
 /// `Some(ptr)`, `ptr` points to a live allocation from
-/// `alloc_layout::<A, T>(count)` whose `bitmap` field is initialised with
-/// `bitmap != A::Bitmap::ZERO`, and whose `count == bitmap.count_ones()`
+/// `alloc_layout::<Inner<A, T>, T>(count)` whose `bitmap` field is initialised
+/// with `bitmap != A::Bitmap::ZERO`, and whose `count == bitmap.count_ones()`
 /// element slots are all initialised in ascending slot (rank) order. When
 /// `self.0` is `None`, there is no allocation. The `unsafe` reads throughout
 /// this module rely on this invariant.
@@ -98,20 +98,11 @@ const _: () = assert!(
     core::mem::size_of::<PackedArray<[u8; 32], SizeWitness>>() == core::mem::size_of::<*const ()>()
 );
 
-/// Layout of the heap block for `count` elements: `Inner` header extended by a
-/// `[T; count]` array, padded to alignment.
-fn alloc_layout<A: Arity, T>(count: usize) -> Layout {
-    let (layout, _) = Layout::new::<Inner<A, T>>()
-        .extend(Layout::array::<T>(count).expect("element layout overflow"))
-        .expect("block layout overflow");
-    layout.pad_to_align()
-}
-
 /// Base address of the element array within an `Inner` allocation.
 ///
 /// # Safety
-/// `inner` must point to a live allocation from `alloc_layout::<A, T>(count)`
-/// with the `bitmap` field initialised.
+/// `inner` must point to a live allocation from `alloc_layout::<Inner<A, T>,
+/// T>(count)` with the `bitmap` field initialised.
 unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
     // SAFETY: `inner` is valid per the precondition; `#[repr(C)]` places `data`
     // at the correct offset, so `&raw mut (*p).data` cast to `*mut T` is the
@@ -129,9 +120,9 @@ unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
 /// `count` must be `> 0` (so the layout is non-zero-sized) and equal to
 /// `bitmap.count_ones()`. The caller must initialise all `count` element slots
 /// before any read, and owns the allocation thereafter (dropping the elements
-/// and deallocating with `alloc_layout::<A, T>(count)`).
+/// and deallocating with `alloc_layout::<Inner<A, T>, T>(count)`).
 unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<Inner<A, T>> {
-    let layout = alloc_layout::<A, T>(count);
+    let layout = alloc_layout::<Inner<A, T>, T>(count);
     // SAFETY: `count > 0` so `layout.size() > 0`; `alloc` returns null on
     // failure, handled below.
     let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
@@ -162,14 +153,14 @@ struct FillGuard<A: Arity, T> {
 
 impl<A: Arity, T> Drop for FillGuard<A, T> {
     fn drop(&mut self) {
-        // SAFETY: `inner` is a live allocation from `alloc_layout::<A, T>(capacity)`;
-        // its `initialized` leading elements are initialised.
+        // SAFETY: `inner` is a live allocation from `alloc_layout::<Inner<A, T>,
+        // T>(capacity)`; its `initialized` leading elements are initialised.
         unsafe {
             let dp = data_ptr(self.inner);
             core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(dp, self.initialized));
             dealloc(
                 self.inner.as_ptr().cast(),
-                alloc_layout::<A, T>(self.capacity),
+                alloc_layout::<Inner<A, T>, T>(self.capacity),
             );
         }
     }
@@ -207,9 +198,9 @@ impl<T, A: Arity> PackedArray<T, A> {
     pub fn allocated_size(&self) -> usize {
         self.0.map_or(0, |ptr| {
             // SAFETY: `Some` ↔ a live allocation with an initialised bitmap, sized
-            // by `alloc_layout::<A, T>(count)`.
+            // by `alloc_layout::<Inner<A, T>, T>(count)`.
             let count = unsafe { ptr.as_ref().bitmap }.count_ones() as usize;
-            alloc_layout::<A, T>(count).size()
+            alloc_layout::<Inner<A, T>, T>(count).size()
         })
     }
 
@@ -357,9 +348,14 @@ impl<T, A: Arity> PackedArray<T, A> {
                 dst.add(rank).write(value);
                 core::ptr::copy_nonoverlapping(src.add(rank), dst.add(rank + 1), old_count - rank);
             }
-            // SAFETY: the old block came from `alloc_layout::<A, T>(old_count)`;
+            // SAFETY: the old block came from `alloc_layout::<Inner<A, T>, T>(old_count)`;
             // its elements were moved out above, so free it without dropping.
-            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+            unsafe {
+                dealloc(
+                    ptr.as_ptr().cast(),
+                    alloc_layout::<Inner<A, T>, T>(old_count),
+                );
+            };
             self.0 = Some(new_inner);
             None
         }
@@ -386,7 +382,12 @@ impl<T, A: Arity> PackedArray<T, A> {
             // element out (returned to the caller, not dropped here).
             let removed = unsafe { data_ptr(ptr).add(rank).read() };
             // SAFETY: the sole element was moved out above; free the old block.
-            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+            unsafe {
+                dealloc(
+                    ptr.as_ptr().cast(),
+                    alloc_layout::<Inner<A, T>, T>(old_count),
+                );
+            };
             self.0 = None;
             return Some(removed);
         }
@@ -412,7 +413,12 @@ impl<T, A: Arity> PackedArray<T, A> {
             core::ptr::copy_nonoverlapping(src.add(rank + 1), dst.add(rank), old_count - rank - 1);
         }
         // SAFETY: survivors moved, removed element read out; free the old block.
-        unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(old_count)) };
+        unsafe {
+            dealloc(
+                ptr.as_ptr().cast(),
+                alloc_layout::<Inner<A, T>, T>(old_count),
+            );
+        };
         self.0 = Some(new_inner);
         Some(removed)
     }
@@ -519,7 +525,7 @@ impl<T, A: Arity> From<PackedArray<T, A>> for FixedArray<Option<T>, A> {
                 let v = unsafe { dp.add(rank).read() };
                 out[index] = Some(v);
             }
-            let layout = alloc_layout::<A, T>(count);
+            let layout = alloc_layout::<Inner<A, T>, T>(count);
             // SAFETY: elements moved out; sole deallocation of this block.
             unsafe { dealloc(ptr.as_ptr().cast(), layout) };
         }
@@ -673,9 +679,9 @@ impl<T, A: Arity> Drop for PackedArray<T, A> {
         // SAFETY: `dp..dp+count` are initialised; `drop_in_place` over the slice
         // drops each exactly once.
         unsafe { core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(dp, count)) };
-        // SAFETY: `ptr` came from `alloc(alloc_layout::<A, T>(count))`; elements
-        // are dropped; this is the sole deallocation.
-        unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(count)) };
+        // SAFETY: `ptr` came from `alloc(alloc_layout::<Inner<A, T>, T>(count))`;
+        // elements are dropped; this is the sole deallocation.
+        unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<Inner<A, T>, T>(count)) };
     }
 }
 
@@ -1234,7 +1240,7 @@ mod tests {
         // Cross-check against the private layout helper in this module.
         assert_eq!(
             p.allocated_size(),
-            alloc_layout::<Arity16, [u8; 32]>(3).size()
+            alloc_layout::<Inner<Arity16, [u8; 32]>, [u8; 32]>(3).size()
         );
     }
 

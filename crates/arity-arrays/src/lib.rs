@@ -36,6 +36,7 @@ mod compact;
 pub mod fixed;
 pub mod gapped;
 pub mod packed;
+mod raw;
 
 pub use arity::Arity;
 #[cfg(feature = "8")]

@@ -4,7 +4,6 @@
 use alloc::alloc::alloc;
 use alloc::alloc::dealloc;
 use alloc::alloc::handle_alloc_error;
-use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
@@ -14,6 +13,7 @@ use arity_index::Niche;
 use crate::Arity;
 use crate::FixedArray;
 use crate::PackedArray;
+use crate::raw::alloc_layout;
 
 /// Heap header: two bitmaps and the capacity exponent, followed (after
 /// alignment padding) by the element array. `#[repr(C)]` makes `data` the
@@ -123,12 +123,12 @@ struct Inner<A: Arity, T> {
 /// range.
 ///
 /// Structural invariant: when `self.0` is `Some(ptr)`, `ptr` is a live
-/// allocation from `alloc_layout::<A, T>(1 << cap_exp)` whose header is
-/// initialised with `occupancy.count_ones() == live.count_ones()`, the set bits
-/// of `live` being exactly the initialised element slots, and the `r`-th set
-/// bit of `live` (in ascending order) holding the physical slot of the `r`-th
-/// present element. Every physical slot read in this module relies on this
-/// invariant.
+/// allocation from `alloc_layout::<Inner<A, T>, T>(1 << cap_exp)` whose header
+/// is initialised with `occupancy.count_ones() == live.count_ones()`, the set
+/// bits of `live` being exactly the initialised element slots, and the `r`-th
+/// set bit of `live` (in ascending order) holding the physical slot of the
+/// `r`-th present element. Every physical slot read in this module relies on
+/// this invariant.
 ///
 /// # Example
 ///
@@ -236,19 +236,11 @@ fn spread_pos(r: usize, count: usize, cap: usize) -> usize {
     r * cap / count
 }
 
-/// Layout of the heap block for `cap` element slots.
-fn alloc_layout<A: Arity, T>(cap: usize) -> Layout {
-    let (layout, _) = Layout::new::<Inner<A, T>>()
-        .extend(Layout::array::<T>(cap).expect("element layout overflow"))
-        .expect("block layout overflow");
-    layout.pad_to_align()
-}
-
 /// Base address of the element array.
 ///
 /// # Safety
-/// `inner` must point to a live allocation from `alloc_layout::<A, T>(cap)`
-/// with the header initialised.
+/// `inner` must point to a live allocation from `alloc_layout::<Inner<A, T>,
+/// T>(cap)` with the header initialised.
 unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
     // SAFETY: `inner` is valid per the precondition; `#[repr(C)]` places `data`
     // at the element-array offset.
@@ -268,7 +260,7 @@ unsafe fn alloc_block<A: Arity, T>(
     cap_exp: u8,
     cap: usize,
 ) -> NonNull<Inner<A, T>> {
-    let layout = alloc_layout::<A, T>(cap);
+    let layout = alloc_layout::<Inner<A, T>, T>(cap);
     // SAFETY: `cap > 0` so `layout.size() > 0`; null is handled below.
     let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
         handle_alloc_error(layout)
@@ -326,8 +318,9 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// size of the `capacity`-slot block.
     #[must_use]
     pub fn allocated_size(&self) -> usize {
-        self.0
-            .map_or(0, |_| alloc_layout::<A, T>(self.capacity()).size())
+        self.0.map_or(0, |_| {
+            alloc_layout::<Inner<A, T>, T>(self.capacity()).size()
+        })
     }
 
     /// Returns a reference to the element at `index`, or `None` if absent.
@@ -476,7 +469,12 @@ impl<T, A: Arity> GappedArray<T, A> {
         self.0 = Some(new_ptr);
         // SAFETY: live elements moved out; old block came from
         // `alloc_layout(old_cap)`; freed exactly once.
-        unsafe { dealloc(old_ptr.as_ptr().cast(), alloc_layout::<A, T>(old_cap)) };
+        unsafe {
+            dealloc(
+                old_ptr.as_ptr().cast(),
+                alloc_layout::<Inner<A, T>, T>(old_cap),
+            );
+        };
     }
 
     /// Replaces the block with a fresh `new_cap`-slot block holding all current
@@ -543,7 +541,12 @@ impl<T, A: Arity> GappedArray<T, A> {
         }
         self.0 = Some(new_ptr);
         // SAFETY: all old elements moved out; old block from `alloc_layout(old_cap)`.
-        unsafe { dealloc(old_ptr.as_ptr().cast(), alloc_layout::<A, T>(old_cap)) };
+        unsafe {
+            dealloc(
+                old_ptr.as_ptr().cast(),
+                alloc_layout::<Inner<A, T>, T>(old_cap),
+            );
+        };
     }
 
     /// Inserts `value` at `index`, returning the previous value if the slot was
@@ -993,7 +996,12 @@ impl<T, A: Arity> Drop for GappedArray<T, A> {
         impl<A: Arity, T> Drop for FreeOnDrop<A, T> {
             fn drop(&mut self) {
                 // SAFETY: sole dealloc of a block from `alloc_layout(cap)`.
-                unsafe { dealloc(self.ptr.as_ptr().cast(), alloc_layout::<A, T>(self.cap)) };
+                unsafe {
+                    dealloc(
+                        self.ptr.as_ptr().cast(),
+                        alloc_layout::<Inner<A, T>, T>(self.cap),
+                    );
+                };
             }
         }
         let Some(ptr) = self.0 else { return };
@@ -1028,7 +1036,10 @@ impl<A: Arity, T> Drop for GappedFillGuard<A, T> {
             for i in self.initialized.bits() {
                 core::ptr::drop_in_place(dp.add(i.as_usize()));
             }
-            dealloc(self.inner.as_ptr().cast(), alloc_layout::<A, T>(self.cap));
+            dealloc(
+                self.inner.as_ptr().cast(),
+                alloc_layout::<Inner<A, T>, T>(self.cap),
+            );
         }
     }
 }
@@ -1136,7 +1147,7 @@ impl<T, A: Arity> From<GappedArray<T, A>> for FixedArray<Option<T>, A> {
                 out[logical] = Some(v);
             }
             // SAFETY: elements moved out; sole deallocation.
-            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<A, T>(cap)) };
+            unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<Inner<A, T>, T>(cap)) };
         }
         out
     }
