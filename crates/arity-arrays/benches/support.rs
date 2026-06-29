@@ -63,7 +63,8 @@ pub fn masked_index<A: Arity>(i: usize) -> A::Index {
 /// `usize` slot the bench body computes via [`masked_index`]. Named to avoid
 /// clashing with the inherent `get`/`insert`/`remove` methods on the concrete
 /// types. The future capacity-tracking container implements this trait and is
-/// appended to each bench's `types = [...]` list — the entire integration cost.
+/// appended to each per-cell `types = [...]` list (and, to appear in the
+/// conversion or memory-report tables, those call sites too).
 pub trait BenchContainer<T: Payload> {
     /// An empty container. (divan labels each generic instantiation by type, so
     /// no per-impl name constant is needed.)
@@ -133,7 +134,7 @@ impl<T: Payload, A: Arity> BenchContainer<T> for BoxArr<T, A> {
     fn empty() -> Self {
         let mut v: Vec<Option<T>> = Vec::with_capacity(A::LEN);
         v.resize_with(A::LEN, || None);
-        Self(v.into_boxed_slice(), core::marker::PhantomData)
+        Self(v.into_boxed_slice(), PhantomData)
     }
     fn lookup(&self, index: usize) -> Option<&T> {
         self.0[index & (A::LEN - 1)].as_ref()

@@ -93,7 +93,7 @@ macro_rules! single_op_benches {
             #[divan::bench(types = [$($ctype),+], args = $occ)]
             fn iter_present<C: BenchContainer<$ty>>(bencher: divan::Bencher, occupancy: usize) {
                 let c = C::fill(occupancy);
-                bencher.bench_local(|| divan::black_box(c.fold()));
+                bencher.bench_local(|| divan::black_box(divan::black_box(&c).fold()));
             }
         }
     };
