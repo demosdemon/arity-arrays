@@ -488,35 +488,144 @@ impl<T, A: Arity> GappedArray<T, A> {
     }
 
     /// Places `value` at an absent `index` given spare capacity (`count <
-    /// cap`). Correctness-first: fill a hole strictly between the
-    /// rank-neighbors if one exists, otherwise respread the whole block
-    /// including the new element (`rebuild_with_insert`), which always
-    /// succeeds. Task 10 replaces the respread fallback with the cheaper
-    /// `min(shift, respread)` rule.
+    /// cap`). Fills a hole strictly between the rank-neighbors if one exists;
+    /// otherwise chooses the cheapest of shift-left, shift-right, or full
+    /// respread (`rebuild_with_insert`, cost ≈ count).
     fn place_absent(&mut self, index: A::Index, value: T) {
         let ptr = self.0.expect("place_absent requires an allocation");
         // SAFETY: `ptr` valid per the invariant.
         let live = unsafe { ptr.as_ref().live };
         let cap = self.capacity();
+        // SAFETY: `ptr` valid per the invariant.
+        let count = unsafe { ptr.as_ref().occupancy }.count_ones() as usize;
         let (p_lo, p_hi) = self.neighbor_bounds(index);
-        // Look for a hole strictly between p_lo and p_hi.
-        // `p_lo >= -1` (sentinel) so `p_lo + 1 >= 0`; cast to usize is safe.
-        let mut hole: Option<usize> = None;
+        // Hole strictly between the neighbors → place with no move.
+        // `p_lo >= -1` (sentinel) so `p_lo + 1 >= 0`; cast_unsigned is safe.
         let mut p = (p_lo + 1).cast_unsigned();
         while p < p_hi {
             let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap <= N");
             if !live.test(p_idx) {
-                hole = Some(p);
-                break;
+                self.write_into_hole(index, p, value);
+                return;
             }
             p += 1;
         }
-        if let Some(hp) = hole {
-            self.write_into_hole(index, hp, value);
+        // Neighbors are physically adjacent. Choose the cheapest of: shift the
+        // run left to the nearest hole, shift it right to the nearest hole, or
+        // respread the whole block including the new element (cost ≈ count).
+        // With `count < cap` there is always ≥ 1 hole, so at least one shift is
+        // finite; the respread branch is a correct tie-break, never a panic.
+        let left = self.nearest_hole_left(p_lo); // Option<(hole_pos, dist)>
+        let right = self.nearest_hole_right(p_hi, cap); // Option<(hole_pos, dist)>
+        let respread_cost = count;
+        let left_cost = left.map_or(usize::MAX, |(_, d)| d);
+        let right_cost = right.map_or(usize::MAX, |(_, d)| d);
+        if left_cost <= right_cost && left_cost <= respread_cost {
+            let (hpos, _) = left.expect("left_cost finite ⇒ Some");
+            self.shift_left_and_write(index, hpos, p_hi, value);
+        } else if right_cost <= respread_cost {
+            let (hpos, _) = right.expect("right_cost finite ⇒ Some");
+            self.shift_right_and_write(index, p_hi, hpos, value);
         } else {
-            // No between-neighbors hole. Respread including the new element —
-            // capacity is unchanged (count < cap ⇒ count + 1 <= cap).
+            // Reachable only if both shifts are None, which cannot happen for
+            // `count < cap`; kept as a safe fallback (cap unchanged, count+1 ≤ cap).
             self.rebuild_with_insert(index, value, cap);
+        }
+    }
+
+    /// Nearest hole at a physical slot `< from` (scanning down). Returns
+    /// `(hole_pos, live_elements_crossed)`.
+    fn nearest_hole_left(&self, from: isize) -> Option<(usize, usize)> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` valid.
+        let live = unsafe { ptr.as_ref().live };
+        let mut p = from; // from == p_lo (a live slot or -1)
+        let mut crossed = 0usize;
+        while p >= 0 {
+            let p_idx = <A::Index as Niche>::try_from_usize(p.cast_unsigned()).expect("p < cap");
+            if !live.test(p_idx) {
+                return Some((p.cast_unsigned(), crossed));
+            }
+            crossed += 1;
+            p -= 1;
+        }
+        None
+    }
+
+    /// Nearest hole at a physical slot `>= from` (scanning up to `cap`).
+    /// Returns `(hole_pos, live_elements_crossed)`.
+    fn nearest_hole_right(&self, from: usize, cap: usize) -> Option<(usize, usize)> {
+        let ptr = self.0?;
+        // SAFETY: `ptr` valid.
+        let live = unsafe { ptr.as_ref().live };
+        let mut crossed = 0usize;
+        let mut p = from; // from == p_hi (a live slot or cap)
+        while p < cap {
+            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap");
+            if !live.test(p_idx) {
+                return Some((p, crossed));
+            }
+            crossed += 1;
+            p += 1;
+        }
+        None
+    }
+
+    /// Shift the live run `(hole, p_hi)` down by one to open slot `p_hi - 1`,
+    /// then write `value` there. `hole < p_hi`, all slots in `(hole, p_hi)`
+    /// live.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "mutation occurs through raw pointer derived from self.0; \
+                  clippy cannot see through the raw-pointer write"
+    )]
+    fn shift_left_and_write(&mut self, index: A::Index, hole: usize, p_hi: usize, value: T) {
+        let ptr = self.0.expect("allocation present");
+        let n = p_hi - hole - 1; // elements in (hole, p_hi) to shift down by one
+        // SAFETY: slots (hole, p_hi) are initialised live elements; copying them
+        // one slot toward `hole` is an overlap-safe bitwise move (no drop/user
+        // code runs). The vacated slot is `p_hi - 1`, where `value` is written.
+        // After the copy, exactly one new physical slot is live — the former
+        // hole — so the live bitmap gains `hole_idx` and is otherwise unchanged.
+        unsafe {
+            let base = data_ptr(ptr);
+            core::ptr::copy(base.add(hole + 1), base.add(hole), n);
+            let write_at = p_hi - 1;
+            base.add(write_at).write(value);
+            // occupancy gains `index`; live gains the hole (now filled).
+            let occ = (*ptr.as_ptr()).occupancy.with_bit(index);
+            let live = (*ptr.as_ptr()).live;
+            let hole_idx = <A::Index as Niche>::try_from_usize(hole).expect("hole < cap");
+            (*ptr.as_ptr()).occupancy = occ;
+            (*ptr.as_ptr()).live = live.with_bit(hole_idx);
+        }
+    }
+
+    /// Shift the live run `[p_hi, hole)` up by one to open slot `p_hi`, then
+    /// write `value` there. `p_hi <= hole`, all slots in `[p_hi, hole)` live.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "mutation occurs through raw pointer derived from self.0; \
+                  clippy cannot see through the raw-pointer write"
+    )]
+    fn shift_right_and_write(&mut self, index: A::Index, p_hi: usize, hole: usize, value: T) {
+        let ptr = self.0.expect("allocation present");
+        let n = hole - p_hi; // elements in [p_hi, hole) to shift up by one
+        // SAFETY: slots [p_hi, hole) are initialised live elements; copying them
+        // up by one is an overlap-safe bitwise move (no drop/user code runs).
+        // The vacated slot is `p_hi`, where `value` is written. After the copy,
+        // exactly one new physical slot is live — the former hole — so the live
+        // bitmap gains `hole_idx` and is otherwise unchanged.
+        unsafe {
+            let base = data_ptr(ptr);
+            core::ptr::copy(base.add(p_hi), base.add(p_hi + 1), n);
+            base.add(p_hi).write(value);
+            // occupancy gains `index`; live gains the hole (now filled).
+            let occ = (*ptr.as_ptr()).occupancy.with_bit(index);
+            let live = (*ptr.as_ptr()).live;
+            let hole_idx = <A::Index as Niche>::try_from_usize(hole).expect("hole < cap");
+            (*ptr.as_ptr()).occupancy = occ;
+            (*ptr.as_ptr()).live = live.with_bit(hole_idx);
         }
     }
 
@@ -1045,6 +1154,35 @@ mod tests {
         let mut g = GappedArray::<u16, Arity16>::new();
         let mut oracle: BTreeMap<u8, u16> = BTreeMap::new();
         for (slot, val) in [(3u8, 30u16), (1, 10), (3, 33), (14, 140), (8, 80), (1, 11)] {
+            let i = U4::new_masked(slot);
+            assert_eq!(g.insert(i, val), oracle.insert(slot, val));
+            assert_eq!(g.count(), oracle.len());
+            for s in 0..16u8 {
+                assert_eq!(g.get(U4::new_masked(s)).copied(), oracle.get(&s).copied());
+            }
+        }
+    }
+
+    #[test]
+    fn insert_shifts_to_nearest_hole_without_full_respread() {
+        use std::collections::BTreeMap;
+        // Build a small dense run with a single trailing hole, then insert in the
+        // middle: the element should shift toward the near hole, not respread.
+        // Slots 0,1,2 present at cap 4 (one hole at the spread gap). Insert slot 3
+        // (logical back) lands directly in a hole — no move. Then a middle insert
+        // shifts only the minimal run.
+        let mut src = FixedArray::<Option<u16>, Arity16>::new();
+        for s in [0u8, 1, 2] {
+            src[U4::new_masked(s)] = Some(u16::from(s));
+        }
+        let mut g = GappedArray::from(src); // cap 4, count 3
+        assert_eq!(g.capacity(), 4);
+        // Correctness under a mixed sequence (oracle).
+        let mut oracle: BTreeMap<u8, u16> = BTreeMap::new();
+        for s in [0u8, 1, 2] {
+            oracle.insert(s, u16::from(s));
+        }
+        for (slot, val) in [(3u8, 30u16), (5, 50), (4, 40), (6, 60), (7, 70)] {
             let i = U4::new_masked(slot);
             assert_eq!(g.insert(i, val), oracle.insert(slot, val));
             assert_eq!(g.count(), oracle.len());
