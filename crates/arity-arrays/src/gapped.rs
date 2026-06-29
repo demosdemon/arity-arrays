@@ -69,8 +69,8 @@ struct Inner<A: Arity, T> {
 /// **Delete never moves.** Removing an element clears both its `occupancy` bit
 /// and its `live` slot bit, then reads the value out — no other element moves.
 ///
-/// **Insert uses min(shift, respread).** A new absent element is placed at the
-/// lowest cost among three strategies:
+/// **Insert moves only when forced, and prefers the cheapest move.** A new
+/// absent element is placed by the lowest-cost strategy available:
 ///
 /// 1. **Hole between neighbors** — if a hole exists strictly between the
 ///    predecessor and successor physical slots, write the element there (zero
@@ -79,8 +79,12 @@ struct Inner<A: Arity, T> {
 ///    the left or right live run to an adjacent hole (linear in run length, not
 ///    total occupancy).
 /// 3. **Full respread** — rebuild the block with all elements at even-spread
-///    positions; chosen when the block is full (triggering a capacity doubling)
-///    or when a respread is cheaper than any available shift.
+///    positions. This is the full-block path: when `count == cap`, the insert
+///    doubles capacity and respreads to include the new element. With spare
+///    capacity a respread arm also exists as a cost tie-break, but it never
+///    wins there — a shift crosses at most `count` live elements, so its cost
+///    is always ≤ the respread cost of `count`, and ties favor a shift. So
+///    respread is reached only on a full block.
 ///
 /// # Allocation model
 ///

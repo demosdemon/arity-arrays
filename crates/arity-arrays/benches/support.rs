@@ -63,9 +63,9 @@ pub fn masked_index<A: Arity>(i: usize) -> A::Index {
 /// The operations every benched representation supports, keyed by a raw
 /// `usize` slot the bench body computes via [`masked_index`]. Named to avoid
 /// clashing with the inherent `get`/`insert`/`remove` methods on the concrete
-/// types. The future capacity-tracking container implements this trait and is
-/// appended to each per-cell `types = [...]` list (and, to appear in the
-/// conversion or memory-report tables, those call sites too).
+/// types. A new representation implements this trait and is appended to each
+/// per-cell `types = [...]` list; to also appear in the conversion or
+/// memory-report tables, it must be wired into those call sites too.
 pub trait BenchContainer<T: Payload> {
     /// An empty container. (divan labels each generic instantiation by type, so
     /// no per-impl name constant is needed.)
