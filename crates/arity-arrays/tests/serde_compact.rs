@@ -62,3 +62,25 @@ fn compact_arity256_round_trip_stable_bytes() {
     let back: Node256 = serde_json::from_str(&json).expect("de");
     assert_eq!(node, back);
 }
+
+#[serde_as]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct GappedNode {
+    #[serde_as(as = "Compact")]
+    children: arity_arrays::GappedArray<u16, Arity16>,
+}
+
+#[test]
+fn compact_gapped_round_trip() {
+    let mut children = arity_arrays::GappedArray::<u16, Arity16>::new();
+    children.insert(U4::new_masked(2), 20);
+    children.insert(U4::new_masked(9), 90);
+    let node = GappedNode { children };
+    let json = serde_json::to_string(&node).expect("ser");
+    // Same wire form as PackedArray: bitmap bits 2,9 = 0x0204 -> LE [4,2]; values.
+    assert_eq!(json, r#"{"children":[[4,2],[20,90]]}"#);
+    let back: GappedNode = serde_json::from_str(&json).expect("de");
+    assert_eq!(node, back);
+    // popcount mismatch is rejected.
+    assert!(serde_json::from_str::<GappedNode>(r#"{"children":[[4,2],[20]]}"#).is_err());
+}

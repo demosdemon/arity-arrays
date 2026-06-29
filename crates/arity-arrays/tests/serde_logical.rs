@@ -45,3 +45,23 @@ fn packed_arity256_round_trip() {
     let back: PackedArray<u32, Arity256> = serde_json::from_str(&json).expect("de");
     assert_eq!(p, back);
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn gapped_serde_logical_roundtrip() {
+    use arity_arrays::Arity16;
+    use arity_arrays::FixedArray;
+    use arity_arrays::GappedArray;
+    use arity_arrays::index::U4;
+    let mut src = FixedArray::<Option<u16>, Arity16>::new();
+    for s in [1u8, 8, 15] {
+        src[U4::new_masked(s)] = Some(u16::from(s));
+    }
+    let g = GappedArray::<u16, Arity16>::from(src);
+    let json = serde_json::to_string(&g).expect("ser");
+    let back: GappedArray<u16, Arity16> = serde_json::from_str(&json).expect("de");
+    assert_eq!(g, back);
+    // strictly-ascending-index rejection mirrors PackedArray.
+    let bad = "[[5,50],[3,30]]";
+    assert!(serde_json::from_str::<GappedArray<u16, Arity16>>(bad).is_err());
+}
