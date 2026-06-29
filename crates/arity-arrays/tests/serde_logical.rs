@@ -59,8 +59,8 @@ fn gapped_serde_logical_roundtrip() {
     }
     let g = GappedArray::<u16, Arity16>::from(src);
     let json = serde_json::to_string(&g).expect("ser");
-    // Logical wire form: ascending (index, value) pairs. Locks the format so the
-    // impl_logical_serde! macro (Task 6) cannot silently change it.
+    // Logical wire form: ascending (index, value) pairs. Locks the format so a
+    // refactor of the serialize impl cannot silently change it.
     assert_eq!(json, "[[1,1],[8,8],[15,15]]");
     let back: GappedArray<u16, Arity16> = serde_json::from_str(&json).expect("de");
     assert_eq!(g, back);
