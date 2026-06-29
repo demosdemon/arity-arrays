@@ -61,11 +61,16 @@ pub fn masked_index<A: Arity>(i: usize) -> A::Index {
 }
 
 /// The operations every benched representation supports, keyed by a raw
-/// `usize` slot the bench body computes via [`masked_index`]. Named to avoid
-/// clashing with the inherent `get`/`insert`/`remove` methods on the concrete
-/// types. A new representation implements this trait and is appended to each
-/// per-cell `types = [...]` list; to also appear in the conversion or
-/// memory-report tables, it must be wired into those call sites too.
+/// `usize` slot. Named to avoid clashing with the inherent
+/// `get`/`insert`/`remove` methods on the concrete types. Bounded-width
+/// representations mask the slot into `[0, A::LEN)` — the typed containers
+/// (`PackedArray`, `GappedArray`, `FixedArray`) via [`masked_index`], `BoxArr`
+/// inline — while map-backed implementations use the raw value directly. A new
+/// representation implements this trait and adds its concrete types to each
+/// `single_op_benches!` and `workload_benches!` invocation (two cells × two
+/// macro families = four call sites); to also appear in the conversion table
+/// (`mod convert` in `throughput.rs`) or the memory-report table (`memory_table`
+/// in `tests/memory_report.rs`), it must be wired into those call sites too.
 pub trait BenchContainer<T: Payload> {
     /// An empty container. (divan labels each generic instantiation by type, so
     /// no per-impl name constant is needed.)
