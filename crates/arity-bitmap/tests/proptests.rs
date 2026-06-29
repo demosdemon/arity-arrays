@@ -29,6 +29,14 @@ proptest! {
         let mut back: Vec<usize> = bm.bits().rev().map(arity_index::U4::as_usize).collect();
         back.reverse();
         prop_assert_eq!(&back, &expected);
+        // select is the dense inverse of rank: the n-th present index in the
+        // sorted model equals select(n).
+        let sorted: Vec<usize> = model.iter().copied().collect();
+        for (n, &want) in sorted.iter().enumerate() {
+            let got = bm.select(u32::try_from(n).expect("n < bitmap width <= u32::MAX")).map(arity_index::U4::as_usize);
+            prop_assert_eq!(got, Some(want));
+        }
+        prop_assert_eq!(bm.select(u32::try_from(sorted.len()).expect("sorted.len() < bitmap width <= u32::MAX")), None);
     }
 
     #[test]
@@ -52,6 +60,12 @@ proptest! {
         let mut back: Vec<usize> = bm.bits().rev().map(arity_index::U7::as_usize).collect();
         back.reverse();
         prop_assert_eq!(&back, &expected);
+        let sorted: Vec<usize> = model.iter().copied().collect();
+        for (n, &want) in sorted.iter().enumerate() {
+            let got = bm.select(u32::try_from(n).expect("n < bitmap width <= u32::MAX")).map(arity_index::U7::as_usize);
+            prop_assert_eq!(got, Some(want));
+        }
+        prop_assert_eq!(bm.select(u32::try_from(sorted.len()).expect("sorted.len() < bitmap width <= u32::MAX")), None);
     }
 
     #[test]
@@ -75,5 +89,11 @@ proptest! {
         let mut back: Vec<usize> = bm.bits().rev().map(Niche::as_usize).collect();
         back.reverse();
         prop_assert_eq!(&back, &expected);
+        let sorted: Vec<usize> = model.iter().copied().collect();
+        for (n, &want) in sorted.iter().enumerate() {
+            let got = bm.select(u32::try_from(n).expect("n < bitmap width <= u32::MAX")).map(Niche::as_usize);
+            prop_assert_eq!(got, Some(want));
+        }
+        prop_assert_eq!(bm.select(u32::try_from(sorted.len()).expect("sorted.len() < bitmap width <= u32::MAX")), None);
     }
 }

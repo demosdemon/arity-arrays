@@ -63,6 +63,24 @@ trait Raw: Sealed + Copy + Eq {
     fn raw_clear_lowest(self) -> Self;
     #[must_use]
     fn raw_clear_highest(self) -> Self;
+    /// Returns the bit position (`< WIDTH`) of the `n`-th set bit (0-based), or
+    /// `None` if `n >= raw_popcount()`. Runs in `O(log WIDTH)` per limb (a
+    /// popcount-guided binary search), replacing the `O(n)` `bits().nth(n)`
+    /// fallback now that `select` is a hot path for gapped storage.
+    ///
+    /// The default body is an `O(n)` fallback via `raw_clear_lowest` iteration;
+    /// native-width implementations override this with the O(log WIDTH)
+    /// version.
+    fn raw_select(self, n: u32) -> Option<usize> {
+        if n >= self.raw_popcount() {
+            return None;
+        }
+        let mut x = self;
+        for _ in 0..n {
+            x = x.raw_clear_lowest();
+        }
+        Some(x.raw_lowest_pos())
+    }
 }
 
 /// A fixed-width bitmap addressed by a [`Niche`] index type.
@@ -107,9 +125,15 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// `n >= count_ones()`. The inverse of [`rank`](Bitmap::rank):
     /// `select(rank(i)) == Some(i)` for every set `i`.
     ///
-    /// Provided over [`bits`](Bitmap::bits); runs in `O(n)`.
+    /// Runs in `O(log WIDTH)` per limb via [`Raw::raw_select`].
     fn select(self, n: u32) -> Option<Self::Index> {
-        self.bits().nth(n as usize)
+        let pos = self.raw_select(n)?;
+        // `raw_select` yields `pos < WIDTH == Self::Index::COUNT`, so the
+        // reconstruction is always `Some`.
+        Some(
+            <Self::Index as Niche>::try_from_usize(pos)
+                .expect("raw_select yields a position < WIDTH == Index::COUNT"),
+        )
     }
     /// Writes the bitmap as `BYTES` little-endian bytes into `buf`.
     ///

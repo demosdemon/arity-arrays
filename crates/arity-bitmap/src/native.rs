@@ -89,6 +89,33 @@ macro_rules! impl_native_bitmap {
                     self & !(1 << self.ilog2())
                 }
             }
+
+            fn raw_select(self, n: u32) -> Option<usize> {
+                if n >= self.raw_popcount() {
+                    return None;
+                }
+                // Popcount-guided binary search over the limb: at each step,
+                // compare `n` against the popcount of the low `size` bits; if it
+                // lies above, skip them and accumulate `size` into `pos`. `size`
+                // starts at WIDTH/2 so no shift ever reaches the type width.
+                let mut n = n;
+                let mut x = self;
+                let mut pos = 0usize;
+                let mut size: u32 = ($width / 2) as u32;
+                loop {
+                    let lo_mask = ((1 as $ty) << size).wrapping_sub(1);
+                    let lo_count = (x & lo_mask).count_ones();
+                    if n >= lo_count {
+                        n -= lo_count;
+                        x >>= size;
+                        pos += size as usize;
+                    }
+                    if size == 1 {
+                        return Some(pos);
+                    }
+                    size /= 2;
+                }
+            }
         }
 
         impl Bitmap for $ty {
@@ -232,6 +259,34 @@ mod tests {
         assert_eq!(cleared.count_ones(), 2);
         // Clearing an unset bit is a no-op.
         assert_eq!(bm.without_bit(u4(2)), bm);
+    }
+
+    #[test]
+    fn select_in_word_all_widths() {
+        // Exhaustive single-limb check: for every set bit, select(rank(i)) == i,
+        // and select past the popcount is None.
+        let bm = u8::ZERO
+            .with_bit(U3::new_masked(0))
+            .with_bit(U3::new_masked(3))
+            .with_bit(U3::new_masked(7));
+        assert_eq!(bm.select(0).map(U3::as_u8), Some(0));
+        assert_eq!(bm.select(1).map(U3::as_u8), Some(3));
+        assert_eq!(bm.select(2).map(U3::as_u8), Some(7));
+        assert_eq!(bm.select(3), None);
+
+        // u128: bits at both ends and the middle.
+        let b = u128::ZERO
+            .with_bit(U7::new_masked(0))
+            .with_bit(U7::new_masked(64))
+            .with_bit(U7::new_masked(127));
+        assert_eq!(b.select(0).map(U7::as_u8), Some(0));
+        assert_eq!(b.select(1).map(U7::as_u8), Some(64));
+        assert_eq!(b.select(2).map(U7::as_u8), Some(127));
+        assert_eq!(b.select(3), None);
+        // select is the inverse of rank for every set bit.
+        for i in b.bits() {
+            assert_eq!(b.select(b.rank(i)), Some(i));
+        }
     }
 
     #[test]
