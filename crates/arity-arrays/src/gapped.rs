@@ -819,6 +819,67 @@ impl<T, A: Arity> Drop for GappedArray<T, A> {
     }
 }
 
+/// Drop guard for a sparse clone fill. Unlike `packed.rs`'s contiguous-prefix
+/// guard, the fill writes scattered physical slots, so on unwind it must drop
+/// exactly the slots set in `initialized` (not a prefix) — dropping a prefix
+/// would hit uninitialised holes (UB).
+struct GappedFillGuard<A: Arity, T> {
+    inner: NonNull<Inner<A, T>>,
+    initialized: A::Bitmap,
+    cap: usize,
+}
+
+impl<A: Arity, T> Drop for GappedFillGuard<A, T> {
+    fn drop(&mut self) {
+        // SAFETY: `inner` is a live allocation from `alloc_layout(cap)`; the
+        // slots set in `initialized` are the only initialised elements.
+        unsafe {
+            let dp = data_ptr(self.inner);
+            for i in self.initialized.bits() {
+                core::ptr::drop_in_place(dp.add(i.as_usize()));
+            }
+            dealloc(self.inner.as_ptr().cast(), alloc_layout::<A, T>(self.cap));
+        }
+    }
+}
+
+impl<T: Clone, A: Arity> Clone for GappedArray<T, A> {
+    fn clone(&self) -> Self {
+        let Some(ptr) = self.0 else {
+            return Self::new();
+        };
+        // SAFETY: `ptr` valid per the invariant.
+        let occ = unsafe { ptr.as_ref().occupancy };
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        let cap = self.capacity();
+        let cap_exp = cap_exp_of(cap);
+        // SAFETY: `cap > 0`; the guarded fill below initialises exactly the
+        // `live` slots (or the guard frees them on unwind).
+        let new_inner = unsafe { alloc_block::<A, T>(occ, live, cap_exp, cap) };
+        // SAFETY: `ptr` is the live source block; `new_inner` is the freshly
+        // allocated destination; both are valid for `data_ptr`.
+        let src = unsafe { data_ptr(ptr).cast_const() };
+        // SAFETY: `new_inner` is a live allocation from `alloc_block`.
+        let dst = unsafe { data_ptr(new_inner) };
+        let mut guard = GappedFillGuard::<A, T> {
+            inner: new_inner,
+            initialized: A::Bitmap::ZERO,
+            cap,
+        };
+        for i in live.bits() {
+            let p = i.as_usize();
+            // SAFETY: `p` is a set live slot in `src` (initialised); `dst.add(p)`
+            // is the matching uninitialised slot; `write` initialises it. On a
+            // `T::clone` panic the guard drops exactly `initialized`.
+            unsafe { dst.add(p).write((*src.add(p)).clone()) };
+            guard.initialized = guard.initialized.with_bit(i);
+        }
+        core::mem::forget(guard);
+        Self(Some(new_inner), PhantomData)
+    }
+}
+
 /// Iterator over present elements of a [`GappedArray`]. See
 /// [`GappedArray::iter_present`].
 ///
@@ -1190,6 +1251,67 @@ mod tests {
                 assert_eq!(g.get(U4::new_masked(s)).copied(), oracle.get(&s).copied());
             }
         }
+    }
+
+    #[test]
+    fn clone_is_independent_and_preserves_layout() {
+        let mut src = FixedArray::<Option<u16>, Arity16>::new();
+        for s in [1u8, 4, 9] {
+            src[U4::new_masked(s)] = Some(u16::from(s));
+        }
+        let a = GappedArray::from(src);
+        let b = a.clone();
+        assert_eq!(b.count(), 3);
+        assert_eq!(b.capacity(), a.capacity());
+        for s in 0..16u8 {
+            assert_eq!(
+                a.get(U4::new_masked(s)).copied(),
+                b.get(U4::new_masked(s)).copied()
+            );
+        }
+    }
+
+    #[test]
+    fn clone_panic_frees_partial() {
+        use std::panic;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        struct Panicky {
+            drops: Arc<AtomicUsize>,
+            clones: Arc<AtomicUsize>,
+        }
+        impl Clone for Panicky {
+            fn clone(&self) -> Self {
+                assert!(self.clones.fetch_add(1, Ordering::SeqCst) < 2, "boom");
+                Self {
+                    drops: self.drops.clone(),
+                    clones: self.clones.clone(),
+                }
+            }
+        }
+        impl Drop for Panicky {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        let clones = Arc::new(AtomicUsize::new(0));
+        let mut src = FixedArray::<Option<Panicky>, Arity16>::new();
+        for i in 0..4u8 {
+            src[U4::new_masked(i)] = Some(Panicky {
+                drops: drops.clone(),
+                clones: clones.clone(),
+            });
+        }
+        let g = GappedArray::from(src);
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            drop(g.clone());
+        }));
+        assert!(r.is_err());
+        assert_eq!(drops.load(Ordering::SeqCst), 2); // the 2 cloned elements freed
+        drop(g);
+        assert_eq!(drops.load(Ordering::SeqCst), 6);
     }
 
     #[test]
