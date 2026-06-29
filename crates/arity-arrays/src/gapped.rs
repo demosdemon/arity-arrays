@@ -43,7 +43,7 @@ struct Inner<A: Arity, T> {
 /// `None` ↔ unallocated (`count == 0`, `capacity == 0`); pointer-sized via the
 /// `NonNull` niche. `Some(ptr)` ↔ a live allocation of `capacity` slots, of
 /// which `count == occupancy.count_ones() == live.count_ones() ∈ [0, capacity]`
-/// are filled. Unlike [`PackedArray`](crate::PackedArray), `Some` with
+/// are filled. Unlike [`PackedArray`], `Some` with
 /// `count == 0` is legal — removing all elements retains the allocation
 /// (shrinks are never automatic).
 ///
@@ -108,12 +108,16 @@ const _: () = assert!(
 
 /// Smallest power-of-two capacity that holds `n` elements, capped at `A::LEN`.
 /// Returns `0` for `n == 0` (the unallocated state). `A::LEN` is itself a power
-/// of two, so the cap preserves the power-of-two property.
-fn pow2_cap_for<A: Arity>(n: usize) -> usize {
+/// of two, so the cap preserves the power-of-two property. Safe for large `n`
+/// (including `usize::MAX`): caps before calling `next_power_of_two` to avoid
+/// overflow for values that already meet or exceed `A::LEN`.
+const fn pow2_cap_for<A: Arity>(n: usize) -> usize {
     if n == 0 {
         0
+    } else if n >= A::LEN {
+        A::LEN
     } else {
-        n.next_power_of_two().min(A::LEN)
+        n.next_power_of_two()
     }
 }
 
@@ -336,10 +340,6 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// and respread. `new_cap` must be a power of two `≥ count`. No-op shape
     /// when unallocated with `new_cap` chosen for `count == 0` is not allowed;
     /// callers handle the empty case separately.
-    #[expect(
-        dead_code,
-        reason = "used by upcoming shrink_to_fit and reserve implementations"
-    )]
     fn rebuild_to(&mut self, new_cap: usize) {
         let Some(old_ptr) = self.0 else { return };
         // SAFETY: `old_ptr` valid per the invariant.
@@ -682,6 +682,72 @@ impl<T, A: Arity> GappedArray<T, A> {
             (*ptr.as_ptr()).occupancy = occ.with_bit(index);
             (*ptr.as_ptr()).live = live.with_bit(hp_idx);
         }
+    }
+
+    /// Creates an array with capacity for at least `n` elements (rounded up to
+    /// a power of two, capped at `A::LEN`). `with_capacity(0)` is the
+    /// unallocated state. Eager: the reservation lives in the heap header.
+    #[must_use]
+    pub fn with_capacity(n: usize) -> Self {
+        let cap = pow2_cap_for::<A>(n);
+        if cap == 0 {
+            return Self::new();
+        }
+        // SAFETY: `cap > 0`; no element slots are live, so the empty block is
+        // fully described by its zeroed bitmaps — nothing to initialise.
+        let inner =
+            unsafe { alloc_block::<A, T>(A::Bitmap::ZERO, A::Bitmap::ZERO, cap_exp_of(cap), cap) };
+        Self(Some(inner), PhantomData)
+    }
+
+    /// Ensures capacity for at least `count + n` elements (power of two, capped
+    /// at `A::LEN`). Saturating: `n` may be `usize::MAX`.
+    pub fn reserve(&mut self, n: usize) {
+        let want = self.count().saturating_add(n);
+        let target = pow2_cap_for::<A>(want);
+        if target <= self.capacity() {
+            return;
+        }
+        match self.0 {
+            Some(_) => self.rebuild_to(target),
+            None => *self = Self::with_capacity(want),
+        }
+    }
+
+    /// Shrinks capacity to the smallest power of two ≥ `count` (respread);
+    /// becomes unallocated when empty. The only in-type capacity reduction.
+    pub fn shrink_to_fit(&mut self) {
+        let count = self.count();
+        if count == 0 {
+            // Drop the (empty) allocation and become `None`.
+            *self = Self::new();
+            return;
+        }
+        let target = pow2_cap_for::<A>(count);
+        if target < self.capacity() {
+            self.rebuild_to(target);
+        }
+    }
+
+    /// Drops all present elements, retaining the allocation (capacity
+    /// unchanged).
+    pub fn clear(&mut self) {
+        let Some(ptr) = self.0 else { return };
+        // SAFETY: `ptr` valid per the invariant.
+        let live = unsafe { ptr.as_ref().live };
+        // SAFETY: `ptr` valid per the invariant.
+        let dp = unsafe { data_ptr(ptr) };
+        // Reset membership FIRST so a panicking destructor cannot leave a set
+        // live bit that a later `Drop` would double-drop; the allocation stays.
+        // SAFETY: header initialised and `Copy`.
+        unsafe {
+            (*ptr.as_ptr()).occupancy = A::Bitmap::ZERO;
+            (*ptr.as_ptr()).live = A::Bitmap::ZERO;
+        }
+        // SAFETY: `live` are the initialised slots; `drop_live_elems` drops them
+        // all (re-arm drops the rest on a panicking destructor). The header is
+        // already cleared, so no double-drop is possible.
+        unsafe { drop_live_elems::<A, T>(dp, live) };
     }
 
     /// Iterates present elements as `(A::Index, &T)`, ascending. Double-ended.
@@ -1432,6 +1498,36 @@ mod tests {
         assert_eq!(drops.load(Ordering::SeqCst), 2); // the 2 cloned elements freed
         drop(g);
         assert_eq!(drops.load(Ordering::SeqCst), 6);
+    }
+
+    #[test]
+    fn capacity_api() {
+        // with_capacity(0) is unallocated; rounds up otherwise; caps at N.
+        assert_eq!(GappedArray::<u16, Arity16>::with_capacity(0).capacity(), 0);
+        assert_eq!(GappedArray::<u16, Arity16>::with_capacity(5).capacity(), 8);
+        assert_eq!(
+            GappedArray::<u16, Arity16>::with_capacity(99).capacity(),
+            16
+        );
+        let mut g = GappedArray::<u16, Arity16>::with_capacity(2);
+        assert_eq!(g.capacity(), 2);
+        assert!(g.is_empty());
+        g.insert(U4::new_masked(3), 30);
+        g.reserve(10); // ensure capacity >= count + 10, pow2, capped at N
+        assert!(g.capacity() >= 11 && g.capacity() <= 16 && g.capacity().is_power_of_two());
+        g.reserve(usize::MAX); // saturates at N, no overflow
+        assert_eq!(g.capacity(), 16);
+        assert_eq!(g.get(U4::new_masked(3)), Some(&30));
+        // shrink_to_fit -> smallest pow2 >= count
+        g.shrink_to_fit();
+        assert_eq!(g.capacity(), 1);
+        // clear retains the allocation
+        g.clear();
+        assert!(g.is_empty());
+        assert_eq!(g.capacity(), 1);
+        // shrink_to_fit on empty -> unallocated
+        g.shrink_to_fit();
+        assert_eq!(g.capacity(), 0);
     }
 
     #[test]
