@@ -61,7 +61,12 @@ fn gapped_serde_logical_roundtrip() {
     let json = serde_json::to_string(&g).expect("ser");
     let back: GappedArray<u16, Arity16> = serde_json::from_str(&json).expect("de");
     assert_eq!(g, back);
-    // strictly-ascending-index rejection mirrors PackedArray.
-    let bad = "[[5,50],[3,30]]";
-    assert!(serde_json::from_str::<GappedArray<u16, Arity16>>(bad).is_err());
+    // Adversarial decodes mirror PackedArray: the visitor shares the same
+    // `i <= prev` ascending guard and `out[index]` index-domain check.
+    // Non-ascending indices are rejected.
+    assert!(serde_json::from_str::<GappedArray<u16, Arity16>>("[[5,50],[3,30]]").is_err());
+    // Duplicate indices are rejected.
+    assert!(serde_json::from_str::<GappedArray<u16, Arity16>>("[[2,20],[2,21]]").is_err());
+    // Out-of-range index is rejected (16 invalid for Arity16 / U4).
+    assert!(serde_json::from_str::<GappedArray<u16, Arity16>>("[[16,1]]").is_err());
 }
