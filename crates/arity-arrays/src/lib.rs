@@ -31,11 +31,11 @@
 extern crate alloc;
 
 pub mod arity;
-#[cfg(feature = "serde_with")]
-mod compact;
 pub mod fixed;
 #[macro_use]
 mod macros;
+#[cfg(feature = "serde_with")]
+mod compact;
 pub mod gapped;
 pub mod packed;
 mod raw;

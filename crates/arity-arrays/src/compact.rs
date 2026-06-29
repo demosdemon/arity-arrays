@@ -39,75 +39,10 @@ where
     }
 }
 
-impl<T: Serialize, A: Arity> SerializeAs<PackedArray<T, A>> for Compact {
-    fn serialize_as<S: serde::Serializer>(
-        source: &PackedArray<T, A>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut buf = alloc::vec![0u8; <A::Bitmap as Bitmap>::BYTES];
-        source.bitmap().to_le_bytes(&mut buf);
-        let values: Vec<&T> = source.iter_present().map(|(_, v)| v).collect();
-        (buf, values).serialize(serializer)
-    }
-}
+/// Error operand for a compact bitmap of the wrong byte length.
+const COMPACT_LEN_ERR: &str = "the bitmap byte length (WIDTH / 8)";
+/// Error for a compact bitmap whose popcount disagrees with the value count.
+const COMPACT_POPCOUNT_ERR: &str = "Compact: bitmap popcount does not match the number of values";
 
-impl<'de, T: Deserialize<'de>, A: Arity> DeserializeAs<'de, PackedArray<T, A>> for Compact {
-    fn deserialize_as<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<PackedArray<T, A>, D::Error> {
-        let (buf, values): (Vec<u8>, Vec<T>) = Deserialize::deserialize(deserializer)?;
-        if buf.len() != <A::Bitmap as Bitmap>::BYTES {
-            return Err(serde::de::Error::invalid_length(
-                buf.len(),
-                &"the bitmap byte length (WIDTH / 8)",
-            ));
-        }
-        let bitmap = <A::Bitmap as Bitmap>::from_le_bytes(&buf);
-        if bitmap.count_ones() as usize != values.len() {
-            return Err(serde::de::Error::custom(
-                "Compact: bitmap popcount does not match the number of values",
-            ));
-        }
-        let mut out = FixedArray::<Option<T>, A>::new();
-        for (index, value) in bitmap.bits().zip(values) {
-            out[index] = Some(value);
-        }
-        Ok(PackedArray::from(out))
-    }
-}
-
-impl<T: Serialize, A: Arity> SerializeAs<GappedArray<T, A>> for Compact {
-    fn serialize_as<S: serde::Serializer>(
-        source: &GappedArray<T, A>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut buf = alloc::vec![0u8; <A::Bitmap as Bitmap>::BYTES];
-        source.bitmap().to_le_bytes(&mut buf);
-        (buf, PresentValues(|| source.iter_present().map(|(_, v)| v))).serialize(serializer)
-    }
-}
-
-impl<'de, T: Deserialize<'de>, A: Arity> DeserializeAs<'de, GappedArray<T, A>> for Compact {
-    fn deserialize_as<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<GappedArray<T, A>, D::Error> {
-        let (buf, values): (Vec<u8>, Vec<T>) = Deserialize::deserialize(deserializer)?;
-        if buf.len() != <A::Bitmap as Bitmap>::BYTES {
-            return Err(serde::de::Error::invalid_length(
-                buf.len(),
-                &"the bitmap byte length (WIDTH / 8)",
-            ));
-        }
-        let bitmap = <A::Bitmap as Bitmap>::from_le_bytes(&buf);
-        if bitmap.count_ones() as usize != values.len() {
-            return Err(serde::de::Error::custom(
-                "Compact: bitmap popcount does not match the number of values",
-            ));
-        }
-        let mut out = FixedArray::<Option<T>, A>::new();
-        for (index, value) in bitmap.bits().zip(values) {
-            out[index] = Some(value);
-        }
-        Ok(GappedArray::from(out))
-    }
-}
+impl_compact_adapter!(PackedArray);
+impl_compact_adapter!(GappedArray);

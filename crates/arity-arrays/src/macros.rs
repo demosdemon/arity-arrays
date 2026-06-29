@@ -121,6 +121,48 @@ macro_rules! impl_dense_common {
     };
 }
 
+/// Emits the `serde_with` `Compact` wire-form adapter (`SerializeAs` +
+/// `DeserializeAs`) for an array representation. Both serialize by streaming
+/// `iter_present()` via `PresentValues` (no temporary `Vec`). Requires
+/// `Compact`, `PresentValues`, `Bitmap`, `Arity`, `FixedArray`, the `serde`/
+/// `serde_with` traits, and `COMPACT_LEN_ERR`/`COMPACT_POPCOUNT_ERR` in scope.
+#[cfg(feature = "serde_with")]
+macro_rules! impl_compact_adapter {
+    ($Ty:ident) => {
+        impl<T: Serialize, A: Arity> SerializeAs<$Ty<T, A>> for Compact {
+            fn serialize_as<S: ::serde::Serializer>(
+                source: &$Ty<T, A>,
+                serializer: S,
+            ) -> ::core::result::Result<S::Ok, S::Error> {
+                let mut buf = alloc::vec![0u8; <A::Bitmap as Bitmap>::BYTES];
+                source.bitmap().to_le_bytes(&mut buf);
+                (buf, PresentValues(|| source.iter_present().map(|(_, v)| v)))
+                    .serialize(serializer)
+            }
+        }
+
+        impl<'de, T: Deserialize<'de>, A: Arity> DeserializeAs<'de, $Ty<T, A>> for Compact {
+            fn deserialize_as<D: ::serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> ::core::result::Result<$Ty<T, A>, D::Error> {
+                let (buf, values): (Vec<u8>, Vec<T>) = Deserialize::deserialize(deserializer)?;
+                if buf.len() != <A::Bitmap as Bitmap>::BYTES {
+                    return Err(::serde::de::Error::invalid_length(buf.len(), &COMPACT_LEN_ERR));
+                }
+                let bitmap = <A::Bitmap as Bitmap>::from_le_bytes(&buf);
+                if bitmap.count_ones() as usize != values.len() {
+                    return Err(::serde::de::Error::custom(COMPACT_POPCOUNT_ERR));
+                }
+                let mut out = FixedArray::<Option<T>, A>::new();
+                for (index, value) in bitmap.bits().zip(values) {
+                    out[index] = Some(value);
+                }
+                Ok($Ty::from(out))
+            }
+        }
+    };
+}
+
 /// Emits the logical-form serde impls (a sequence of ascending `(index, value)`
 /// pairs) for an array representation. `$label` prefixes the strictly-ascending
 /// error message. Gated on `feature = "serde"`. Requires `FixedArray`, `Arity`,
