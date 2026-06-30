@@ -2,6 +2,10 @@
 //! the `arity-arrays` benches and this tool. Parsing is total: an unrecognized
 //! path is an error, never a silently mis-bucketed measurement.
 
+// Module-scope is intentional: per-variant `#[expect(dead_code)]` does not
+// fulfill for fields that are constructed but never read, so narrowing the
+// attribute to individual items would produce unfulfilled expects and a
+// compiler error.
 #![expect(
     dead_code,
     reason = "BenchId is a total id-path parser; the Workload/Convert/Trie variants are parsed for completeness but the current charts consume only Single"
@@ -11,7 +15,7 @@ use core::fmt;
 use core::str::FromStr;
 
 /// Which payload cell a throughput bench belongs to. `Ord` so it can key the
-/// `BTreeMap`s the chart renderer (Task 8) builds.
+/// `BTreeMap`s the chart renderer builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Cell {
     A,

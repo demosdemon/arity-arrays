@@ -169,7 +169,7 @@ pub fn write_delta(
 #[expect(
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    reason = "x is a plotters tick value in [0, n_ops); never negative or fractional at a label tick"
+    reason = "x is a plotters tick value in [0, n_ops); fract guard in the formatter ensures it is non-negative and integral before the cast"
 )]
 fn render_grouped(
     path: &Path,
@@ -211,8 +211,18 @@ fn render_grouped(
     chart
         .configure_mesh()
         .y_desc(y_desc)
-        .x_labels(n_ops)
-        .x_label_formatter(&|x| op_names.get(*x as usize).cloned().unwrap_or_default())
+        // Request more tick slots than there are ops so plotters' "nice" tick
+        // selection is forced to include every integer position in [0, n_ops).
+        .x_labels(n_ops * 2 + 1)
+        // Emit an op label only at integer positions; return empty string for
+        // any fractional ticks plotters may insert between integers.
+        .x_label_formatter(&|x| {
+            if x.fract().abs() < 1e-9 {
+                op_names.get(*x as usize).cloned().unwrap_or_default()
+            } else {
+                String::new()
+            }
+        })
         .draw()
         .map_err(|e| ChartError(e.to_string()))?;
 
