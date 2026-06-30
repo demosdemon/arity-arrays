@@ -189,5 +189,5 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - run: cargo build --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features --benches
-      - run: cargo bench --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features
+      - run: cargo build --release --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features --benches
+      - run: cargo bench --release --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features
