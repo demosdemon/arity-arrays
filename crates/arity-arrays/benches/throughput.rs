@@ -250,13 +250,13 @@ fn convert(c: &mut Criterion) {
             let src =
                 <FixedArray<Option<[u8; 32]>, Arity16> as BenchContainer<[u8; 32]>>::fill(occ);
             g.bench_with_input(BenchmarkId::new("cell_a", occ), &occ, |b, _| {
-                b.iter_with_large_drop(|| PackedArray::from(black_box(&src)))
+                b.iter_with_large_drop(|| PackedArray::from(black_box(&src)));
             });
         }
         for &occ in OCC_B {
             let src = <FixedArray<Option<u64>, Arity256> as BenchContainer<u64>>::fill(occ);
             g.bench_with_input(BenchmarkId::new("cell_b", occ), &occ, |b, _| {
-                b.iter_with_large_drop(|| PackedArray::from(black_box(&src)))
+                b.iter_with_large_drop(|| PackedArray::from(black_box(&src)));
             });
         }
         g.finish();
@@ -268,7 +268,7 @@ fn convert(c: &mut Criterion) {
             g.bench_with_input(BenchmarkId::new("cell_a", occ), &occ, |b, _| {
                 b.iter_with_large_drop(|| {
                     FixedArray::<Option<[u8; 32]>, Arity16>::from(black_box(&src))
-                })
+                });
             });
         }
         for &occ in OCC_B {
@@ -276,7 +276,7 @@ fn convert(c: &mut Criterion) {
             g.bench_with_input(BenchmarkId::new("cell_b", occ), &occ, |b, _| {
                 b.iter_with_large_drop(|| {
                     FixedArray::<Option<u64>, Arity256>::from(black_box(&src))
-                })
+                });
             });
         }
         g.finish();
