@@ -23,7 +23,7 @@ fmt-check:
 # Workspace lints promote pedantic/nursery to warnings and deny undocumented unsafe.
 # Lint with Clippy over every target and feature.
 lint:
-    cargo clippy --workspace --all-targets --all-features
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Run tests (default: whole workspace; pass a package to scope, e.g. `just test arity-bitmap`).
 test pkg='':
