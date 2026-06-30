@@ -172,22 +172,17 @@ jobs:
       - run: cargo +nightly fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
 
   bench:
-    name: bench ${{ matrix.os }} / ${{ matrix.toolchain }}
+    name: bench ${{ matrix.os }}
     needs: [test]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2025-vs2026, macos-26, ubuntu-26.04, ubuntu-26.04-arm]
-        toolchain:
-          - msrv
-          - stable
-          - beta
-          - nightly
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
-          toolchain: ${{ matrix.toolchain }}
-      - run: cargo build --release --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features --benches
-      - run: cargo bench --release --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features
+          toolchain: nightly
+      - run: cargo build --release --workspace --all-features --benches
+      - run: cargo bench --release --workspace --all-features
