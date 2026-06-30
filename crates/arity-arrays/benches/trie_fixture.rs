@@ -132,10 +132,6 @@ pub struct Trie<A: Arity, S: ChildStore<A>> {
 /// hash-stamped, `Arc`-shared subtree.
 pub enum Edge<A: Arity, S: ChildStore<A>> {
     Mutable(Box<Trie<A, S>>),
-    #[expect(
-        dead_code,
-        reason = "Frozen models structural sharing; populated by a future frozen-ratio fixture"
-    )]
     Frozen {
         hash: [u8; 32],
         node: Arc<Trie<A, S>>,
@@ -163,19 +159,12 @@ impl<A: Arity, S: ChildStore<A>> Clone for Trie<A, S> {
 
 impl<A: Arity, S: ChildStore<A>> Clone for Edge<A, S> {
     fn clone(&self) -> Self {
-        // The wildcard arm avoids explicitly referencing `Frozen`, which would
-        // suppress its `dead_code` lint and make the `#[expect(dead_code)]` on
-        // the variant unfulfilled.
-        #[expect(
-            clippy::match_wildcard_for_single_variants,
-            reason = "wildcard preserves dead_code for the Frozen variant"
-        )]
         match self {
             Self::Mutable(t) => Self::Mutable(t.clone()),
-            // Frozen is never constructed by current code; this arm exists only
-            // for exhaustiveness. When the frozen-ratio fixture is added this
-            // arm must be replaced with the explicit pattern.
-            _ => unreachable!("Frozen variant is not yet populated"),
+            Self::Frozen { hash, node } => Self::Frozen {
+                hash: *hash,
+                node: Arc::clone(node),
+            },
         }
     }
 }

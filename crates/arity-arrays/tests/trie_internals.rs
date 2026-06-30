@@ -30,25 +30,38 @@ fn leaf<A: Arity, S: ChildStore<A>>() -> Trie<A, S> {
     }
 }
 
-/// Insert one `Mutable` leaf at index 0, read it back, clone, and drop — for a
-/// single store. Generic so every store exercises the GAT and the `Clone`
-/// bound.
-fn roundtrip<A: Arity, S: ChildStore<A>>()
-where
-    <S as ChildStore<A>>::Map<Edge<A, S>>: Clone,
-{
+/// Insert one `Mutable` child at index 0, give that child its own `Mutable`
+/// grandchild at index 0, then clone the root and verify the full two-level
+/// tree is present and independent in the clone.
+fn roundtrip<A: Arity, S: ChildStore<A>>() {
     let mut root: Trie<A, S> = leaf();
     let i0 = <A::Index as Niche>::try_from_usize(0).expect("0 < LEN");
-    ChildMap::insert(&mut root.children, i0, Edge::Mutable(Box::new(leaf())));
+
+    // Build a two-level tree: root → child → grandchild.
+    let mut child: Trie<A, S> = leaf();
+    ChildMap::insert(&mut child.children, i0, Edge::Mutable(Box::new(leaf())));
+    ChildMap::insert(&mut root.children, i0, Edge::Mutable(Box::new(child)));
+
     assert!(matches!(
         ChildMap::get(&root.children, i0),
         Some(Edge::Mutable(_))
     ));
+
     let clone = root.clone();
+
+    // Root-level child is present in the clone.
     assert!(matches!(
         ChildMap::get(&clone.children, i0),
         Some(Edge::Mutable(_))
     ));
+
+    // Grandchild is present in the clone (exercises recursive clone at depth 2).
+    let grandchild_present = match ChildMap::get(&clone.children, i0) {
+        Some(Edge::Mutable(c)) => matches!(ChildMap::get(&c.children, i0), Some(Edge::Mutable(_))),
+        _ => false,
+    };
+    assert!(grandchild_present);
+
     drop(root);
     // The clone is independent: it survives the original's drop.
     assert!(matches!(
