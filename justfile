@@ -44,14 +44,22 @@ miri pkg='':
 setup:
     mise install
 
-# Build/lint the crates under representative feature subsets (mirrors CI `features`).
-# Library/lints only — NOT tests. The test suite references types from several
-# arities at once, so it compiles and runs only with the default (all-arity)
-# feature set; run `just test`, not a per-arity `cargo test`.
+# Lint every meaningful feature combination via cargo-hack (the CI `features`
+# job runs exactly this). Arities are mutually exclusive in the powerset, so each
+# is linted alone (8/16/32/64/128/256) rather than in 63 redundant multi-arity
+# subsets; the orthogonal serde/serde_with/ethnum/std features are powerset on
+# top, capped at 4 simultaneous flags. --exclude-features default drops the
+# synthetic all-arity `default` member (the all-arity build is already covered by
+# `lint` and the test job); without it cargo-hack would re-introduce multi-arity
+# combos that slip past --mutually-exclusive-features. --depth is the dial if this
+# grows too slow. xtask has no arity features and needs a newer Rust than the
+# workspace MSRV, so it is excluded. Library/bin lints only (no --all-targets):
+# the tests reference several arities at once and won't compile under a single
+# arity set.
 features:
-    cargo clippy --workspace --no-default-features --features 16 -- -D warnings
-    cargo clippy --workspace --no-default-features --features 256 -- -D warnings
-    cargo clippy --workspace --no-default-features -- -D warnings
+    cargo hack --workspace --exclude xtask --feature-powerset \
+        --exclude-features default --mutually-exclusive-features 8,16,32,64,128,256 \
+        --depth 4 clippy -- -D warnings
 
 # Run the fast checks (everything except the slow Miri pass).
 ci: fmt-check lint features test doc

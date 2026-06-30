@@ -6,12 +6,13 @@
 # on PATH — instead of compiling from source.
 #
 # CI does not use this manifest: it installs the Rust toolchains via
-# dtolnay/rust-toolchain, and the one auxiliary tool it needs (cargo-fuzz) is
-# installed from a prebuilt binary directly in the fuzz job.
+# dtolnay/rust-toolchain and its auxiliary tools (just, cargo-hack,
+# cargo-nextest, cargo-fuzz) from prebuilt binaries via taiki-e/install-action.
 [tools]
 just = "latest"
 cargo-binstall = "latest"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-fuzz" = "latest"
+"cargo:cargo-hack" = "latest"
 "cargo:cargo-insta" = "latest"
 "cargo:cargo-criterion" = "latest"
