@@ -5,6 +5,15 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
+## [Unreleased]
+
+### Changed
+
+- Migrate the benchmark harness from `divan` to `criterion`, run via
+  `cargo-criterion`. Benchmark results now export to JSON and feed an
+  in-workspace `xtask` that regenerates the README comparison tables and SVG
+  charts under `docs/bench/`. Developer tooling only — no library API change.
+
 ## [0.1.0] - 2026-06-28
 
 Initial release of three `no_std` crates for fixed-arity storage indexed by

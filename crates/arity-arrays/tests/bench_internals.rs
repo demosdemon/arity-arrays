@@ -1,7 +1,7 @@
 //! Unit tests for the shared bench support module. The `throughput` bench uses
-//! `harness = false` (divan), so its embedded `#[test]` functions would never
-//! run under `cargo test`; the bench support is `#[path]`-included here instead
-//! so its correctness is verified by a normal integration test target.
+//! `harness = false` (criterion), so its embedded `#[test]` functions would
+//! never run under `cargo test`; the bench support is `#[path]`-included here
+//! instead so its correctness is verified by a normal integration test target.
 #![cfg(not(miri))]
 
 #[path = "../benches/support.rs"]
