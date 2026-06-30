@@ -6,6 +6,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub(crate) mod bench_id;
+mod ingest;
 
 fn main() {
     // Subcommands are wired in later tasks.
