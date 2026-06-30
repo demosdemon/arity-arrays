@@ -8,22 +8,85 @@
 #[path = "../benches/trie_fixture.rs"]
 mod fixture;
 
+use std::collections::BTreeMap;
+
 use arity_arrays::Arity;
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
+use arity_arrays::FixedArray;
+use arity_arrays::GappedArray;
+use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 use fixture::BTreeStore;
+use fixture::BUSHY_DEPTH;
+use fixture::BUSHY_FANOUT;
 use fixture::ChildMap;
 use fixture::ChildStore;
 use fixture::Edge;
 use fixture::FixedStore;
 use fixture::GappedStore;
 use fixture::PackedStore;
+use fixture::REALISTIC_FANOUTS;
 use fixture::Shape;
 use fixture::Trie;
 use fixture::build;
-use fixture::expected_node_count;
 use fixture::key_depth;
+
+/// Read access over a children map. Kept here in the test rather than on the
+/// bench fixture's `ChildMap` so that trait carries only methods the `trie`
+/// benchmark actually calls (the benchmark never reads children) — which keeps
+/// the bench target free of dead-code warnings. `child` is the former
+/// `ChildMap::get`.
+trait ChildRead<A: Arity, V> {
+    fn child(&self, index: A::Index) -> Option<&V>;
+}
+impl<A: Arity, V> ChildRead<A, V> for GappedArray<V, A> {
+    fn child(&self, index: A::Index) -> Option<&V> {
+        self.get(index)
+    }
+}
+impl<A: Arity, V> ChildRead<A, V> for PackedArray<V, A> {
+    fn child(&self, index: A::Index) -> Option<&V> {
+        self.get(index)
+    }
+}
+impl<A: Arity, V> ChildRead<A, V> for FixedArray<Option<V>, A> {
+    fn child(&self, index: A::Index) -> Option<&V> {
+        self.get(index).as_ref()
+    }
+}
+impl<A: Arity, V> ChildRead<A, V> for BTreeMap<usize, V> {
+    fn child(&self, index: A::Index) -> Option<&V> {
+        self.get(&index.as_usize())
+    }
+}
+
+/// Independent node-count oracle, computed from the (now `pub`) shape
+/// parameters rather than the recursive builder, so a builder bug cannot make
+/// the test pass vacuously. Lives in the test, not the bench fixture.
+fn expected_node_count<A: Arity>(shape: Shape) -> usize {
+    match shape {
+        Shape::Chain => key_depth::<A>(),
+        Shape::Bushy => {
+            // Full BUSHY_FANOUT-ary tree of depth BUSHY_DEPTH: a geometric sum.
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "BUSHY_DEPTH is 3 or 6 — both fit in u32 with ample room"
+            )]
+            let depth_u32 = BUSHY_DEPTH as u32;
+            (BUSHY_FANOUT.pow(depth_u32 + 1) - 1) / (BUSHY_FANOUT - 1)
+        }
+        Shape::Realistic => {
+            let mut total = 1; // the root
+            let mut level = 1; // nodes at the current depth
+            for &f in REALISTIC_FANOUTS {
+                level *= f;
+                total += level;
+            }
+            total
+        }
+    }
+}
 
 /// A childless node for the store `S` over arity `A`.
 fn leaf<A: Arity, S: ChildStore<A>>() -> Trie<A, S> {
@@ -37,7 +100,10 @@ fn leaf<A: Arity, S: ChildStore<A>>() -> Trie<A, S> {
 /// Insert one `Mutable` child at index 0, give that child its own `Mutable`
 /// grandchild at index 0, then clone the root and verify the full two-level
 /// tree is present and independent in the clone.
-fn roundtrip<A: Arity, S: ChildStore<A>>() {
+fn roundtrip<A: Arity, S: ChildStore<A>>()
+where
+    <S as ChildStore<A>>::Map<Edge<A, S>>: ChildRead<A, Edge<A, S>>,
+{
     let mut root: Trie<A, S> = leaf();
     let i0 = <A::Index as Niche>::try_from_usize(0).expect("0 < LEN");
 
@@ -46,32 +112,23 @@ fn roundtrip<A: Arity, S: ChildStore<A>>() {
     ChildMap::insert(&mut child.children, i0, Edge::Mutable(Box::new(leaf())));
     ChildMap::insert(&mut root.children, i0, Edge::Mutable(Box::new(child)));
 
-    assert!(matches!(
-        ChildMap::get(&root.children, i0),
-        Some(Edge::Mutable(_))
-    ));
+    assert!(matches!(root.children.child(i0), Some(Edge::Mutable(_))));
 
     let clone = root.clone();
 
     // Root-level child is present in the clone.
-    assert!(matches!(
-        ChildMap::get(&clone.children, i0),
-        Some(Edge::Mutable(_))
-    ));
+    assert!(matches!(clone.children.child(i0), Some(Edge::Mutable(_))));
 
     // Grandchild is present in the clone (exercises recursive clone at depth 2).
-    let grandchild_present = match ChildMap::get(&clone.children, i0) {
-        Some(Edge::Mutable(c)) => matches!(ChildMap::get(&c.children, i0), Some(Edge::Mutable(_))),
+    let grandchild_present = match clone.children.child(i0) {
+        Some(Edge::Mutable(c)) => matches!(c.children.child(i0), Some(Edge::Mutable(_))),
         _ => false,
     };
     assert!(grandchild_present);
 
     drop(root);
     // The clone is independent: it survives the original's drop.
-    assert!(matches!(
-        ChildMap::get(&clone.children, i0),
-        Some(Edge::Mutable(_))
-    ));
+    assert!(matches!(clone.children.child(i0), Some(Edge::Mutable(_))));
 }
 
 #[test]
@@ -88,17 +145,23 @@ fn childmap_roundtrip_and_clone_all_stores() {
 
 /// Count nodes store-agnostically: a node plus its present `Mutable` children.
 /// Fixtures are all-`Mutable`, so `Frozen` never appears.
-fn count_nodes<A: Arity, S: ChildStore<A>>(t: &Trie<A, S>) -> usize {
+fn count_nodes<A: Arity, S: ChildStore<A>>(t: &Trie<A, S>) -> usize
+where
+    <S as ChildStore<A>>::Map<Edge<A, S>>: ChildRead<A, Edge<A, S>>,
+{
     let mut n = 1;
     for i in <A::Index as Niche>::all() {
-        if let Some(Edge::Mutable(child)) = ChildMap::get(&t.children, i) {
+        if let Some(Edge::Mutable(child)) = t.children.child(i) {
             n += count_nodes::<A, S>(child);
         }
     }
     n
 }
 
-fn check_count<A: Arity, S: ChildStore<A>>(shape: Shape) {
+fn check_count<A: Arity, S: ChildStore<A>>(shape: Shape)
+where
+    <S as ChildStore<A>>::Map<Edge<A, S>>: ChildRead<A, Edge<A, S>>,
+{
     assert_eq!(
         count_nodes(&build::<A, S>(shape)),
         expected_node_count::<A>(shape),
@@ -133,7 +196,10 @@ fn chain_depth_is_key_depth() {
     );
 }
 
-fn check_clone_independent<A: Arity, S: ChildStore<A>>(shape: Shape) {
+fn check_clone_independent<A: Arity, S: ChildStore<A>>(shape: Shape)
+where
+    <S as ChildStore<A>>::Map<Edge<A, S>>: ChildRead<A, Edge<A, S>>,
+{
     let original = build::<A, S>(shape);
     let expected = count_nodes(&original);
     let clone = original.clone();

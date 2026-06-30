@@ -21,7 +21,9 @@ pub trait ChildStore<A: Arity> {
     type Map<V>: ChildMap<A, V>;
 }
 
-/// The minimal index-to-value map the builder and the test walker need.
+/// The minimal index-to-value map the builder needs. (The `trie_internals` test
+/// adds its own read accessor; this trait carries only what the bench uses, so
+/// the bench target stays free of dead-code on test-only methods.)
 ///
 /// `clone_map` clones the map structure by applying a caller-supplied clone
 /// function to each present value. This avoids propagating a `V: Clone` bound
@@ -30,7 +32,6 @@ pub trait ChildStore<A: Arity> {
 pub trait ChildMap<A: Arity, V> {
     fn empty() -> Self;
     fn insert(&mut self, index: A::Index, value: V) -> Option<V>;
-    fn get(&self, index: A::Index) -> Option<&V>;
     fn clone_map(&self, clone_one: impl Fn(&V) -> V) -> Self;
 }
 
@@ -59,9 +60,6 @@ impl<A: Arity, V> ChildMap<A, V> for GappedArray<V, A> {
     fn insert(&mut self, i: A::Index, v: V) -> Option<V> {
         Self::insert(self, i, v)
     }
-    fn get(&self, i: A::Index) -> Option<&V> {
-        Self::get(self, i)
-    }
     fn clone_map(&self, clone_one: impl Fn(&V) -> V) -> Self {
         let mut result = Self::new();
         for (idx, v) in self.iter_present() {
@@ -76,9 +74,6 @@ impl<A: Arity, V> ChildMap<A, V> for PackedArray<V, A> {
     }
     fn insert(&mut self, i: A::Index, v: V) -> Option<V> {
         Self::insert(self, i, v)
-    }
-    fn get(&self, i: A::Index) -> Option<&V> {
-        Self::get(self, i)
     }
     fn clone_map(&self, clone_one: impl Fn(&V) -> V) -> Self {
         let mut result = Self::new();
@@ -95,9 +90,6 @@ impl<A: Arity, V> ChildMap<A, V> for FixedArray<Option<V>, A> {
     fn insert(&mut self, i: A::Index, v: V) -> Option<V> {
         Self::replace(self, i, Some(v))
     }
-    fn get(&self, i: A::Index) -> Option<&V> {
-        Self::get(self, i).as_ref()
-    }
     fn clone_map(&self, clone_one: impl Fn(&V) -> V) -> Self {
         let mut result = Self::new();
         for (idx, v) in self.iter_present() {
@@ -112,9 +104,6 @@ impl<A: Arity, V> ChildMap<A, V> for BTreeMap<usize, V> {
     }
     fn insert(&mut self, i: A::Index, v: V) -> Option<V> {
         Self::insert(self, i.as_usize(), v)
-    }
-    fn get(&self, i: A::Index) -> Option<&V> {
-        Self::get(self, &i.as_usize())
     }
     fn clone_map(&self, clone_one: impl Fn(&V) -> V) -> Self {
         self.iter().map(|(&k, v)| (k, clone_one(v))).collect()
@@ -186,18 +175,20 @@ const VALUE_LEN: usize = 8;
 /// non-allocating path).
 const REALISTIC_PATH_LEN: usize = 4;
 /// Children per node for `Bushy`.
-const BUSHY_FANOUT: usize = 4;
+pub const BUSHY_FANOUT: usize = 4;
 
 // Depths are cfg(miri)-reduced so the Miri-checked tests stay bounded; the
-// benchmark always runs natively, so it uses the full sizes.
+// benchmark always runs natively, so it uses the full sizes. These shape
+// parameters are `pub` so the `trie_internals` test can compute its independent
+// node-count oracle from them.
 #[cfg(not(miri))]
-const BUSHY_DEPTH: usize = 6; // (4^7 - 1) / 3 = 5461 nodes
+pub const BUSHY_DEPTH: usize = 6; // (4^7 - 1) / 3 = 5461 nodes
 #[cfg(miri)]
-const BUSHY_DEPTH: usize = 3; // (4^4 - 1) / 3 = 85 nodes
+pub const BUSHY_DEPTH: usize = 3; // (4^4 - 1) / 3 = 85 nodes
 #[cfg(not(miri))]
-const REALISTIC_FANOUTS: &[usize] = &[16, 8, 4, 2, 1, 1, 1, 1]; // 5777 nodes
+pub const REALISTIC_FANOUTS: &[usize] = &[16, 8, 4, 2, 1, 1, 1, 1]; // 5777 nodes
 #[cfg(miri)]
-const REALISTIC_FANOUTS: &[usize] = &[4, 2, 1]; // 1 + 4 + 8 + 8 = 21 nodes
+pub const REALISTIC_FANOUTS: &[usize] = &[4, 2, 1]; // 1 + 4 + 8 + 8 = 21 nodes
 
 /// Symbol-length of a 64-byte key in this arity's alphabet: 128 for Arity16
 /// (nibbles), 64 for Arity256 (bytes). Only `Shape::Chain` uses it.
@@ -242,33 +233,6 @@ impl Shape {
         match self {
             Self::Realistic => REALISTIC_PATH_LEN,
             Self::Chain | Self::Bushy => 0,
-        }
-    }
-}
-
-/// Total node count a `build::<A, _>(shape)` produces — computed from the shape
-/// parameters, independent of the recursive construction.
-#[must_use]
-pub fn expected_node_count<A: Arity>(shape: Shape) -> usize {
-    match shape {
-        Shape::Chain => key_depth::<A>(),
-        Shape::Bushy => {
-            // Full BUSHY_FANOUT-ary tree of depth BUSHY_DEPTH: a geometric sum.
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "BUSHY_DEPTH is 3 or 6 — both fit in u32 with ample room"
-            )]
-            let depth_u32 = BUSHY_DEPTH as u32;
-            (BUSHY_FANOUT.pow(depth_u32 + 1) - 1) / (BUSHY_FANOUT - 1)
-        }
-        Shape::Realistic => {
-            let mut total = 1; // the root
-            let mut level = 1; // nodes at the current depth
-            for &f in REALISTIC_FANOUTS {
-                level *= f;
-                total += level;
-            }
-            total
         }
     }
 }
