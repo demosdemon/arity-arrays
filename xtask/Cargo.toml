@@ -9,5 +9,6 @@ publish = false
 workspace = true
 
 [dependencies]
+plotters = { version = "0.3.7", default-features = false, features = ["svg_backend"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
