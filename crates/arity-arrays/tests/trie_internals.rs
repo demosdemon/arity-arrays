@@ -22,6 +22,7 @@ use fixture::PackedStore;
 use fixture::Shape;
 use fixture::Trie;
 use fixture::build;
+use fixture::expected_node_count;
 use fixture::key_depth;
 
 /// A childless node for the store `S` over arity `A`.
@@ -85,18 +86,6 @@ fn childmap_roundtrip_and_clone_all_stores() {
     roundtrip::<Arity256, BTreeStore>();
 }
 
-/// Number of nodes a `build` of `shape` must produce, computed independently of
-/// the builder so the test cannot drift with it. Mirrors the builder's complete
-/// per-depth fanout: `Chain` is a `key_depth`-long path; `Bushy` is a full
-/// `BUSHY_FANOUT`-ary tree of depth `BUSHY_DEPTH`; `Realistic` is the
-/// product-sum of `REALISTIC_FANOUTS`. These mirror the cfg(miri) reductions
-/// automatically by re-deriving from the same public values where possible; the
-/// Bushy/Realistic closed forms are recomputed from the builder's own
-/// `expected_node_count`.
-fn expected_count<A: Arity>(shape: Shape) -> usize {
-    fixture::expected_node_count::<A>(shape)
-}
-
 /// Count nodes store-agnostically: a node plus its present `Mutable` children.
 /// Fixtures are all-`Mutable`, so `Frozen` never appears.
 fn count_nodes<A: Arity, S: ChildStore<A>>(t: &Trie<A, S>) -> usize {
@@ -112,7 +101,7 @@ fn count_nodes<A: Arity, S: ChildStore<A>>(t: &Trie<A, S>) -> usize {
 fn check_count<A: Arity, S: ChildStore<A>>(shape: Shape) {
     assert_eq!(
         count_nodes(&build::<A, S>(shape)),
-        expected_count::<A>(shape),
+        expected_node_count::<A>(shape),
         "node count mismatch",
     );
 }

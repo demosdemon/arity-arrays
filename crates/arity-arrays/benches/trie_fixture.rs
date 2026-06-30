@@ -291,64 +291,36 @@ pub fn build<A: Arity, S: ChildStore<A>>(shape: Shape) -> Trie<A, S> {
     *build_node::<A, S>(shape, 0)
 }
 
-// Returns `Box<Trie>` and delegates map initialisation and Trie construction to
-// helpers so that `build_node`'s own frame holds only small pointer-sized
-// locals (~70 bytes) during deep recursion. Without this,
-// `FixedArray<Option<Edge>, Arity256>` (12 KiB inline) would accumulate across
-// 64 recursive Chain frames and overflow the test-thread stack (~1 MiB) in a
-// debug build.
+// Allocates a childless node directly on the heap. The `Trie` literal — up to
+// ~12 KiB for a `FixedStore` + `Arity256` node, whose children array is inline
+// — lives only in this (non-recursive, leaf) frame before `Box::new` moves it
+// to the heap, so it never accumulates across the deep `build_node` recursion.
 #[expect(
     clippy::unnecessary_box_returns,
-    reason = "Box is load-bearing: keeps the 12 KiB FixedStore frame off the \
-              recursive call stack in debug builds (see module-level comment)"
+    reason = "Box is load-bearing: keeps the up-to-12 KiB node off build_node's recursive frames"
+)]
+fn alloc_node<A: Arity, S: ChildStore<A>>(shape: Shape, depth: usize) -> Box<Trie<A, S>> {
+    Box::new(Trie {
+        path: make_path::<A>(shape.path_len()),
+        value: Some(make_value(depth)),
+        children: ChildMap::empty(),
+    })
+}
+
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "Box is load-bearing: build_node's recursive frame holds only the 8-byte Box, not the up-to-12 KiB node"
 )]
 fn build_node<A: Arity, S: ChildStore<A>>(shape: Shape, depth: usize) -> Box<Trie<A, S>> {
     let fanout = shape.fanout::<A>(depth);
     // INVARIANT: insert children one at a time into an empty map. This is what
     // gives each Gapped/Packed node its minimal power-of-two capacity; switching
     // to batch / From-based construction would change the clone-cost profile.
-    let mut children_box = build_empty_map::<A, S>();
+    let mut node = alloc_node::<A, S>(shape, depth);
     for k in 0..fanout {
         let index = child_index::<A>(k, fanout);
         let child = build_node::<A, S>(shape, depth + 1);
-        ChildMap::insert(&mut *children_box, index, Edge::Mutable(child));
+        ChildMap::insert(&mut node.children, index, Edge::Mutable(child));
     }
-    box_trie::<A, S>(
-        make_path::<A>(shape.path_len()),
-        make_value(depth),
-        children_box,
-    )
-}
-
-// `ChildMap::empty()` returns the map by value; for `FixedStore + Arity256`
-// that value is 12 KiB. Placing the call in its own stack frame keeps that
-// temporary off `build_node`'s frame, which is live across the recursive call.
-#[expect(
-    clippy::unnecessary_box_returns,
-    reason = "Box is load-bearing: confines the 12 KiB ChildMap temporary to \
-              this helper's frame, not build_node's (see module-level comment)"
-)]
-fn build_empty_map<A: Arity, S: ChildStore<A>>() -> Box<<S as ChildStore<A>>::Map<Edge<A, S>>> {
-    Box::new(ChildMap::empty())
-}
-
-// Consumes `children_box`, materialises `children` (up to 12 KiB for
-// `FixedStore + Arity256`) in this helper's own frame rather than in
-// `build_node`'s, then boxes the completed `Trie`.
-fn box_trie<A: Arity, S: ChildStore<A>>(
-    path: Box<[A::Index]>,
-    value: Box<[u8]>,
-    #[expect(
-        clippy::boxed_local,
-        reason = "Box is load-bearing: the caller passes a heap-allocated map so \
-                  the 12 KiB FixedStore map does not sit in build_node's frame"
-    )]
-    children_box: Box<<S as ChildStore<A>>::Map<Edge<A, S>>>,
-) -> Box<Trie<A, S>> {
-    let children = *children_box;
-    Box::new(Trie {
-        path,
-        value: Some(value),
-        children,
-    })
+    node
 }
