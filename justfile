@@ -116,11 +116,16 @@ bench *args:
 
 # The separate build is a fail-fast compile check before the timed run (always
 # nightly, release profile). For the local charting workflow use `just bench`
-# (cargo-criterion).
+# (cargo-criterion). Extra args pass through to the criterion harness; CI sends
+# `--quick` on pull requests to assert the benches run without paying for
+# full-precision measurement, and nothing (full suite) on merges to main.
+# Both lines name the two criterion benches explicitly: `--benches` (and a bare
+# `--workspace`) also runs the libtest unit-test harness in bench mode, which
+# would reject a pass-through flag like `--quick`.
 # Build then run the benches as a smoke check, the way CI does.
-ci-bench:
-    cargo build --release --workspace --all-features --benches
-    cargo bench --workspace --all-features
+ci-bench *args:
+    cargo build --release -p arity-arrays --all-features --bench throughput --bench trie
+    cargo bench -p arity-arrays --all-features --bench throughput --bench trie -- {{ args }}
 
 # <label> names the capture under the gitignored bench-data/ dir; suffix it with a
 # git SHA to keep before/after runs distinct (reusing a label overwrites the earlier
