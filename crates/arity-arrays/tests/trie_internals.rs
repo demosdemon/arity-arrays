@@ -224,3 +224,28 @@ fn clone_is_independent_across_stores() {
     check_clone_independent::<Arity256, FixedStore>(Shape::Realistic);
     check_clone_independent::<Arity256, BTreeStore>(Shape::Realistic);
 }
+
+#[test]
+fn child_store_names_are_unique_and_nonempty() {
+    let names = [
+        <GappedStore as ChildStore<Arity16>>::NAME,
+        <PackedStore as ChildStore<Arity16>>::NAME,
+        <FixedStore as ChildStore<Arity16>>::NAME,
+        <BTreeStore as ChildStore<Arity16>>::NAME,
+    ];
+    for name in names {
+        assert!(!name.is_empty(), "NAME must be non-empty");
+    }
+    let mut deduped = names.to_vec();
+    deduped.sort_unstable();
+    deduped.dedup();
+    assert_eq!(deduped.len(), names.len(), "store NAMEs must be unique");
+}
+
+#[test]
+fn shape_display_strings_are_stable() {
+    // These exact strings are the trie id-path <shape> segment.
+    assert_eq!(Shape::Chain.to_string(), "Chain");
+    assert_eq!(Shape::Bushy.to_string(), "Bushy");
+    assert_eq!(Shape::Realistic.to_string(), "Realistic");
+}
