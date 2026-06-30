@@ -4,6 +4,7 @@
 //! `Clone`/`Drop` workload is timed across `GappedArray`, `PackedArray`,
 //! `FixedArray`, and a `BTreeMap` baseline. Not part of the public API.
 
+use core::fmt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -18,6 +19,9 @@ use arity_arrays::index::Niche;
 /// never be named as a bare type parameter (which Rust cannot express without
 /// HKT).
 pub trait ChildStore<A: Arity> {
+    /// Stable label for this representation, used as the trie `BenchmarkId`
+    /// subject and parsed back by the chart xtask. Must be unique.
+    const NAME: &'static str;
     type Map<V>: ChildMap<A, V>;
 }
 
@@ -41,15 +45,19 @@ pub struct FixedStore;
 pub struct BTreeStore;
 
 impl<A: Arity> ChildStore<A> for GappedStore {
+    const NAME: &'static str = "GappedStore";
     type Map<V> = GappedArray<V, A>;
 }
 impl<A: Arity> ChildStore<A> for PackedStore {
+    const NAME: &'static str = "PackedStore";
     type Map<V> = PackedArray<V, A>;
 }
 impl<A: Arity> ChildStore<A> for FixedStore {
+    const NAME: &'static str = "FixedStore";
     type Map<V> = FixedArray<Option<V>, A>;
 }
 impl<A: Arity> ChildStore<A> for BTreeStore {
+    const NAME: &'static str = "BTreeStore";
     type Map<V> = BTreeMap<usize, V>;
 }
 
@@ -234,6 +242,17 @@ impl Shape {
             Self::Realistic => REALISTIC_PATH_LEN,
             Self::Chain | Self::Bushy => 0,
         }
+    }
+}
+
+impl fmt::Display for Shape {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Chain => "Chain",
+            Self::Bushy => "Bushy",
+            Self::Realistic => "Realistic",
+        };
+        f.write_str(s)
     }
 }
 

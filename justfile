@@ -23,7 +23,7 @@ fmt-check:
 # Workspace lints promote pedantic/nursery to warnings and deny undocumented unsafe.
 # Lint with Clippy over every target and feature.
 lint:
-    cargo clippy --workspace --all-targets --all-features
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Run tests (default: whole workspace; pass a package to scope, e.g. `just test arity-bitmap`).
 test pkg='':
@@ -71,7 +71,20 @@ fuzz-linux target time="60":
       -w /src/fuzz arity-arrays-fuzz \
       cargo fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
 
-# Run the divan throughput benchmarks (default features cover both cells).
-# Pass divan args after `--`, e.g. `just bench -- --sample-count 3`.
+# Run both criterion benches via cargo-criterion. Pass criterion args after
+# `--`, e.g. `just bench -- --sample-size 50`.
 bench *args:
-    cargo bench -p arity-arrays --bench throughput {{ args }}
+    cargo criterion -p arity-arrays {{ args }}
+
+# Capture a benchmark run as JSON for charting. <label> names the capture under
+# the gitignored bench-data/ dir; suffix it with a git SHA to keep before/after
+# runs distinct (reusing a label overwrites the earlier capture).
+bench-export label:
+    mkdir -p bench-data
+    cargo criterion -p arity-arrays --message-format=json > bench-data/{{ label }}.json
+
+# Regenerate docs/bench/ SVGs and the README comparison tables from a capture.
+# With a second <baseline> label, also writes per-cell delta charts (run vs
+# baseline), e.g. `just bench-charts branch main`.
+bench-charts run baseline='':
+    cargo run -p xtask -- charts bench-data/{{ run }}.json {{ if baseline == '' { '' } else { 'bench-data/' + baseline + '.json' } }}

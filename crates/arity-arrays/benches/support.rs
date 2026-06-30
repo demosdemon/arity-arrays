@@ -73,8 +73,11 @@ pub fn masked_index<A: Arity>(i: usize) -> A::Index {
 /// (`memory_table` in `tests/memory_report.rs`), it must be wired into those
 /// call sites too.
 pub trait BenchContainer<T: Payload> {
-    /// An empty container. (divan labels each generic instantiation by type, so
-    /// no per-impl name constant is needed.)
+    /// Stable label for this representation, used as the criterion
+    /// `BenchmarkId` subject and parsed back by the chart xtask. Must be
+    /// unique per cell.
+    const NAME: &'static str;
+    /// An empty container.
     fn empty() -> Self;
     /// Slots `0..occupancy` present, each holding `T::make(slot)`.
     fn fill(occupancy: usize) -> Self
@@ -98,6 +101,7 @@ pub trait BenchContainer<T: Payload> {
 }
 
 impl<T: Payload, A: Arity> BenchContainer<T> for PackedArray<T, A> {
+    const NAME: &'static str = "PackedArray";
     fn empty() -> Self {
         Self::new()
     }
@@ -116,6 +120,7 @@ impl<T: Payload, A: Arity> BenchContainer<T> for PackedArray<T, A> {
 }
 
 impl<T: Payload, A: Arity> BenchContainer<T> for GappedArray<T, A> {
+    const NAME: &'static str = "GappedArray";
     fn empty() -> Self {
         Self::new()
     }
@@ -134,6 +139,7 @@ impl<T: Payload, A: Arity> BenchContainer<T> for GappedArray<T, A> {
 }
 
 impl<T: Payload, A: Arity> BenchContainer<T> for FixedArray<Option<T>, A> {
+    const NAME: &'static str = "FixedArray";
     fn empty() -> Self {
         Self::new()
     }
@@ -156,6 +162,7 @@ impl<T: Payload, A: Arity> BenchContainer<T> for FixedArray<Option<T>, A> {
 pub struct BoxArr<T, A: Arity>(Box<[Option<T>]>, PhantomData<A>);
 
 impl<T: Payload, A: Arity> BenchContainer<T> for BoxArr<T, A> {
+    const NAME: &'static str = "BoxArr";
     fn empty() -> Self {
         let mut v: Vec<Option<T>> = Vec::with_capacity(A::LEN);
         v.resize_with(A::LEN, || None);
@@ -176,6 +183,7 @@ impl<T: Payload, A: Arity> BenchContainer<T> for BoxArr<T, A> {
 }
 
 impl<T: Payload> BenchContainer<T> for BTreeMap<usize, T> {
+    const NAME: &'static str = "BTreeMap";
     fn empty() -> Self {
         Self::new()
     }
@@ -194,6 +202,7 @@ impl<T: Payload> BenchContainer<T> for BTreeMap<usize, T> {
 }
 
 impl<T: Payload> BenchContainer<T> for HashMap<usize, T> {
+    const NAME: &'static str = "HashMap";
     fn empty() -> Self {
         Self::new()
     }

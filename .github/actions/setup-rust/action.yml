@@ -18,7 +18,7 @@ runs:
   steps:
     - uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: ${{ inputs.toolchain }}
+        toolchain: ${{ case(inputs.toolchain == 'msrv', '1.92.0', inputs.toolchain) }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
     - uses: Swatinem/rust-cache@v2

@@ -75,12 +75,13 @@ Minimum Supported Rust Version: **1.92**.
 
 ## Performance
 
-Throughput measured with [`divan`](https://crates.io/crates/divan) over the two
-representative cells (Arity16 + 32-byte hash; Arity256 + 8-byte pointer
-stand-in), comparing `PackedArray` against `FixedArray`, `Box<[Option<T>]>`,
-`BTreeMap`, and `HashMap`. `GappedArray` is also a benchmark subject in the
-full suite but is omitted from the snapshot below; reproduce all results with
-`just bench`.
+Throughput measured with [`criterion`](https://crates.io/crates/criterion)
+(run via [`cargo-criterion`](https://crates.io/crates/cargo-criterion)) over the
+two representative cells (Arity16 + 32-byte hash; Arity256 + 8-byte pointer
+stand-in), comparing `PackedArray` against `GappedArray`, `FixedArray`,
+`Box<[Option<T>]>`, `BTreeMap`, and `HashMap`. Reproduce all results with
+`just bench`; refresh the tables below and the charts in `docs/bench/` with
+`just bench-export <label>` then `just bench-charts <label>`.
 
 The `trie` bench (`cargo bench -p arity-arrays --bench trie`) additionally times
 recursive `Clone`/`Drop` of a trie fixture with non-POD node contents (`Edge`
@@ -88,19 +89,33 @@ children owning a `Box`/`Arc` subtree) across all four representations,
 contrasting `FixedArray`'s full-width (`A::LEN`) per-node cost with `PackedArray`
 (per live child) and `GappedArray` (per power-of-two capacity ≥ live count).
 
-> measured on: Apple M3 Max, rustc 1.98.0-nightly (f428d123a 2026-06-19), 2026-06-28
-
 Absolute nanoseconds are machine-specific; the comparison *between*
 representations is the durable signal. Highlights (median latency):
 
-| benchmark | occupancy | PackedArray | FixedArray | Box<[Option<T>]> | BTreeMap | HashMap |
+<!-- bench:start -->
+**Cell A (Arity16) single-op (median, max occupancy)**
+
+| op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Cell A `get_hit` | 8/16 | 1.10 ns | 0.69 ns | 0.78 ns | 2.16 ns | 10.05 ns |
-| Cell A `insert_new` | 4/16 | 35.24 ns | 9.36 ns | 13.75 ns | 23.19 ns | 25.55 ns |
-| Cell A `churn` | – | 7.915 µs | 333 ns | 276 ns | 2.87 µs | 3.34 µs |
-| Cell B `get_hit` | 128/256 | 1.43 ns | 0.50 ns | 0.74 ns | 4.56 ns | 7.29 ns |
-| Cell B `insert_new` | 64/256 | 47.61 ns | 68.11 ns | 11.51 ns | 150.8 ns | 26.12 ns |
-| Cell B `churn` | – | 90.56 µs | 958 ns | 903 ns | 35.79 µs | 42.70 µs |
+| `get_hit` | 3.46 ns | 0.60 ns | 0.81 ns | 4.68 ns | 7.19 ns | 1.07 ns |
+| `get_miss` | 3.48 ns | 0.61 ns | 0.80 ns | 1.61 ns | 6.03 ns | 0.81 ns |
+| `insert_new` | 28.09 ns | 23.97 ns | 11.13 ns | 59.99 ns | 37.97 ns | 37.86 ns |
+| `insert_replace` | 59.80 ns | 22.89 ns | 11.63 ns | 24.54 ns | 41.99 ns | 18.07 ns |
+| `iter_present` | 16.89 ns | 7.06 ns | 9.10 ns | 22.77 ns | 9.48 ns | 18.82 ns |
+| `remove` | 72.28 ns | 25.59 ns | 11.22 ns | 23.80 ns | 45.86 ns | 45.96 ns |
+
+**Cell B (Arity256) single-op (median, max occupancy)**
+
+| op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `get_hit` | 5.49 ns | 0.54 ns | 0.52 ns | 13.37 ns | 7.58 ns | 1.53 ns |
+| `get_miss` | 9.68 ns | 0.49 ns | 0.48 ns | 0.78 ns | 5.99 ns | 0.81 ns |
+| `insert_new` | 331.03 ns | 26.40 ns | 80.85 ns | 513.13 ns | 31.33 ns | 44.72 ns |
+| `insert_replace` | 638.64 ns | 25.01 ns | 79.34 ns | 33.20 ns | 29.81 ns | 14.12 ns |
+| `iter_present` | 183.61 ns | 51.74 ns | 81.38 ns | 542.46 ns | 135.68 ns | 659.03 ns |
+| `remove` | 643.57 ns | 24.38 ns | 78.91 ns | 34.18 ns | 34.44 ns | 66.69 ns |
+
+<!-- bench:end -->
 
 ## License
 

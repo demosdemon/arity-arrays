@@ -1,7 +1,7 @@
 //! Unit tests for the shared bench support module. The `throughput` bench uses
-//! `harness = false` (divan), so its embedded `#[test]` functions would never
-//! run under `cargo test`; the bench support is `#[path]`-included here instead
-//! so its correctness is verified by a normal integration test target.
+//! `harness = false` (criterion), so its embedded `#[test]` functions would
+//! never run under `cargo test`; the bench support is `#[path]`-included here
+//! instead so its correctness is verified by a normal integration test target.
 #![cfg(not(miri))]
 
 #[path = "../benches/support.rs"]
@@ -14,6 +14,7 @@ use arity_arrays::Arity;
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
 use arity_arrays::FixedArray;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 use support::BenchContainer;
@@ -58,6 +59,7 @@ fn adapter_roundtrip<T: Payload + PartialEq + core::fmt::Debug, C: BenchContaine
 #[test]
 fn adapters_behave_cell_a() {
     adapter_roundtrip::<[u8; 32], PackedArray<[u8; 32], Arity16>>();
+    adapter_roundtrip::<[u8; 32], GappedArray<[u8; 32], Arity16>>();
     adapter_roundtrip::<[u8; 32], FixedArray<Option<[u8; 32]>, Arity16>>();
     adapter_roundtrip::<[u8; 32], BoxArr<[u8; 32], Arity16>>();
     adapter_roundtrip::<[u8; 32], BTreeMap<usize, [u8; 32]>>();
@@ -67,6 +69,7 @@ fn adapters_behave_cell_a() {
 #[test]
 fn adapters_behave_cell_b() {
     adapter_roundtrip::<u64, PackedArray<u64, Arity256>>();
+    adapter_roundtrip::<u64, GappedArray<u64, Arity256>>();
     adapter_roundtrip::<u64, FixedArray<Option<u64>, Arity256>>();
     adapter_roundtrip::<u64, BoxArr<u64, Arity256>>();
     adapter_roundtrip::<u64, BTreeMap<usize, u64>>();
@@ -112,4 +115,30 @@ fn churn_ops_hold_half_occupancy() {
             "occupancy stays near half"
         );
     }
+}
+
+#[test]
+fn bench_container_names_are_unique_and_nonempty() {
+    // Every benched subject must have a distinct, non-empty NAME so the
+    // criterion id path stays unambiguous. Listed per cell exactly as the
+    // throughput bench sweeps them.
+    let cell_a = [
+        <PackedArray<[u8; 32], Arity16> as BenchContainer<[u8; 32]>>::NAME,
+        <GappedArray<[u8; 32], Arity16> as BenchContainer<[u8; 32]>>::NAME,
+        <FixedArray<Option<[u8; 32]>, Arity16> as BenchContainer<[u8; 32]>>::NAME,
+        <BoxArr<[u8; 32], Arity16> as BenchContainer<[u8; 32]>>::NAME,
+        <BTreeMap<usize, [u8; 32]> as BenchContainer<[u8; 32]>>::NAME,
+        <HashMap<usize, [u8; 32]> as BenchContainer<[u8; 32]>>::NAME,
+    ];
+    for name in cell_a {
+        assert!(!name.is_empty(), "NAME must be non-empty");
+    }
+    let mut deduped = cell_a.to_vec();
+    deduped.sort_unstable();
+    deduped.dedup();
+    assert_eq!(
+        deduped.len(),
+        cell_a.len(),
+        "NAMEs must be unique within a cell"
+    );
 }

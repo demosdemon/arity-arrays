@@ -8,6 +8,7 @@ mod support;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::hint::black_box;
 
 use arity_arrays::Arity;
 use arity_arrays::Arity16;
@@ -15,6 +16,11 @@ use arity_arrays::Arity256;
 use arity_arrays::FixedArray;
 use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
+use criterion::BatchSize;
+use criterion::BenchmarkId;
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
 use support::BenchContainer;
 use support::BoxArr;
 use support::ChurnOp;
@@ -28,80 +34,114 @@ const OCC_B: &[usize] = &[1, 16, 64, 128, 256];
 const OCC_A_PARTIAL: &[usize] = &[1, 4, 8];
 const OCC_B_PARTIAL: &[usize] = &[1, 16, 64, 128];
 
-/// Generates the single-op bench module for one cell. `$ty` is the payload,
-/// `$arity` its arity, `$occ`/`$occ_partial` the sample-point slices, and the
-/// trailing list the concrete container types swept by divan.
+// Present mid-rank slot: slots 0..occupancy are contiguous, so rank == slot and
+// the mid-rank element is at slot occupancy/2.
+const fn hit_index(occupancy: usize) -> usize {
+    occupancy / 2
+}
+// First slot `fill` did not populate.
+const fn miss_index(occupancy: usize) -> usize {
+    occupancy
+}
+
+/// Registers the six single-op benches for one cell. `$cell` is the id-path
+/// cell segment, `$ty` the payload, `$occ`/`$occ_partial` the occupancy slices,
+/// and the trailing list the concrete container types swept.
 macro_rules! single_op_benches {
-    ($modname:ident, $ty:ty, $arity:ty, $occ:expr, $occ_partial:expr, [$($ctype:ty),+ $(,)?]) => {
-        mod $modname {
-            use super::*;
-
-            // Present mid-rank slot: slots 0..occupancy are contiguous, so rank
-            // == slot and the mid-rank element is at slot occupancy/2.
-            const fn hit_index(occupancy: usize) -> usize {
-                occupancy / 2
+    ($fn:ident, $cell:literal, $ty:ty, $occ:expr, $occ_partial:expr, [$($ctype:ty),+ $(,)?]) => {
+        fn $fn(c: &mut Criterion) {
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/get_hit"));
+                $( for &occ in $occ {
+                    let cont = <$ctype as BenchContainer<$ty>>::fill(occ);
+                    let target = hit_index(occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| b.iter(|| black_box(cont.lookup(black_box(target)))),
+                    );
+                } )+
+                g.finish();
             }
-            // First slot `fill` did not populate.
-            const fn miss_index(occupancy: usize) -> usize {
-                occupancy
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/get_miss"));
+                $( for &occ in $occ_partial {
+                    let cont = <$ctype as BenchContainer<$ty>>::fill(occ);
+                    let target = miss_index(occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| b.iter(|| black_box(cont.lookup(black_box(target)))),
+                    );
+                } )+
+                g.finish();
             }
-
-            #[divan::bench(types = [$($ctype),+], args = $occ)]
-            fn get_hit<C: BenchContainer<$ty>>(bencher: divan::Bencher, occupancy: usize) {
-                let c = C::fill(occupancy);
-                let target = hit_index(occupancy);
-                bencher.bench_local(|| divan::black_box(c.lookup(divan::black_box(target))));
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/insert_replace"));
+                $( for &occ in $occ {
+                    let target = hit_index(occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| b.iter_batched(
+                            || <$ctype as BenchContainer<$ty>>::fill(occ),
+                            |mut cont| black_box(cont.set(target, <$ty as Payload>::make(target))),
+                            BatchSize::SmallInput,
+                        ),
+                    );
+                } )+
+                g.finish();
             }
-
-            #[divan::bench(types = [$($ctype),+], args = $occ_partial)]
-            fn get_miss<C: BenchContainer<$ty>>(bencher: divan::Bencher, occupancy: usize) {
-                let c = C::fill(occupancy);
-                let target = miss_index(occupancy);
-                bencher.bench_local(|| divan::black_box(c.lookup(divan::black_box(target))));
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/insert_new"));
+                $( for &occ in $occ_partial {
+                    let target = miss_index(occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| b.iter_batched(
+                            || <$ctype as BenchContainer<$ty>>::fill(occ),
+                            |mut cont| black_box(cont.set(target, <$ty as Payload>::make(target))),
+                            BatchSize::SmallInput,
+                        ),
+                    );
+                } )+
+                g.finish();
             }
-
-            #[divan::bench(types = [$($ctype),+], args = $occ)]
-            fn insert_replace<C: BenchContainer<$ty>>(
-                bencher: divan::Bencher,
-                occupancy: usize,
-            ) {
-                let target = hit_index(occupancy);
-                bencher
-                    .with_inputs(|| C::fill(occupancy))
-                    .bench_local_values(|mut c| {
-                        divan::black_box(c.set(target, <$ty as Payload>::make(target)))
-                    });
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/remove"));
+                $( for &occ in $occ {
+                    let target = hit_index(occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| b.iter_batched(
+                            || <$ctype as BenchContainer<$ty>>::fill(occ),
+                            |mut cont| black_box(cont.del(target)),
+                            BatchSize::SmallInput,
+                        ),
+                    );
+                } )+
+                g.finish();
             }
-
-            #[divan::bench(types = [$($ctype),+], args = $occ_partial)]
-            fn insert_new<C: BenchContainer<$ty>>(bencher: divan::Bencher, occupancy: usize) {
-                let target = miss_index(occupancy);
-                bencher
-                    .with_inputs(|| C::fill(occupancy))
-                    .bench_local_values(|mut c| {
-                        divan::black_box(c.set(target, <$ty as Payload>::make(target)))
-                    });
-            }
-
-            #[divan::bench(types = [$($ctype),+], args = $occ)]
-            fn remove<C: BenchContainer<$ty>>(bencher: divan::Bencher, occupancy: usize) {
-                let target = hit_index(occupancy);
-                bencher
-                    .with_inputs(|| C::fill(occupancy))
-                    .bench_local_values(|mut c| divan::black_box(c.del(target)));
-            }
-
-            #[divan::bench(types = [$($ctype),+], args = $occ)]
-            fn iter_present<C: BenchContainer<$ty>>(bencher: divan::Bencher, occupancy: usize) {
-                let c = C::fill(occupancy);
-                bencher.bench_local(|| divan::black_box(divan::black_box(&c).fold()));
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/iter_present"));
+                $( for &occ in $occ {
+                    let cont = <$ctype as BenchContainer<$ty>>::fill(occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| b.iter(|| black_box(black_box(&cont).fold())),
+                    );
+                } )+
+                g.finish();
             }
         }
     };
 }
 
 single_op_benches!(
-    cell_a, [u8; 32], Arity16, OCC_A, OCC_A_PARTIAL,
+    single_cell_a, "cell_a", [u8; 32], OCC_A, OCC_A_PARTIAL,
     [
         PackedArray<[u8; 32], Arity16>,
         GappedArray<[u8; 32], Arity16>,
@@ -113,7 +153,7 @@ single_op_benches!(
 );
 
 single_op_benches!(
-    cell_b, u64, Arity256, OCC_B, OCC_B_PARTIAL,
+    single_cell_b, "cell_b", u64, OCC_B, OCC_B_PARTIAL,
     [
         PackedArray<u64, Arity256>,
         GappedArray<u64, Arity256>,
@@ -124,97 +164,61 @@ single_op_benches!(
     ]
 );
 
-mod convert {
-    use super::Arity16;
-    use super::Arity256;
-    use super::BenchContainer;
-    use super::FixedArray;
-    use super::OCC_A;
-    use super::OCC_B;
-    use super::PackedArray;
-
-    // pack: clone a populated FixedArray into a PackedArray (From<&FixedArray>).
-    #[divan::bench(args = OCC_A)]
-    fn pack_cell_a(bencher: divan::Bencher, occupancy: usize) {
-        let src =
-            <FixedArray<Option<[u8; 32]>, Arity16> as BenchContainer<[u8; 32]>>::fill(occupancy);
-        bencher.bench_local(|| divan::black_box(PackedArray::from(divan::black_box(&src))));
-    }
-
-    #[divan::bench(args = OCC_B)]
-    fn pack_cell_b(bencher: divan::Bencher, occupancy: usize) {
-        let src = <FixedArray<Option<u64>, Arity256> as BenchContainer<u64>>::fill(occupancy);
-        bencher.bench_local(|| divan::black_box(PackedArray::from(divan::black_box(&src))));
-    }
-
-    // unpack: clone a populated PackedArray back into a FixedArray
-    // (From<&PackedArray>).
-    #[divan::bench(args = OCC_A)]
-    fn unpack_cell_a(bencher: divan::Bencher, occupancy: usize) {
-        let src = <PackedArray<[u8; 32], Arity16> as BenchContainer<[u8; 32]>>::fill(occupancy);
-        bencher.bench_local(|| {
-            divan::black_box(FixedArray::<Option<[u8; 32]>, Arity16>::from(
-                divan::black_box(&src),
-            ))
-        });
-    }
-
-    #[divan::bench(args = OCC_B)]
-    fn unpack_cell_b(bencher: divan::Bencher, occupancy: usize) {
-        let src = <PackedArray<u64, Arity256> as BenchContainer<u64>>::fill(occupancy);
-        bencher.bench_local(|| {
-            divan::black_box(FixedArray::<Option<u64>, Arity256>::from(divan::black_box(
-                &src,
-            )))
-        });
-    }
-}
-
+/// Registers `build` and `churn` for one cell under `throughput/<cell>/<op>`,
+/// with no occupancy parameter (the macro sweeps the full arity).
 macro_rules! workload_benches {
-    ($modname:ident, $ty:ty, $arity:ty, [$($ctype:ty),+ $(,)?]) => {
-        mod $modname {
-            use super::*;
-
-            // build: N successive inserts from empty (burst-insert).
-            #[divan::bench(types = [$($ctype),+])]
-            fn build<C: BenchContainer<$ty>>(bencher: divan::Bencher) {
+    ($fn:ident, $cell:literal, $ty:ty, $arity:ty, [$($ctype:ty),+ $(,)?]) => {
+        fn $fn(c: &mut Criterion) {
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/build"));
                 let n = <$arity as Arity>::LEN;
-                bencher.bench_local(|| {
-                    let mut c = C::empty();
-                    for i in 0..n {
-                        c.set(i, <$ty as Payload>::make(i));
-                    }
-                    divan::black_box(c)
-                });
+                $(
+                    // bench_function (no parameter) so the id is the exact
+                    // four-segment `throughput/<cell>/build/<NAME>`. Using
+                    // BenchmarkId::new(NAME, "") would append an empty segment.
+                    g.bench_function(<$ctype as BenchContainer<$ty>>::NAME, |b| {
+                        b.iter_with_large_drop(|| {
+                            let mut cont = <$ctype as BenchContainer<$ty>>::empty();
+                            for i in 0..n {
+                                cont.set(i, <$ty as Payload>::make(i));
+                            }
+                            cont
+                        })
+                    });
+                )+
+                g.finish();
             }
-
-            // churn: hold ~half occupancy through max(256, 8N) alternating ops.
-            #[divan::bench(types = [$($ctype),+])]
-            fn churn<C: BenchContainer<$ty>>(bencher: divan::Bencher) {
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/churn"));
                 let ops = churn_ops::<$arity>();
                 let half = <$arity as Arity>::LEN / 2;
-                bencher
-                    .with_inputs(|| C::fill(half))
-                    .bench_local_values(|mut c| {
-                        for &(op, slot) in &ops {
-                            match op {
-                                ChurnOp::Remove => {
-                                    divan::black_box(c.del(slot));
+                $(
+                    g.bench_function(<$ctype as BenchContainer<$ty>>::NAME, |b| {
+                        b.iter_batched(
+                            || <$ctype as BenchContainer<$ty>>::fill(half),
+                            |mut cont| {
+                                for &(op, slot) in &ops {
+                                    match op {
+                                        ChurnOp::Remove => { black_box(cont.del(slot)); }
+                                        ChurnOp::Insert => {
+                                            black_box(cont.set(slot, <$ty as Payload>::make(slot)));
+                                        }
+                                    }
                                 }
-                                ChurnOp::Insert => {
-                                    divan::black_box(c.set(slot, <$ty as Payload>::make(slot)));
-                                }
-                            }
-                        }
-                        divan::black_box(c)
+                                cont
+                            },
+                            BatchSize::SmallInput,
+                        )
                     });
+                )+
+                g.finish();
             }
         }
     };
 }
 
 workload_benches!(
-    workload_a, [u8; 32], Arity16,
+    workload_cell_a, "cell_a", [u8; 32], Arity16,
     [
         PackedArray<[u8; 32], Arity16>,
         GappedArray<[u8; 32], Arity16>,
@@ -226,7 +230,7 @@ workload_benches!(
 );
 
 workload_benches!(
-    workload_b, u64, Arity256,
+    workload_cell_b, "cell_b", u64, Arity256,
     [
         PackedArray<u64, Arity256>,
         GappedArray<u64, Arity256>,
@@ -237,6 +241,54 @@ workload_benches!(
     ]
 );
 
-fn main() {
-    divan::main();
+/// pack/unpack between a populated `FixedArray` and a `PackedArray`, swept by
+/// occupancy per cell, under `throughput/convert/<op>`.
+fn convert(c: &mut Criterion) {
+    {
+        let mut g = c.benchmark_group("throughput/convert/pack");
+        for &occ in OCC_A {
+            let src =
+                <FixedArray<Option<[u8; 32]>, Arity16> as BenchContainer<[u8; 32]>>::fill(occ);
+            g.bench_with_input(BenchmarkId::new("cell_a", occ), &occ, |b, _| {
+                b.iter_with_large_drop(|| PackedArray::from(black_box(&src)));
+            });
+        }
+        for &occ in OCC_B {
+            let src = <FixedArray<Option<u64>, Arity256> as BenchContainer<u64>>::fill(occ);
+            g.bench_with_input(BenchmarkId::new("cell_b", occ), &occ, |b, _| {
+                b.iter_with_large_drop(|| PackedArray::from(black_box(&src)));
+            });
+        }
+        g.finish();
+    }
+    {
+        let mut g = c.benchmark_group("throughput/convert/unpack");
+        for &occ in OCC_A {
+            let src = <PackedArray<[u8; 32], Arity16> as BenchContainer<[u8; 32]>>::fill(occ);
+            g.bench_with_input(BenchmarkId::new("cell_a", occ), &occ, |b, _| {
+                b.iter_with_large_drop(|| {
+                    FixedArray::<Option<[u8; 32]>, Arity16>::from(black_box(&src))
+                });
+            });
+        }
+        for &occ in OCC_B {
+            let src = <PackedArray<u64, Arity256> as BenchContainer<u64>>::fill(occ);
+            g.bench_with_input(BenchmarkId::new("cell_b", occ), &occ, |b, _| {
+                b.iter_with_large_drop(|| {
+                    FixedArray::<Option<u64>, Arity256>::from(black_box(&src))
+                });
+            });
+        }
+        g.finish();
+    }
 }
+
+criterion_group!(
+    benches,
+    single_cell_a,
+    single_cell_b,
+    workload_cell_a,
+    workload_cell_b,
+    convert,
+);
+criterion_main!(benches);

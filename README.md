@@ -66,22 +66,39 @@ The wiring is a compile-time guarantee: for every arity,
 
 ## Throughput benchmarks
 
-`just bench` runs the divan throughput suite (`cargo bench -p arity-arrays
---bench throughput`; pass divan args after `--`, e.g. `just bench -- --sample-count 3`).
+`just bench` runs both criterion benches via `cargo-criterion` (`cargo criterion
+-p arity-arrays`; pass criterion args after `--`, e.g. `just bench --
+--sample-size 50`). Export a run with `just bench-export <label>` and regenerate
+the comparison tables below plus the SVG charts in `docs/bench/` with `just
+bench-charts <label>`.
 
 Current state, medians on an Apple M3 Max (MacBook Pro), the array layouts vs
 the standard maps (`usize` keys) at Arity256, full occupancy:
 
-| op (Arity256, full) | GappedArray | PackedArray | BTreeMap | HashMap | note |
-| :--- | ---: | ---: | ---: | ---: | :--- |
-| `get_hit` | ~13 ns | ~1.4 ns | ~5 ns | ~17 ns | flat across occupancy: one `select` per lookup is the holed layout's irreducible cost |
-| `remove` | ~33 ns | ~79 ns | ~601 ns | ~39 ns | move-free delete — **Gapped wins**, flat in occupancy |
-| `insert_replace` | ~32 ns | ~13 ns | ~640 ns | ~29 ns | flat, in-place |
-| `insert_new`¹ | ~510 ns | ~50 ns | ~304 ns | ~29 ns | O(count): the benched fills are all capacity boundaries, so only the grow + respread path is measured (worst case, not typical insert) |
-| `iter_present` | ~550 ns | ~656 ns | ~187 ns | ~140 ns | comparable |
+<!-- bench:start -->
+**Cell A (Arity16) single-op (median, max occupancy)**
 
-¹ `insert_new` maxes out at fill 128 in the suite (its sample fills are all
-powers of two); the other rows are at fill 256.
+| op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `get_hit` | 3.46 ns | 0.60 ns | 0.81 ns | 4.68 ns | 7.19 ns | 1.07 ns |
+| `get_miss` | 3.48 ns | 0.61 ns | 0.80 ns | 1.61 ns | 6.03 ns | 0.81 ns |
+| `insert_new` | 28.09 ns | 23.97 ns | 11.13 ns | 59.99 ns | 37.97 ns | 37.86 ns |
+| `insert_replace` | 59.80 ns | 22.89 ns | 11.63 ns | 24.54 ns | 41.99 ns | 18.07 ns |
+| `iter_present` | 16.89 ns | 7.06 ns | 9.10 ns | 22.77 ns | 9.48 ns | 18.82 ns |
+| `remove` | 72.28 ns | 25.59 ns | 11.22 ns | 23.80 ns | 45.86 ns | 45.96 ns |
+
+**Cell B (Arity256) single-op (median, max occupancy)**
+
+| op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `get_hit` | 5.49 ns | 0.54 ns | 0.52 ns | 13.37 ns | 7.58 ns | 1.53 ns |
+| `get_miss` | 9.68 ns | 0.49 ns | 0.48 ns | 0.78 ns | 5.99 ns | 0.81 ns |
+| `insert_new` | 331.03 ns | 26.40 ns | 80.85 ns | 513.13 ns | 31.33 ns | 44.72 ns |
+| `insert_replace` | 638.64 ns | 25.01 ns | 79.34 ns | 33.20 ns | 29.81 ns | 14.12 ns |
+| `iter_present` | 183.61 ns | 51.74 ns | 81.38 ns | 542.46 ns | 135.68 ns | 659.03 ns |
+| `remove` | 643.57 ns | 24.38 ns | 78.91 ns | 34.18 ns | 34.44 ns | 66.69 ns |
+
+<!-- bench:end -->
 
 `GappedArray` trades memory and lookup cost for cheap mutation: at Arity16 its
 build/churn workload is ~2× faster than `PackedArray`; at Arity256 the
