@@ -83,9 +83,10 @@ full suite but is omitted from the snapshot below; reproduce all results with
 `just bench`.
 
 The `trie` bench (`cargo bench -p arity-arrays --bench trie`) additionally times
-recursive `Clone`/`Drop` of a trie fixture with a non-POD `Edge` payload across
-all four representations, contrasting `FixedArray`'s full-width per-node cost
-with the live-count-proportional `PackedArray`/`GappedArray`.
+recursive `Clone`/`Drop` of a trie fixture with non-POD node contents (`Edge`
+children owning a `Box`/`Arc` subtree) across all four representations,
+contrasting `FixedArray`'s full-width (`A::LEN`) per-node cost with `PackedArray`
+(per live child) and `GappedArray` (per power-of-two capacity ≥ live count).
 
 > measured on: Apple M3 Max, rustc 1.98.0-nightly (f428d123a 2026-06-19), 2026-06-28
 

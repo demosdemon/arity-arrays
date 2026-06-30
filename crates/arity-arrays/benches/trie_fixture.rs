@@ -147,6 +147,17 @@ pub enum Edge<A: Arity, S: ChildStore<A>> {
 // unconditionally: `Trie::clone` delegates to `ChildMap::clone_map`, which
 // accepts a caller-supplied cloning function, removing the structural
 // `V: Clone` requirement from the store implementations.
+//
+// `clone_map` *rebuilds* each children map by re-inserting its present elements
+// one at a time, rather than calling the representation's own `Clone`. For the
+// builder-constructed fixtures this reproduces the native clone's capacity
+// (Packed exact-fit, Gapped next-power-of-two, Fixed full-width) and per-node
+// cost is dominated by the recursive subtree clones, so the
+// cross-representation comparison stays faithful. Caveat: `PackedArray::insert`
+// reallocates to exact size on each call, so a per-node rebuild is O(count^2) —
+// immaterial only because the fixtures cap fanout at 16. A future wide-fanout
+// fixture would start measuring rebuild artifacts instead of clone cost and
+// should clone via the representation's own `Clone`.
 impl<A: Arity, S: ChildStore<A>> Clone for Trie<A, S> {
     fn clone(&self) -> Self {
         Self {

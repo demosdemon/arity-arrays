@@ -133,10 +133,7 @@ fn chain_depth_is_key_depth() {
     );
 }
 
-fn check_clone_independent<A: Arity, S: ChildStore<A>>(shape: Shape)
-where
-    <S as ChildStore<A>>::Map<Edge<A, S>>: Clone,
-{
+fn check_clone_independent<A: Arity, S: ChildStore<A>>(shape: Shape) {
     let original = build::<A, S>(shape);
     let expected = count_nodes(&original);
     let clone = original.clone();

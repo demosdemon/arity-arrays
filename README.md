@@ -95,10 +95,11 @@ general-purpose default.
 
 A second bench, `cargo bench -p arity-arrays --bench trie`, measures recursive
 `Clone` and `Drop` of a compressed-trie fixture whose children array is each
-representation, with a non-POD `Edge` payload (`Box`/`Arc`/`Box<[u8]>`). It
-isolates the per-element clone/drop cost — where `FixedArray` pays for all
-`A::LEN` slots per node while `PackedArray`/`GappedArray` pay only for live
-children — across Chain (deep), Bushy (broad), and Realistic (tapered) shapes.
+representation, with non-POD node contents (`Edge` children owning a `Box`/`Arc`
+subtree, plus a boxed value). It isolates the per-element clone/drop cost — where
+`FixedArray` touches all `A::LEN` slots per node, `PackedArray` pays per live
+child, and `GappedArray` pays for its power-of-two capacity (≥ the live count) —
+across Chain (deep), Bushy (broad), and Realistic (tapered) shapes.
 
 ## Crates
 
