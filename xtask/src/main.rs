@@ -7,6 +7,7 @@
 
 pub(crate) mod bench_id;
 mod ingest;
+mod tables;
 
 fn main() {
     // Subcommands are wired in later tasks.
