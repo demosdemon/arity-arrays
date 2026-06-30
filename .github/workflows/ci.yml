@@ -53,36 +53,28 @@ jobs:
       - run: cargo doc --workspace --no-deps --all-features
 
   features:
-    name: feature matrix ${{ matrix.os }} / ${{ matrix.toolchain }} / ${{ matrix.features }}
+    # Feature gating is platform-agnostic (no target_os/arch cfg in the library
+    # crates), so the cargo-hack feature powerset runs on Linux only; platform
+    # breadth lives in the `test` and `bench` jobs. The recipe is the source of
+    # truth for the exact powerset. beta is omitted here (it never diverges from
+    # stable for feature gating) but kept in `test`.
+    name: feature powerset / ${{ matrix.toolchain }}
     needs: [nostd, docs]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: true
       matrix:
-        os: [windows-2025-vs2026, macos-26, ubuntu-26.04, ubuntu-26.04-arm]
-        toolchain:
-          - msrv
-          - stable
-          - beta
-          - nightly
-        features:
-          # Lean single-arity build (the firewood shape): library compiles and lints clean.
-          - "16"
-          # Arity-256 alone: exercises the U256 backing in isolation.
-          - "256"
-          # No arities selected: the crates still compile (empty of arity types), warning-free.
-          - ""
-          # Logical serde without serde_with (catches a misplaced serde_with cfg).
-          - "16,serde"
-          # ethnum backing + compact serde + std together.
-          - "256,ethnum,serde_with,std"
+        toolchain: [msrv, stable, nightly]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
-      - run: cargo clippy --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --no-default-features --features "${{ matrix.features }}" -- -D warnings
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-hack
+      - run: just features
 
   test:
     name: test ${{ matrix.os }} / ${{ matrix.toolchain }}
