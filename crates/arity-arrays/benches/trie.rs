@@ -8,13 +8,14 @@
 #[path = "trie_fixture.rs"]
 mod fixture;
 
+use std::hint::black_box;
+
 use arity_arrays::Arity;
 use arity_arrays::Arity16;
 use arity_arrays::Arity256;
 use criterion::BatchSize;
 use criterion::BenchmarkId;
 use criterion::Criterion;
-use criterion::black_box;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use fixture::BTreeStore;
