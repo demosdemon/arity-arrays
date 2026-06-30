@@ -19,7 +19,10 @@ use fixture::Edge;
 use fixture::FixedStore;
 use fixture::GappedStore;
 use fixture::PackedStore;
+use fixture::Shape;
 use fixture::Trie;
+use fixture::build;
+use fixture::key_depth;
 
 /// A childless node for the store `S` over arity `A`.
 fn leaf<A: Arity, S: ChildStore<A>>() -> Trie<A, S> {
@@ -80,4 +83,92 @@ fn childmap_roundtrip_and_clone_all_stores() {
     roundtrip::<Arity256, PackedStore>();
     roundtrip::<Arity256, FixedStore>();
     roundtrip::<Arity256, BTreeStore>();
+}
+
+/// Number of nodes a `build` of `shape` must produce, computed independently of
+/// the builder so the test cannot drift with it. Mirrors the builder's complete
+/// per-depth fanout: `Chain` is a `key_depth`-long path; `Bushy` is a full
+/// `BUSHY_FANOUT`-ary tree of depth `BUSHY_DEPTH`; `Realistic` is the
+/// product-sum of `REALISTIC_FANOUTS`. These mirror the cfg(miri) reductions
+/// automatically by re-deriving from the same public values where possible; the
+/// Bushy/Realistic closed forms are recomputed from the builder's own
+/// `expected_node_count`.
+fn expected_count<A: Arity>(shape: Shape) -> usize {
+    fixture::expected_node_count::<A>(shape)
+}
+
+/// Count nodes store-agnostically: a node plus its present `Mutable` children.
+/// Fixtures are all-`Mutable`, so `Frozen` never appears.
+fn count_nodes<A: Arity, S: ChildStore<A>>(t: &Trie<A, S>) -> usize {
+    let mut n = 1;
+    for i in <A::Index as Niche>::all() {
+        if let Some(Edge::Mutable(child)) = ChildMap::get(&t.children, i) {
+            n += count_nodes::<A, S>(child);
+        }
+    }
+    n
+}
+
+fn check_count<A: Arity, S: ChildStore<A>>(shape: Shape) {
+    assert_eq!(
+        count_nodes(&build::<A, S>(shape)),
+        expected_count::<A>(shape),
+        "node count mismatch",
+    );
+}
+
+#[test]
+fn node_counts_match_across_stores() {
+    for shape in [Shape::Chain, Shape::Bushy, Shape::Realistic] {
+        check_count::<Arity16, GappedStore>(shape);
+        check_count::<Arity16, PackedStore>(shape);
+        check_count::<Arity16, FixedStore>(shape);
+        check_count::<Arity16, BTreeStore>(shape);
+        check_count::<Arity256, GappedStore>(shape);
+        check_count::<Arity256, PackedStore>(shape);
+        check_count::<Arity256, FixedStore>(shape);
+        check_count::<Arity256, BTreeStore>(shape);
+    }
+}
+
+#[test]
+fn chain_depth_is_key_depth() {
+    // A Chain is a single path: its node count equals its depth.
+    assert_eq!(
+        count_nodes(&build::<Arity16, GappedStore>(Shape::Chain)),
+        key_depth::<Arity16>()
+    );
+    assert_eq!(
+        count_nodes(&build::<Arity256, GappedStore>(Shape::Chain)),
+        key_depth::<Arity256>()
+    );
+}
+
+fn check_clone_independent<A: Arity, S: ChildStore<A>>(shape: Shape)
+where
+    <S as ChildStore<A>>::Map<Edge<A, S>>: Clone,
+{
+    let original = build::<A, S>(shape);
+    let expected = count_nodes(&original);
+    let clone = original.clone();
+    assert_eq!(count_nodes(&clone), expected);
+    drop(original); // recursive Drop through this store (Miri checks for UB/leaks)
+    assert_eq!(
+        count_nodes(&clone),
+        expected,
+        "clone must survive the original's drop"
+    );
+}
+
+#[test]
+fn clone_is_independent_across_stores() {
+    // Bushy gives several children per node, exercising per-array Clone/Drop.
+    check_clone_independent::<Arity16, GappedStore>(Shape::Bushy);
+    check_clone_independent::<Arity16, PackedStore>(Shape::Bushy);
+    check_clone_independent::<Arity16, FixedStore>(Shape::Bushy);
+    check_clone_independent::<Arity16, BTreeStore>(Shape::Bushy);
+    check_clone_independent::<Arity256, GappedStore>(Shape::Realistic);
+    check_clone_independent::<Arity256, PackedStore>(Shape::Realistic);
+    check_clone_independent::<Arity256, FixedStore>(Shape::Realistic);
+    check_clone_independent::<Arity256, BTreeStore>(Shape::Realistic);
 }
