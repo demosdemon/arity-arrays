@@ -75,5 +75,19 @@ trie_cell!(arity256, [
 ]);
 
 fn main() {
-    divan::main();
+    // The `Chain` fixture recurses to `key_depth` (128 levels for Arity16, 64
+    // for Arity256), and `Trie::clone` returns each node by value — a
+    // `FixedStore` + `Arity256` node carries its children array inline (~12 KiB),
+    // so the recursive clone needs well over 2 MiB of stack. That exceeds
+    // Windows' ~1 MiB default main-thread stack in debug builds (e.g. when
+    // `cargo test` runs this bench in test mode), aborting with a stack
+    // overflow. Run the harness on a thread with an ample stack so the benches
+    // work on every platform; `bench_local` runs on the calling thread, so the
+    // benched closures inherit this stack.
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(divan::main)
+        .expect("spawn bench harness thread")
+        .join()
+        .expect("bench harness thread panicked");
 }
