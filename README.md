@@ -64,6 +64,32 @@ this costs nothing in practice.
 The wiring is a compile-time guarantee: for every arity,
 `Index::COUNT == LEN == Bitmap::WIDTH`.
 
+## Throughput benchmarks
+
+`just bench` runs the divan throughput suite (`cargo bench -p arity-arrays
+--bench throughput`; pass divan args after `--`, e.g. `just bench -- --sample-count 3`).
+
+Current state, medians on an Apple M3 Max (MacBook Pro), `GappedArray` vs the
+other layouts:
+
+| op (Arity256, full) | GappedArray | PackedArray | note |
+| :--- | ---: | ---: | :--- |
+| `get_hit` | ~13 ns | ~1.4 ns | flat across occupancy: one `select` per lookup is the holed layout's irreducible cost |
+| `remove` | ~33 ns | ~79 ns | move-free delete — **Gapped wins**, flat in occupancy |
+| `insert_replace` | ~32 ns | ~13 ns | flat, in-place |
+| `insert_new` | ~510 ns | ~50 ns | O(count): the benched fills are all capacity boundaries, so only the grow + respread path is measured (worst case, not typical insert) |
+| `iter_present` | ~550 ns | ~656 ns | comparable |
+
+`GappedArray` trades memory and lookup cost for cheap mutation: at Arity16 its
+build/churn workload is ~2× faster than `PackedArray`; at Arity256 the
+build/resize path is ~3× slower. It is the write-throughput corner, not a
+general-purpose default.
+
+> [!NOTE]
+> By-value single-op benches (`remove`, `insert_*`) drop the container inside the
+> timed region, so a payload's `Drop` cost is included. Use `black_box`-returning
+> workload benches to time operations in isolation.
+
 ## Crates
 
 In dependency order:
