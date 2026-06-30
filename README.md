@@ -80,26 +80,25 @@ the standard maps (`usize` keys) at Arity256, full occupancy:
 
 | op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `get_hit` | 3.36 ns | 0.56 ns | 0.80 ns | 4.49 ns | 7.45 ns | 1.01 ns |
-| `get_miss` | 3.45 ns | 0.54 ns | 0.80 ns | 1.54 ns | 5.99 ns | 0.79 ns |
-| `insert_new` | 27.86 ns | 24.75 ns | 11.23 ns | 59.86 ns | 38.01 ns | 38.54 ns |
-| `insert_replace` | 63.25 ns | 23.05 ns | 11.16 ns | 25.30 ns | 40.04 ns | 19.75 ns |
-| `iter_present` | 16.57 ns | 7.10 ns | 9.16 ns | 22.96 ns | 9.50 ns | 18.50 ns |
-| `remove` | 75.97 ns | 26.04 ns | 11.69 ns | 24.14 ns | 40.20 ns | 47.61 ns |
+| `get_hit` | 3.46 ns | 0.60 ns | 0.81 ns | 4.68 ns | 7.19 ns | 1.07 ns |
+| `get_miss` | 3.48 ns | 0.61 ns | 0.80 ns | 1.61 ns | 6.03 ns | 0.81 ns |
+| `insert_new` | 28.09 ns | 23.97 ns | 11.13 ns | 59.99 ns | 37.97 ns | 37.86 ns |
+| `insert_replace` | 59.80 ns | 22.89 ns | 11.63 ns | 24.54 ns | 41.99 ns | 18.07 ns |
+| `iter_present` | 16.89 ns | 7.06 ns | 9.10 ns | 22.77 ns | 9.48 ns | 18.82 ns |
+| `remove` | 72.28 ns | 25.59 ns | 11.22 ns | 23.80 ns | 45.86 ns | 45.96 ns |
 
 **Cell B (Arity256) single-op (median, max occupancy)**
 
 | op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `get_hit` | 5.63 ns | 0.52 ns | 0.53 ns | 13.58 ns | 8.02 ns | 1.53 ns |
-| `get_miss` | 9.49 ns | 0.49 ns | 0.50 ns | 0.81 ns | 6.10 ns | 0.79 ns |
-| `insert_new` | 161.93 ns | 27.66 ns | 93.06 ns | 524.58 ns | – | 45.13 ns |
-| `insert_replace` | 653.84 ns | 27.42 ns | 79.66 ns | 36.15 ns | 37.73 ns | 16.02 ns |
+| `get_hit` | 5.49 ns | 0.54 ns | 0.52 ns | 13.37 ns | 7.58 ns | 1.53 ns |
+| `get_miss` | 9.68 ns | 0.49 ns | 0.48 ns | 0.78 ns | 5.99 ns | 0.81 ns |
+| `insert_new` | 331.03 ns | 26.40 ns | 80.85 ns | 513.13 ns | 31.33 ns | 44.72 ns |
+| `insert_replace` | 638.64 ns | 25.01 ns | 79.34 ns | 33.20 ns | 29.81 ns | 14.12 ns |
+| `iter_present` | 183.61 ns | 51.74 ns | 81.38 ns | 542.46 ns | 135.68 ns | 659.03 ns |
+| `remove` | 643.57 ns | 24.38 ns | 78.91 ns | 34.18 ns | 34.44 ns | 66.69 ns |
 
 <!-- bench:end -->
-
-¹ `insert_new` maxes out at fill 128 in the suite (its sample fills are all
-powers of two); the other rows are at fill 256.
 
 `GappedArray` trades memory and lookup cost for cheap mutation: at Arity16 its
 build/churn workload is ~2× faster than `PackedArray`; at Arity256 the
