@@ -82,7 +82,7 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
-      - run: cargo clippy --workspace ${{ case(matrix.toolchain == 'msrv', '--exclude xtask ', '') }}--no-default-features --features "${{ matrix.features }}" -- -D warnings
+      - run: cargo clippy --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --no-default-features --features "${{ matrix.features }}" -- -D warnings
 
   test:
     name: test ${{ matrix.os }} / ${{ matrix.toolchain }}
@@ -102,11 +102,11 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - run: cargo test --workspace ${{ case(matrix.toolchain == 'msrv', '--exclude xtask ', '') }}--all-features --all-targets
-      - run: cargo test --workspace ${{ case(matrix.toolchain == 'msrv', '--exclude xtask ', '') }}--all-features --doc
+      - run: cargo test --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features --all-targets
+      - run: cargo test --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features --doc
       # Default features (= the custom two-limb U256 backing): fast runtime
       # coverage of the shipping default, which --all-features swaps to ethnum.
-      - run: cargo test --workspace
+      - run: cargo test --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }}
 
   # Per-PR Miri smoke: the shared reusable workflow (miri.yml) at a reduced
   # proptest depth. Miri interprets ~100s per proptest case across these
@@ -189,5 +189,5 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - run: cargo build --workspace ${{ case(matrix.toolchain == 'msrv', '--exclude xtask ', '') }}--all-features --benches
-      - run: cargo bench --workspace ${{ case(matrix.toolchain == 'msrv', '--exclude xtask ', '') }}--all-features
+      - run: cargo build --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features --benches
+      - run: cargo bench --workspace${{ case(matrix.toolchain == 'msrv', ' --exclude xtask', '') }} --all-features
