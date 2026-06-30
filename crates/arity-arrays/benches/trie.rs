@@ -17,7 +17,6 @@ use criterion::BatchSize;
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::criterion_group;
-use criterion::criterion_main;
 use fixture::BTreeStore;
 use fixture::ChildStore;
 use fixture::FixedStore;
@@ -110,4 +109,24 @@ trie_cell!(arity256, "arity256", [
 ]);
 
 criterion_group!(benches, arity16, arity256);
-criterion_main!(benches);
+
+fn main() {
+    // Equivalent to `criterion_main!(benches)`, but run on a thread with an
+    // ample stack. The `Chain` fixture recurses to `key_depth` (128 levels for
+    // Arity16, 64 for Arity256), and `Trie::clone` returns each node by value —
+    // a `FixedStore` + `Arity256` node carries its children array inline
+    // (~12 KiB), so the recursive clone needs well over 2 MiB of stack. That
+    // exceeds Windows' ~1 MiB default main-thread stack in debug builds (e.g.
+    // when `cargo test` runs this bench in test mode), aborting with a stack
+    // overflow; Linux and macOS (8 MiB main stack) survive. criterion runs the
+    // benched routine on the calling thread, so it inherits this stack.
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            benches();
+            Criterion::default().configure_from_args().final_summary();
+        })
+        .expect("spawn bench harness thread")
+        .join()
+        .expect("bench harness thread panicked");
+}
