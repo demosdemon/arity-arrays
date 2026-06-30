@@ -45,6 +45,8 @@ jobs:
             args: -p arity-arrays --test mutation -- --skip _arity256
           - name: mutation-256
             args: -p arity-arrays --test mutation -- --exact packed_mutation_matches_btreemap_arity256
+          - name: trie
+            args: -p arity-arrays --test trie_internals
     env:
       # disable-isolation: the round-trip proptests read/write their regression
       # files on disk and seed from host entropy; strict-provenance stays on.
