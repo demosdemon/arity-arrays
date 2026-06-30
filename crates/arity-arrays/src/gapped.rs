@@ -964,6 +964,13 @@ unsafe fn drop_live_elems<A: Arity, T>(dp: *mut T, mut remaining: A::Bitmap) {
             unsafe { drop_live_elems::<A, T>(self.dp, self.remaining) };
         }
     }
+    // Dropping a `!needs_drop` element is a no-op, so skip the per-element
+    // walk entirely. The manual bit-loop below is not elidable by the
+    // optimiser the way slice drop glue is, so without this guard a POD
+    // payload pays an O(count) walk on every drop.
+    if !core::mem::needs_drop::<T>() {
+        return;
+    }
     while let Some(i) = remaining.bits().next() {
         remaining = remaining.without_bit(i);
         let guard = Rest::<A, T> { dp, remaining };
