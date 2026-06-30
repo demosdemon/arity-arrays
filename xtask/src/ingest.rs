@@ -1,10 +1,6 @@
 //! Parse cargo-criterion's newline-delimited JSON (`--message-format=json`)
 //! into normalized nanosecond measurements keyed by a typed `BenchId`.
 
-// Items are consumed by later tasks once subcommands are wired; until then the
-// binary entry point does not reference this module's types.
-#![expect(dead_code, reason = "consumed by later tasks that wire subcommands")]
-
 use serde::Deserialize;
 
 use crate::bench_id::BenchId;

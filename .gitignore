@@ -2,6 +2,10 @@
 # will have compiled files and executables
 target/
 
+# Local benchmark captures (machine-specific; only docs/bench/ SVGs and the
+# regenerated README tables are committed).
+/bench-data/
+
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries
 # More information here https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html
 Cargo.lock

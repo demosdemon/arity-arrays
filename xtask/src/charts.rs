@@ -1,9 +1,5 @@
 //! Render grouped-bar comparison SVGs from normalized measurements.
 
-// Items are consumed by later tasks once subcommands are wired; until then the
-// binary entry point does not reference this module's types.
-#![expect(dead_code, reason = "consumed by later tasks that wire subcommands")]
-
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::Path;

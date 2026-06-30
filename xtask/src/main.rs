@@ -10,8 +10,69 @@ mod charts;
 mod ingest;
 mod tables;
 
-fn main() {
-    // Subcommands are wired in later tasks.
-    eprintln!("xtask: no subcommand wired yet");
-    std::process::exit(2);
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("charts") {
+        match run_charts(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("xtask charts: {e}");
+                ExitCode::from(1)
+            }
+        }
+    } else {
+        eprintln!("usage: xtask charts <run.json> [<baseline.json>]");
+        ExitCode::from(2)
+    }
+}
+
+fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let run_path = args.first().ok_or("missing <run.json> path")?;
+    let jsonl = std::fs::read_to_string(run_path).map_err(|e| format!("read {run_path}: {e}"))?;
+    // Parse EVERYTHING (run, and baseline if given) before touching any file,
+    // so a malformed input aborts without writing partial artifacts.
+    let measurements = ingest::parse_run(&jsonl)?;
+    let baseline = match args.get(1) {
+        Some(p) => {
+            let j = std::fs::read_to_string(p).map_err(|e| format!("read {p}: {e}"))?;
+            Some(ingest::parse_run(&j)?)
+        }
+        None => None,
+    };
+
+    let table = tables::comparison_table(&measurements);
+    let readmes = [
+        Path::new("README.md"),
+        Path::new("crates/arity-arrays/README.md"),
+    ];
+    // Render all README replacements in memory; write nothing until every
+    // marker substitution has succeeded.
+    let mut rewritten: Vec<(PathBuf, String)> = Vec::new();
+    for path in readmes {
+        let existing =
+            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        rewritten.push((
+            path.to_path_buf(),
+            tables::render_marked(&existing, &table)?,
+        ));
+    }
+
+    let bench_dir = Path::new("docs/bench");
+    let mut charts = charts::write_charts(&measurements, bench_dir)?;
+    if let Some(before) = &baseline {
+        charts.extend(charts::write_delta(before, &measurements, bench_dir)?);
+    }
+    for (path, contents) in rewritten {
+        std::fs::write(&path, contents).map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+    eprintln!(
+        "regenerated {} README table(s) and {} chart(s)",
+        readmes.len(),
+        charts.len()
+    );
+    Ok(())
 }

@@ -1,10 +1,6 @@
 //! Regenerate the Markdown comparison tables embedded in the README files,
 //! between `<!-- bench:start -->` / `<!-- bench:end -->` markers.
 
-// Items are consumed by later tasks once subcommands are wired; until then the
-// binary entry point does not reference this module's types.
-#![expect(dead_code, reason = "consumed by later tasks that wire subcommands")]
-
 use crate::ingest::Measurement;
 
 const START: &str = "<!-- bench:start -->";

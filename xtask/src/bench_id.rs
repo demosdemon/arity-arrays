@@ -2,9 +2,10 @@
 //! the `arity-arrays` benches and this tool. Parsing is total: an unrecognized
 //! path is an error, never a silently mis-bucketed measurement.
 
-// Items are consumed by later tasks once subcommands are wired; until then the
-// binary entry point does not reference this module's types.
-#![expect(dead_code, reason = "consumed by later tasks that wire subcommands")]
+#![expect(
+    dead_code,
+    reason = "BenchId is a total id-path parser; the Workload/Convert/Trie variants are parsed for completeness but the current charts consume only Single"
+)]
 
 use core::fmt;
 use core::str::FromStr;
