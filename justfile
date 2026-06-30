@@ -29,9 +29,26 @@ lint:
 test pkg='':
     cargo test {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }} --all-features
 
-# Build docs with warnings denied (default: whole workspace; pass a package to scope).
+# Run the workspace test suite exactly as CI does, for a given toolchain lane.
+# nextest runs unit + integration + (in test mode) bench targets via --all-targets;
+# doctests run separately via `cargo test --doc` because nextest cannot execute
+# them. The default-features pass mirrors CI's fast shipping-default check. The
+# msrv lane drops xtask, which needs a newer Rust than the workspace MSRV.
+ci-test toolchain='stable':
+    cargo nextest run --workspace{{ if toolchain == 'msrv' { ' --exclude xtask' } else { '' } }} --all-features --all-targets
+    cargo test --workspace{{ if toolchain == 'msrv' { ' --exclude xtask' } else { '' } }} --all-features --doc
+    cargo nextest run --workspace{{ if toolchain == 'msrv' { ' --exclude xtask' } else { '' } }}
+
+# Build docs with warnings denied (default: whole workspace; pass a package to
+# scope). --all-features documents every feature-gated item and matches CI.
 doc pkg='':
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}
+
+# Build the crate for a bare-metal no_std target. Locks the #![no_std] discipline:
+# if any selected feature transitively pulls std, the build fails (no std in the
+# sysroot). Requires the target: `rustup target add thumbv7em-none-eabihf`.
+nostd:
+    cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
 
 # Every interpreted operation is far slower than native, so the proptests dominate;
 # scope to a package (`just miri arity-index`) or lower PROPTEST_CASES to iterate faster.
@@ -46,7 +63,7 @@ setup:
 
 # Lint every meaningful feature combination via cargo-hack (the CI `features`
 # job runs exactly this). Arities are mutually exclusive in the powerset, so each
-# is linted alone (8/16/32/64/128/256) rather than in 63 redundant multi-arity
+# is linted alone (8/16/32/64/128/256) rather than in redundant multi-arity
 # subsets; the orthogonal serde/serde_with/ethnum/std features are powerset on
 # top, capped at 4 simultaneous flags. --exclude-features default drops the
 # synthetic all-arity `default` member (the all-arity build is already covered by
@@ -61,12 +78,20 @@ features:
         --exclude-features default --mutually-exclusive-features 8,16,32,64,128,256 \
         --depth 4 clippy -- -D warnings
 
-# Run the fast checks (everything except the slow Miri pass).
-ci: fmt-check lint features test doc
+# Run the fast checks (everything except the slow Miri pass). Mirrors the CI
+# jobs that gate a PR, minus `nostd` — its cross-compile target may not be
+# installed locally (`rustup target add thumbv7em-none-eabihf && just nostd`).
+ci: fmt-check lint features ci-test doc
 
 # Run a fuzz target on the host (omit the CI-only gnu target pin). Default 60s.
 fuzz target time="60":
     cargo +nightly fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
+
+# Run a fuzz target the way CI does: pin the gnu host triple so cargo-fuzz does
+# not default to the musl triple of its prebuilt binary (ASAN cannot link against
+# static musl libc). For host-native local fuzzing use `just fuzz` instead.
+ci-fuzz target time='60':
+    cargo +nightly fuzz run {{target}} --target x86_64-unknown-linux-gnu -- -max_total_time={{time}} -rss_limit_mb=4096
 
 # Run a fuzz target inside a host-native Linux container (faithful glibc + ASAN
 # + libFuzzer). Builds the image on first use. Never forces emulation: amd64
@@ -83,6 +108,13 @@ fuzz-linux target time="60":
 # `--`, e.g. `just bench -- --sample-size 50`.
 bench *args:
     cargo criterion -p arity-arrays {{ args }}
+
+# Build then run the benches as a smoke check, the way CI does (always nightly,
+# release profile). The separate build is a fail-fast compile check before the
+# timed run. For the local charting workflow use `just bench` (cargo-criterion).
+ci-bench:
+    cargo build --release --workspace --all-features --benches
+    cargo bench --workspace --all-features
 
 # Capture a benchmark run as JSON for charting. <label> names the capture under
 # the gitignored bench-data/ dir; suffix it with a git SHA to keep before/after
