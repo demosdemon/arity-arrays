@@ -69,16 +69,19 @@ The wiring is a compile-time guarantee: for every arity,
 `just bench` runs the divan throughput suite (`cargo bench -p arity-arrays
 --bench throughput`; pass divan args after `--`, e.g. `just bench -- --sample-count 3`).
 
-Current state, medians on an Apple M3 Max (MacBook Pro), `GappedArray` vs the
-other layouts:
+Current state, medians on an Apple M3 Max (MacBook Pro), the array layouts vs
+the standard maps (`usize` keys) at Arity256, full occupancy:
 
-| op (Arity256, full) | GappedArray | PackedArray | note |
-| :--- | ---: | ---: | :--- |
-| `get_hit` | ~13 ns | ~1.4 ns | flat across occupancy: one `select` per lookup is the holed layout's irreducible cost |
-| `remove` | ~33 ns | ~79 ns | move-free delete — **Gapped wins**, flat in occupancy |
-| `insert_replace` | ~32 ns | ~13 ns | flat, in-place |
-| `insert_new` | ~510 ns | ~50 ns | O(count): the benched fills are all capacity boundaries, so only the grow + respread path is measured (worst case, not typical insert) |
-| `iter_present` | ~550 ns | ~656 ns | comparable |
+| op (Arity256, full) | GappedArray | PackedArray | BTreeMap | HashMap | note |
+| :--- | ---: | ---: | ---: | ---: | :--- |
+| `get_hit` | ~13 ns | ~1.4 ns | ~5 ns | ~17 ns | flat across occupancy: one `select` per lookup is the holed layout's irreducible cost |
+| `remove` | ~33 ns | ~79 ns | ~601 ns | ~39 ns | move-free delete — **Gapped wins**, flat in occupancy |
+| `insert_replace` | ~32 ns | ~13 ns | ~640 ns | ~29 ns | flat, in-place |
+| `insert_new`¹ | ~510 ns | ~50 ns | ~304 ns | ~29 ns | O(count): the benched fills are all capacity boundaries, so only the grow + respread path is measured (worst case, not typical insert) |
+| `iter_present` | ~550 ns | ~656 ns | ~187 ns | ~140 ns | comparable |
+
+¹ `insert_new` maxes out at fill 128 in the suite (its sample fills are all
+powers of two); the other rows are at fill 256.
 
 `GappedArray` trades memory and lookup cost for cheap mutation: at Arity16 its
 build/churn workload is ~2× faster than `PackedArray`; at Arity256 the
