@@ -82,6 +82,11 @@ stand-in), comparing `PackedArray` against `FixedArray`, `Box<[Option<T>]>`,
 full suite but is omitted from the snapshot below; reproduce all results with
 `just bench`.
 
+The `trie` bench (`cargo bench -p arity-arrays --bench trie`) additionally times
+recursive `Clone`/`Drop` of a trie fixture with a non-POD `Edge` payload across
+all four representations, contrasting `FixedArray`'s full-width per-node cost
+with the live-count-proportional `PackedArray`/`GappedArray`.
+
 > measured on: Apple M3 Max, rustc 1.98.0-nightly (f428d123a 2026-06-19), 2026-06-28
 
 Absolute nanoseconds are machine-specific; the comparison *between*

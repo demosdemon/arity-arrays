@@ -46,3 +46,7 @@ serde_with = { version = "3.21", features = ["macros"] }
 [[bench]]
 name = "throughput"
 harness = false
+
+[[bench]]
+name = "trie"
+harness = false

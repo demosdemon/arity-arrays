@@ -93,6 +93,13 @@ general-purpose default.
 > timed region, so a payload's `Drop` cost is included. Use `black_box`-returning
 > workload benches to time operations in isolation.
 
+A second bench, `cargo bench -p arity-arrays --bench trie`, measures recursive
+`Clone` and `Drop` of a compressed-trie fixture whose children array is each
+representation, with a non-POD `Edge` payload (`Box`/`Arc`/`Box<[u8]>`). It
+isolates the per-element clone/drop cost — where `FixedArray` pays for all
+`A::LEN` slots per node while `PackedArray`/`GappedArray` pay only for live
+children — across Chain (deep), Bushy (broad), and Realistic (tapered) shapes.
+
 ## Crates
 
 In dependency order:
