@@ -17,7 +17,10 @@ jobs:
         with:
           toolchain: nightly
           components: rustfmt
-      - run: cargo fmt --all --check
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just fmt-check
 
   lint:
     runs-on: ubuntu-26.04
@@ -26,7 +29,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just lint
 
   nostd:
     name: no_std bare-metal build
@@ -37,20 +43,21 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           targets: thumbv7em-none-eabihf
-      # A no_std target (no std in the sysroot) fails to build if any dep or
-      # feature transitively pulls std — locking the #![no_std] discipline now
-      # that std-capable optional deps (serde, serde_with) exist.
-      - run: cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just nostd
 
   docs:
     needs: [fmt, lint]
     runs-on: ubuntu-26.04
-    env:
-      RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
-      - run: cargo doc --workspace --no-deps --all-features
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just doc
 
   features:
     # Feature gating is platform-agnostic (no target_os/arch cfg in the library
@@ -144,7 +151,7 @@ jobs:
       # rust-cache round-trips while cleaning the binary out of ~/.cargo/bin.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-fuzz
+          tool: just,cargo-fuzz
       # Persist + grow each target's corpus across runs so later runs explore
       # deeper. Keyed per target so corpora do not collide.
       - uses: actions/cache@v6
@@ -153,14 +160,9 @@ jobs:
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
       # Smoke-level fuzzing: a fixed wall-clock budget catches regressions
-      # without unbounded CI cost. Deeper soaks run out-of-band.
-      #
-      # Pin --target to the gnu host triple. cargo-fuzz defaults --target to the
-      # triple it was *built* for (a compile-time constant), and the prebuilt
-      # binstall binary is musl. Without this, the fuzz target builds for
-      # x86_64-unknown-linux-musl, where ASAN cannot link against static musl
-      # libc and the musl std is not installed.
-      - run: cargo +nightly fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- -max_total_time=60 -rss_limit_mb=4096
+      # without unbounded CI cost. Deeper soaks run out-of-band. The gnu target
+      # pin and its rationale live in the ci-fuzz recipe.
+      - run: just ci-fuzz ${{ matrix.target }}
 
   bench:
     name: bench ${{ matrix.os }}
@@ -175,5 +177,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: nightly
-      - run: cargo build --release --workspace --all-features --benches
-      - run: cargo bench --workspace --all-features
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just ci-bench
