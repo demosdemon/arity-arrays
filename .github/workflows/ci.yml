@@ -185,4 +185,4 @@ jobs:
         with:
           toolchain: nightly
       - run: cargo build --release --workspace --all-features --benches
-      - run: cargo bench --release --workspace --all-features
+      - run: cargo bench --workspace --all-features
