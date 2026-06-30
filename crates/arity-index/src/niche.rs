@@ -109,6 +109,7 @@ macro_rules! niche_int {
             ::seq_macro::seq!(N in 0..$count {
                 /// Constructs from a `u8`, or `None` if `v >= COUNT`.
                 #[must_use]
+                #[inline]
                 pub const fn try_new(v: u8) -> Option<Self> {
                     match v {
                         #( N => Some(Self($repr::V~N)), )*
@@ -123,6 +124,7 @@ macro_rules! niche_int {
             ///
             /// The caller must ensure `v < COUNT`.
             #[must_use]
+            #[inline]
             pub const unsafe fn new_unchecked(v: u8) -> Self {
                 debug_assert!((v as usize) < Self::COUNT);
                 match Self::try_new(v) {
@@ -138,6 +140,7 @@ macro_rules! niche_int {
                 clippy::cast_possible_truncation,
                 reason = "count is 8, 16, 32, 64, or 128 — each fits in u8"
             )]
+            #[inline]
             pub const fn new_masked(v: u8) -> Self {
                 // SAFETY: masking by `COUNT - 1` (a power of two minus one) yields a
                 // value `< COUNT`.
@@ -146,12 +149,14 @@ macro_rules! niche_int {
 
             /// Returns the value as a `u8`.
             #[must_use]
+            #[inline(always)]
             pub const fn as_u8(self) -> u8 {
                 self.0 as u8
             }
 
             /// Returns the value as a `usize`.
             #[must_use]
+            #[inline(always)]
             pub const fn as_usize(self) -> usize {
                 self.0 as usize
             }
@@ -198,18 +203,21 @@ macro_rules! niche_int {
         impl ::core::convert::TryFrom<u8> for $name {
             type Error = crate::TryFromIntError;
 
+            #[inline]
             fn try_from(v: u8) -> ::core::result::Result<Self, Self::Error> {
                 Self::try_new(v).ok_or(crate::TryFromIntError)
             }
         }
 
         impl ::core::convert::From<$name> for u8 {
+            #[inline]
             fn from(v: $name) -> u8 {
                 v.as_u8()
             }
         }
 
         impl ::core::convert::From<$name> for usize {
+            #[inline]
             fn from(v: $name) -> usize {
                 v.as_usize()
             }
@@ -240,10 +248,12 @@ macro_rules! niche_int {
         impl Niche for $name {
             const COUNT: usize = $count;
 
+            #[inline(always)]
             fn as_usize(self) -> usize {
                 self.0 as usize
             }
 
+            #[inline]
             fn try_from_usize(i: usize) -> Option<Self> {
                 match u8::try_from(i) {
                     Ok(v) => Self::try_new(v),
@@ -272,10 +282,18 @@ impl Sealed for u8 {}
 impl Niche for u8 {
     const COUNT: usize = 256;
 
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "single-instruction cast feeding get_unchecked on the \
+                  indexing fast path; forcing inlining avoids a call across \
+                  the crate boundary without LTO"
+    )]
     fn as_usize(self) -> usize {
         usize::from(self)
     }
 
+    #[inline]
     fn try_from_usize(i: usize) -> Option<Self> {
         // `Self::try_from` succeeds iff `i <= 255`, i.e. `i < COUNT`. No cast.
         Self::try_from(i).ok()
