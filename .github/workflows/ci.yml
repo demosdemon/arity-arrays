@@ -180,4 +180,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      - run: just ci-bench
+      # Pull requests run quick benches (assert they execute on every platform
+      # without paying for full-precision sampling); merges to main run the full
+      # suite.
+      - run: just ci-bench ${{ github.event_name == 'pull_request' && '--quick' || '' }}
