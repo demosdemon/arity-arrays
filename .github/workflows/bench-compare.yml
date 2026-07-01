@@ -1,0 +1,148 @@
+name: Bench compare
+
+# Reusable A/B benchmark comparison, shared by the trigger-specific callers
+# (bench-compare-pr.yml, bench-compare-dispatch.yml, bench-compare-push.yml,
+# bench-compare-comment.yml). Runs base-ref then head-ref sequentially on one
+# runner so both captures share the same hardware/thermal noise floor, diffs
+# them via `xtask compare`, and always publishes to the job summary (plus a
+# sticky PR comment when the caller asks for one). No `permissions:` block
+# here — the reusable workflow inherits whatever the calling job grants,
+# mirroring miri.yml.
+#
+# The base/head capture steps intentionally never invoke `just`/`xtask` — only
+# `cargo`/`cargo-criterion` directly. Those repo-tracked tools may not exist yet
+# at an older base-ref (notably the very first comparison run after this
+# workflow is added). `xtask compare` is the one step that reads repo-tracked
+# code, and it always runs after the head-ref checkout, so it only ever needs
+# the head commit's version of the tool.
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: Git ref/SHA to treat as "before".
+        type: string
+        required: true
+      head-ref:
+        description: Git ref/SHA to treat as "after".
+        type: string
+        required: true
+      quick:
+        description: Pass --quick through to the Criterion harness.
+        type: boolean
+        required: true
+      post-comment:
+        description: Whether to upsert a sticky PR comment.
+        type: boolean
+        required: true
+      pr-number:
+        description: >-
+          PR head-ref belongs to, when it may be a fork commit. Required when
+          post-comment is true or head-ref is a fork commit not otherwise
+          reachable in this repository. Typed string, not number: a
+          workflow_dispatch string input forwarded by expression into a
+          number-typed workflow_call input fails Actions' template validation
+          (actions/runner#2848).
+        type: string
+        required: false
+      timeout-minutes:
+        description: Per-run guardrail, in minutes.
+        type: number
+        required: false
+        default: 60
+
+jobs:
+  compare:
+    runs-on: ubuntu-26.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      CARGO_TERM_COLOR: always
+      BASE_REF: ${{ inputs.base-ref }}
+      HEAD_REF: ${{ inputs.head-ref }}
+      PR_NUMBER: ${{ inputs.pr-number }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # This is a public repo, so subsequent git fetch/checkout only ever need
+          # anonymous read access — no reason to leave GITHUB_TOKEN sitting in the
+          # local git credential helper for a (possibly fork-controlled) build/bench
+          # step to find. The PR-comment write path goes through actions/github-script
+          # (step below), which gets its own token independently of this credential.
+          persist-credentials: false
+
+      - name: Fetch PR head (fork-safe)
+        if: inputs.pr-number != ''
+        run: git fetch origin "refs/pull/$PR_NUMBER/head"
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: nightly
+
+      - name: Install cargo-criterion
+        run: cargo install --locked cargo-criterion
+
+      # No --all-features here (unlike ci.yml's `bench` smoke-test job): none of the
+      # optional features (serde, serde_with, ethnum, std) gate any bench code (no
+      # `#[cfg(feature = ...)]` in benches/), so --all-features would only add compile
+      # time, not comparison coverage. Matches the existing local `bench-export` recipe.
+      - name: Capture base
+        run: |
+          git checkout "$BASE_REF"
+          cargo criterion -p arity-arrays --message-format=json ${{ inputs.quick && '-- --quick' || '' }} > base.json
+
+      - name: Capture head
+        run: |
+          git checkout "$HEAD_REF"
+          cargo criterion -p arity-arrays --message-format=json ${{ inputs.quick && '-- --quick' || '' }} > head.json
+
+      - name: Render comparison
+        run: |
+          cargo run -p xtask -- compare head.json base.json > compare.md
+          if [ "${{ inputs.quick }}" = "true" ]; then
+            { printf '> [!NOTE]\n> Quick mode: reduced sample count, noisier than a full run.\n\n'; cat compare.md; } > compare.md.tmp
+            mv compare.md.tmp compare.md
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-compare-${{ github.run_id }}
+          path: |
+            base.json
+            head.json
+            compare.md
+
+      - name: Publish job summary
+        run: cat compare.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert PR comment
+        if: inputs.post-comment
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('compare.md', 'utf8');
+            const marker = '<!-- bench-compare -->';
+            const tagged = `${marker}\n${body}`;
+            const prNumber = Number(process.env.PR_NUMBER);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: tagged,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: tagged,
+              });
+            }

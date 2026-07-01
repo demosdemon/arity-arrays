@@ -72,6 +72,14 @@ The wiring is a compile-time guarantee: for every arity,
 the comparison tables below plus the SVG charts in `docs/bench/` with `just
 bench-charts <label>`.
 
+Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
+as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`
+on a PR for a full-precision on-demand re-run. Every push to `main` runs the same
+full-precision comparison against the previous commit, and the "Bench compare (manual)"
+workflow's `workflow_dispatch` inputs trigger an ad-hoc comparison between any two refs.
+None of these commit anything — see `.github/workflows/bench-compare.yml`. Compare two
+local captures the same way with `just bench-compare <run> <baseline>`.
+
 Current state, medians on an Apple M3 Max (MacBook Pro), the array layouts vs
 the standard maps (`usize` keys) at Arity256, full occupancy:
 

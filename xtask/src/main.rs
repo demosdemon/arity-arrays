@@ -1,5 +1,6 @@
-//! Benchmark-export tooling: parse cargo-criterion JSON and regenerate the
-//! comparison charts (SVG) and README tables.
+//! Benchmark-export tooling: parse cargo-criterion JSON, regenerate the
+//! comparison charts (SVG) and README tables, and render the CI A/B delta
+//! table consumed by the job summary / PR comment (`xtask compare`).
 
 // Tests assert on Result values directly; `unwrap` keeps them terse. This is
 // the sanctioned test-wide suppression (crate root, cfg(test)-gated).
@@ -7,6 +8,7 @@
 
 pub(crate) mod bench_id;
 mod charts;
+mod compare;
 mod ingest;
 mod tables;
 
@@ -14,19 +16,29 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+const USAGE: &str = "usage: xtask charts <run.json> [<baseline.json>]\n       xtask compare <run.json> <baseline.json>";
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("charts") {
-        match run_charts(&args[1..]) {
+    match args.first().map(String::as_str) {
+        Some("charts") => match run_charts(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("xtask charts: {e}");
                 ExitCode::from(1)
             }
+        },
+        Some("compare") => match run_compare(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("xtask compare: {e}");
+                ExitCode::from(1)
+            }
+        },
+        _ => {
+            eprintln!("{USAGE}");
+            ExitCode::from(2)
         }
-    } else {
-        eprintln!("usage: xtask charts <run.json> [<baseline.json>]");
-        ExitCode::from(2)
     }
 }
 
@@ -74,5 +86,21 @@ fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         readmes.len(),
         charts.len()
     );
+    Ok(())
+}
+
+/// `xtask compare <run.json> <baseline.json>`: print the markdown A/B delta
+/// table (run vs baseline) to stdout. Argument order matches `charts`
+/// (current/run first, comparison target/baseline second).
+fn run_compare(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let run_path = args.first().ok_or("missing <run.json> path")?;
+    let baseline_path = args.get(1).ok_or("missing <baseline.json> path")?;
+    let run_jsonl =
+        std::fs::read_to_string(run_path).map_err(|e| format!("read {run_path}: {e}"))?;
+    let baseline_jsonl =
+        std::fs::read_to_string(baseline_path).map_err(|e| format!("read {baseline_path}: {e}"))?;
+    let run = ingest::parse_run(&run_jsonl)?;
+    let baseline = ingest::parse_run(&baseline_jsonl)?;
+    print!("{}", compare::render_compare(&baseline, &run));
     Ok(())
 }
