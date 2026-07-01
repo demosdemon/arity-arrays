@@ -27,7 +27,14 @@ on:
         type: string
         required: true
       quick:
-        description: Pass --quick through to the Criterion harness.
+        description: >-
+          Reduce sample count/timing for a faster, noisier comparison. Passed
+          to the bench harness via BENCH_QUICK, not a Criterion CLI flag:
+          cargo-criterion (needed for --message-format=json) does not forward
+          --quick, --sample-size, or any other criterion CLI flag to the
+          harness the way plain `cargo bench` does, and criterion.toml has no
+          sample-size knob either — so the harness itself (benches/throughput.rs,
+          benches/trie.rs) reads this env var directly.
         type: boolean
         required: true
       post-comment:
@@ -59,6 +66,9 @@ jobs:
       BASE_REF: ${{ inputs.base-ref }}
       HEAD_REF: ${{ inputs.head-ref }}
       PR_NUMBER: ${{ inputs.pr-number }}
+      # Read directly by benches/throughput.rs and benches/trie.rs, not by
+      # Criterion's own CLI parsing — see the `quick` input's description above.
+      BENCH_QUICK: ${{ inputs.quick && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -88,12 +98,12 @@ jobs:
       - name: Capture base
         run: |
           git checkout "$BASE_REF"
-          cargo criterion -p arity-arrays --message-format=json ${{ inputs.quick && '-- --quick' || '' }} > base.json
+          cargo criterion -p arity-arrays --message-format=json > base.json
 
       - name: Capture head
         run: |
           git checkout "$HEAD_REF"
-          cargo criterion -p arity-arrays --message-format=json ${{ inputs.quick && '-- --quick' || '' }} > head.json
+          cargo criterion -p arity-arrays --message-format=json > head.json
 
       - name: Render comparison
         run: |
