@@ -3,6 +3,8 @@
 //! module, which the `bench_internals` integration test also includes and
 //! unit-tests.
 
+#[path = "quick_criterion.rs"]
+mod quick;
 #[path = "support.rs"]
 mod support;
 
@@ -21,6 +23,7 @@ use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use quick::quick_criterion;
 use support::BenchContainer;
 use support::BoxArr;
 use support::ChurnOp;
@@ -280,38 +283,6 @@ fn convert(c: &mut Criterion) {
             });
         }
         g.finish();
-    }
-}
-
-// `BENCH_QUICK=1` shrinks sample size/timing for a fast CI comparison.
-// cargo-criterion does not forward `--quick` (or any other criterion CLI
-// flag) to the harness the way plain `cargo bench` does, so this has to be
-// read directly rather than via `Criterion::configure_from_args`. `trie.rs`
-// carries an identical copy of this helper for the same reason.
-//
-// `nresamples` (bootstrap resamples for the confidence-interval analysis
-// that follows each point's measurement) dominates per-point wall time far
-// more than `sample_size`/`measurement_time` do: `sample_size(10)` is
-// already criterion's enforced floor, but the default `nresamples` of
-// 100_000 still ran a multi-second bootstrap after every point, which is
-// what actually timed out CI. 1_000 is criterion's own documented minimum
-// before it warns.
-//
-// This must feed `criterion_group!`'s `config = ...` (the long form below),
-// not just a `Criterion` built in `main`: the short form `criterion_group!(
-// benches, ...)` expands to a `benches()` function that constructs its own
-// internal `Criterion::default().configure_from_args()` and passes that to
-// every benchmark body — a `Criterion` built in `main` and passed only to
-// `.final_summary()` afterward never actually reaches the benchmarks.
-fn quick_criterion() -> Criterion {
-    let c = Criterion::default();
-    if std::env::var_os("BENCH_QUICK").is_some() {
-        c.sample_size(10)
-            .warm_up_time(std::time::Duration::from_millis(100))
-            .measurement_time(std::time::Duration::from_millis(500))
-            .nresamples(1000)
-    } else {
-        c
     }
 }
 
