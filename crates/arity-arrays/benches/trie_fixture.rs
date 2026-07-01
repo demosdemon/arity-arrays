@@ -289,7 +289,12 @@ pub fn build<A: Arity, S: ChildStore<A>>(shape: Shape) -> Trie<A, S> {
 // ~12 KiB for a `FixedStore` + `Arity256` node, whose children array is inline
 // — lives only in this (non-recursive, leaf) frame before `Box::new` moves it
 // to the heap, so it never accumulates across the deep `build_node` recursion.
-#[expect(
+//
+// `allow`, not `expect`: this repo floats on nightly (unpinned), and whether
+// clippy's `unnecessary_box_returns` fires on a generic recursive fn like
+// this varies by nightly build — an `expect` here would fail CI on whichever
+// day the lint's firing behavior flips.
+#[allow(
     clippy::unnecessary_box_returns,
     reason = "Box is load-bearing: keeps the up-to-12 KiB node off build_node's recursive frames"
 )]
@@ -301,9 +306,9 @@ fn alloc_node<A: Arity, S: ChildStore<A>>(shape: Shape, depth: usize) -> Box<Tri
     })
 }
 
-#[expect(
+#[allow(
     clippy::unnecessary_box_returns,
-    reason = "Box is load-bearing: build_node's recursive frame holds only the 8-byte Box, not the up-to-12 KiB node"
+    reason = "Box is load-bearing: this recursive frame holds only the 8-byte Box, not the up-to-12 KiB node"
 )]
 fn build_node<A: Arity, S: ChildStore<A>>(shape: Shape, depth: usize) -> Box<Trie<A, S>> {
     let fanout = shape.fanout::<A>(depth);
