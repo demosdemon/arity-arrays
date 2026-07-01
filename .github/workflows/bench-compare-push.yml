@@ -22,3 +22,7 @@ jobs:
       head-ref: ${{ github.sha }}
       quick: false
       post-comment: false
+      # Full-precision (100 samples, 3s warm-up + 5s measurement per point)
+      # comfortably exceeds bench-compare.yml's quick-mode default across the
+      # full sweep x 2 captures (base, head).
+      timeout-minutes: 180

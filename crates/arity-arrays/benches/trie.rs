@@ -115,6 +115,14 @@ trie_cell!(arity256, "arity256", [
 // `throughput.rs` carries an identical copy of this helper for the same
 // reason.
 //
+// `nresamples` (bootstrap resamples for the confidence-interval analysis
+// that follows each point's measurement) dominates per-point wall time far
+// more than `sample_size`/`measurement_time` do: `sample_size(10)` is
+// already criterion's enforced floor, but the default `nresamples` of
+// 100_000 still ran a multi-second bootstrap after every point, which is
+// what actually timed out CI. 1_000 is criterion's own documented minimum
+// before it warns.
+//
 // This must feed `criterion_group!`'s `config = ...` (the long form below),
 // not just a `Criterion` built in `main`: the short form `criterion_group!(
 // benches, ...)` expands to a `benches()` function that constructs its own
@@ -127,6 +135,7 @@ fn quick_criterion() -> Criterion {
         c.sample_size(10)
             .warm_up_time(std::time::Duration::from_millis(100))
             .measurement_time(std::time::Duration::from_millis(500))
+            .nresamples(1000)
     } else {
         c
     }
