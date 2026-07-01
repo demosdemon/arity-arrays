@@ -1,0 +1,39 @@
+name: Bench compare (manual)
+
+# On-demand A/B benchmark comparison between two arbitrary refs, via the
+# reusable bench-compare.yml workflow. No PR comment; results land in the job
+# summary and as a downloadable artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Git ref/SHA to treat as "before".
+        type: string
+        required: true
+      head:
+        description: Git ref/SHA to treat as "after".
+        type: string
+        required: true
+      quick:
+        description: Reduce Criterion's sample count for a faster, noisier comparison.
+        type: boolean
+        default: false
+      pr-number:
+        description: >-
+          Set this when "head" is a fork PR commit not otherwise reachable in
+          this repository (e.g. sanity-checking a contributor's PR before
+          merge). Leave blank when both refs are already reachable here.
+        type: string
+        required: false
+
+jobs:
+  compare:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/bench-compare.yml
+    with:
+      base-ref: ${{ inputs.base }}
+      head-ref: ${{ inputs.head }}
+      quick: ${{ inputs.quick }}
+      post-comment: false
+      pr-number: ${{ inputs.pr-number }}

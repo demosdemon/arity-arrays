@@ -1,0 +1,69 @@
+name: Bench compare (comment)
+
+# On-demand, full-precision A/B benchmark comparison triggered by commenting
+# `@exec-complete-benchmark-comparison` on a pull request, via the reusable
+# bench-compare.yml workflow. Gated to repo collaborators (author_association)
+# so an unauthenticated commenter can't repeatedly cancel/re-trigger
+# full-precision runs at unbounded runner-minute cost — a distinct concern
+# from the token-exfiltration risk this repo otherwise accepts for
+# pull_request_target/issue_comment (see the design doc's "Security posture").
+#
+# concurrency: lives on the `compare` job below, not at the workflow level. This
+# workflow's `on: issue_comment` trigger fires for *every* comment on *every*
+# PR — the `setup` job's `if:` only skips that job's own steps, it does not
+# stop the workflow run itself from starting. GitHub Actions' documented
+# concurrency semantics don't spell out whether a workflow-level group claims
+# (and cancels an in-progress run) the moment the run starts, independent of
+# which jobs end up skipped. Scoping concurrency to `compare` sidesteps the
+# ambiguity entirely: that job never even starts unless `setup`'s collaborator
+# gate passed, so an unrelated or non-matching comment can't cancel an
+# in-flight legitimate run merely by existing.
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  setup:
+    if: >-
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@exec-complete-benchmark-comparison') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-26.04
+    permissions:
+      issues: write
+      pull-requests: read
+    outputs:
+      base-sha: ${{ steps.pr.outputs.base-sha }}
+      head-sha: ${{ steps.pr.outputs.head-sha }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      COMMENT_ID: ${{ github.event.comment.id }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: React with eyes
+        run: |
+          gh api --method POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes
+
+      - name: Resolve PR refs
+        id: pr
+        run: |
+          json=$(gh pr view "$ISSUE_NUMBER" --repo "$REPO" --json baseRefOid,headRefOid)
+          echo "base-sha=$(jq -r .baseRefOid <<< "$json")" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$(jq -r .headRefOid <<< "$json")" >> "$GITHUB_OUTPUT"
+
+  compare:
+    needs: [setup]
+    concurrency:
+      group: bench-compare-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/bench-compare.yml
+    with:
+      base-ref: ${{ needs.setup.outputs.base-sha }}
+      head-ref: ${{ needs.setup.outputs.head-sha }}
+      quick: false
+      post-comment: true
+      pr-number: ${{ github.event.issue.number }}

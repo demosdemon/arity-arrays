@@ -76,29 +76,38 @@ fn group_single_ops(measurements: &[Measurement]) -> BTreeMap<Cell, Grouped> {
     out
 }
 
-/// Per-(cell, op, subject) percentage change from `before` to `after`
-/// (positive = slower). Pure; unit tested.
-fn delta_pct(before: &[Measurement], after: &[Measurement]) -> BTreeMap<Cell, Grouped> {
-    let b = group_single_ops(before);
-    let a = group_single_ops(after);
-    let mut out: BTreeMap<Cell, Grouped> = BTreeMap::new();
-    for (cell, ops) in &a {
+/// Per-(cell, op, subject) `(before, after)` value pairs, unioned across both
+/// measurement sets. A pair present on only one side carries `None` for the
+/// other — the join never drops a one-sided bench id.
+pub type Paired = BTreeMap<String, BTreeMap<String, (Option<f64>, Option<f64>)>>;
+
+/// Join two single-op measurement sets into `(before, after)` pairs keyed by
+/// the union of both sides' `(op, subject)` keys. Pure; unit tested.
+pub fn join_single_ops(before: &[Measurement], after: &[Measurement]) -> BTreeMap<Cell, Paired> {
+    let mut out: BTreeMap<Cell, Paired> = BTreeMap::new();
+    for (cell, ops) in group_single_ops(before) {
         for (op, subjects) in ops {
-            for (subject, av) in subjects {
-                let Some(bv) = b
-                    .get(cell)
-                    .and_then(|o| o.get(op))
-                    .and_then(|m| m.get(subject))
-                else {
-                    continue;
-                };
-                if *bv != 0.0 {
-                    out.entry(*cell)
-                        .or_default()
-                        .entry(op.clone())
-                        .or_default()
-                        .insert(subject.clone(), (av - bv) / bv * 100.0);
-                }
+            for (subject, v) in subjects {
+                out.entry(cell)
+                    .or_default()
+                    .entry(op.clone())
+                    .or_default()
+                    .entry(subject)
+                    .or_insert((None, None))
+                    .0 = Some(v);
+            }
+        }
+    }
+    for (cell, ops) in group_single_ops(after) {
+        for (op, subjects) in ops {
+            for (subject, v) in subjects {
+                out.entry(cell)
+                    .or_default()
+                    .entry(op.clone())
+                    .or_default()
+                    .entry(subject)
+                    .or_insert((None, None))
+                    .1 = Some(v);
             }
         }
     }
@@ -143,16 +152,28 @@ pub fn write_delta(
     std::fs::create_dir_all(out_dir)
         .map_err(|e| ChartError(format!("create {}: {e}", out_dir.display())))?;
     let mut written = Vec::new();
-    for (cell, ops) in &delta_pct(before, after) {
-        let path = out_dir.join(format!("{}-delta.svg", cell_slug(*cell)));
+    for (cell, ops) in join_single_ops(before, after) {
+        let mut pct: Grouped = BTreeMap::new();
+        for (op, subjects) in ops {
+            for (subject, (bv, av)) in subjects {
+                if let (Some(bv), Some(av)) = (bv, av)
+                    && bv != 0.0
+                {
+                    pct.entry(op.clone())
+                        .or_default()
+                        .insert(subject, (av - bv) / bv * 100.0);
+                }
+            }
+        }
+        let path = out_dir.join(format!("{}-delta.svg", cell_slug(cell)));
         render_grouped(
             &path,
             &format!(
                 "{} single-op Δ vs baseline (%, lower is better)",
-                cell_slug(*cell)
+                cell_slug(cell)
             ),
             "% change",
-            ops,
+            &pct,
         )?;
         written.push(path);
     }
@@ -315,19 +336,51 @@ mod tests {
     }
 
     #[test]
-    fn delta_pct_computes_signed_change() {
-        let before = sample(); // PackedArray get_hit @16 = 1.1
-        let after = vec![Measurement {
-            id: BenchId::Single {
-                cell: Cell::A,
-                op: "get_hit".to_owned(),
-                subject: "PackedArray".to_owned(),
-                occupancy: 16,
+    fn join_single_ops_unions_both_sides() {
+        let before = vec![
+            Measurement {
+                id: BenchId::Single {
+                    cell: Cell::A,
+                    op: "get_hit".to_owned(),
+                    subject: "PackedArray".to_owned(),
+                    occupancy: 16,
+                },
+                nanos: 1.1,
             },
-            nanos: 2.2, // doubled => +100%
-        }];
-        let d = delta_pct(&before, &after);
-        let pct = d[&Cell::A]["get_hit"]["PackedArray"];
-        assert!((pct - 100.0).abs() < 1e-6, "expected +100%, got {pct}");
+            Measurement {
+                id: BenchId::Single {
+                    cell: Cell::A,
+                    op: "get_hit".to_owned(),
+                    subject: "Removed".to_owned(),
+                    occupancy: 16,
+                },
+                nanos: 9.9,
+            },
+        ];
+        let after = vec![
+            Measurement {
+                id: BenchId::Single {
+                    cell: Cell::A,
+                    op: "get_hit".to_owned(),
+                    subject: "PackedArray".to_owned(),
+                    occupancy: 16,
+                },
+                nanos: 2.2,
+            },
+            Measurement {
+                id: BenchId::Single {
+                    cell: Cell::A,
+                    op: "get_hit".to_owned(),
+                    subject: "New".to_owned(),
+                    occupancy: 16,
+                },
+                nanos: 3.3,
+            },
+        ];
+        let joined = join_single_ops(&before, &after);
+        let ops = &joined[&Cell::A]["get_hit"];
+        assert_eq!(ops["PackedArray"], (Some(1.1), Some(2.2)));
+        assert_eq!(ops["Removed"], (Some(9.9), None));
+        assert_eq!(ops["New"], (None, Some(3.3)));
     }
 }
