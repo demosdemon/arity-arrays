@@ -140,3 +140,10 @@ bench-export label:
 # Regenerate docs/bench/ SVGs and the README comparison tables from a capture.
 bench-charts run baseline='':
     cargo run -p xtask -- charts bench-data/{{ run }}.json {{ if baseline == '' { '' } else { 'bench-data/' + baseline + '.json' } }}
+
+# Unlike `bench-charts`, both labels are required: `xtask compare` always needs two
+# captures (there is no useful single-run mode). Prints the markdown table CI posts to
+# the job summary / PR comment, e.g. `just bench-compare branch main`.
+# Print the A/B delta table (run vs baseline) for two captures.
+bench-compare run baseline:
+    cargo run -p xtask -- compare bench-data/{{ run }}.json bench-data/{{ baseline }}.json

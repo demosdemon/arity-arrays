@@ -13,6 +13,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `cargo-criterion`. Benchmark results now export to JSON and feed an
   in-workspace `xtask` that regenerates the README comparison tables and SVG
   charts under `docs/bench/`. Developer tooling only — no library API change.
+- Add an automated CI A/B benchmark comparison: pull requests get an automatic quick
+  comparison posted as a PR comment, `@exec-complete-benchmark-comparison` triggers an
+  on-demand full-precision re-run, and every push to `main` compares against the
+  previous commit. Developer tooling only — no library API change.
 
 ## [0.1.0] - 2026-06-28
 

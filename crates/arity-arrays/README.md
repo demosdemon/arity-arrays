@@ -83,6 +83,12 @@ stand-in), comparing `PackedArray` against `GappedArray`, `FixedArray`,
 `just bench`; refresh the tables below and the charts in `docs/bench/` with
 `just bench-export <label>` then `just bench-charts <label>`.
 
+Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
+as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`
+on a PR for a full-precision on-demand re-run. Every push to `main` runs the same
+full-precision comparison against the previous commit. Compare two local captures the
+same way with `just bench-compare <run> <baseline>`.
+
 The `trie` bench (`cargo bench -p arity-arrays --bench trie`) additionally times
 recursive `Clone`/`Drop` of a trie fixture with non-POD node contents (`Edge`
 children owning a `Box`/`Arc` subtree) across all four representations,
