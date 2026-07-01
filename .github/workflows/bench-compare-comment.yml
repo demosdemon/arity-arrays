@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       issues: write
-      pull-requests: read
+      pull-requests: write
     outputs:
       base-sha: ${{ steps.pr.outputs.base-sha }}
       head-sha: ${{ steps.pr.outputs.head-sha }}
