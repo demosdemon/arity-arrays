@@ -1,0 +1,30 @@
+name: Bench compare (PR)
+
+# Automatic quick A/B benchmark comparison for pull requests, posted as a
+# sticky PR comment via the reusable bench-compare.yml workflow. Runs under
+# pull_request_target (not pull_request) so the GITHUB_TOKEN can write PR
+# comments even for fork PRs. This intentionally runs (and builds) a fork's
+# benchmark code under a privileged token — accepted for this solo-maintained
+# public repo; see the design doc's "Security posture" for the trade-off.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  compare:
+    # Scoped to this job (not the whole workflow) so it uses the exact same
+    # group-claim semantics as bench-compare-comment.yml's `compare` job —
+    # see that file's comment for why job-level, not workflow-level.
+    concurrency:
+      group: bench-compare-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/bench-compare.yml
+    with:
+      base-ref: ${{ github.event.pull_request.base.sha }}
+      head-ref: ${{ github.event.pull_request.head.sha }}
+      quick: true
+      post-comment: true
+      pr-number: ${{ github.event.pull_request.number }}
