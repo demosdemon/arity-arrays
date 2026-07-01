@@ -45,7 +45,7 @@ impl Payload for [u8; 32] {
         // XOR all four 8-byte chunks so every byte is observed.
         let mut acc = 0u64;
         let mut chunk = [0u8; 8];
-        for c in self.chunks_exact(8) {
+        for c in self.as_chunks::<8>().0 {
             chunk.copy_from_slice(c);
             acc ^= u64::from_ne_bytes(chunk);
         }

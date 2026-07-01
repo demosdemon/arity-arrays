@@ -37,3 +37,6 @@ jobs:
       quick: ${{ inputs.quick }}
       post-comment: false
       pr-number: ${{ inputs.pr-number }}
+      # quick keeps bench-compare.yml's default (see that input's
+      # description); full precision needs it raised further.
+      timeout-minutes: ${{ inputs.quick && 90 || 180 }}

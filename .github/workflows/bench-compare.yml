@@ -52,10 +52,19 @@ on:
         type: string
         required: false
       timeout-minutes:
-        description: Per-run guardrail, in minutes.
+        description: >-
+          Per-run guardrail, in minutes. Default (90) covers quick mode:
+          measured at ~5.6s/point x 390 points x 2 captures (base, head) with
+          criterion's default nresamples (100_000, pre-dating the
+          BENCH_QUICK/nresamples fix below); nresamples(1000) cuts CPU-time
+          ~61% but wall-clock savings depend on the runner's core count,
+          which the 60-minute prior default didn't leave enough margin for.
+          Non-quick callers (bench-compare-push.yml, bench-compare-comment.yml)
+          override this to 180 (full precision is ~9x slower per point:
+          100 samples/3s warm-up/5s measurement vs quick's 10/100ms/500ms).
         type: number
         required: false
-        default: 60
+        default: 90
 
 jobs:
   compare:
