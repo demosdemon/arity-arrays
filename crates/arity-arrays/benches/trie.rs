@@ -108,7 +108,35 @@ trie_cell!(arity256, "arity256", [
     Trie<Arity256, BTreeStore>,
 ]);
 
-criterion_group!(benches, arity16, arity256);
+// `BENCH_QUICK=1` shrinks sample size/timing for a fast CI comparison.
+// cargo-criterion does not forward `--quick` (or any other criterion CLI
+// flag) to the harness the way plain `cargo bench` does, so this has to be
+// read directly rather than via `Criterion::configure_from_args`.
+// `throughput.rs` carries an identical copy of this helper for the same
+// reason.
+//
+// This must feed `criterion_group!`'s `config = ...` (the long form below),
+// not just a `Criterion` built in `main`: the short form `criterion_group!(
+// benches, ...)` expands to a `benches()` function that constructs its own
+// internal `Criterion::default().configure_from_args()` and passes that to
+// every benchmark body — a `Criterion` built in `main` and passed only to
+// `.final_summary()` afterward never actually reaches the benchmarks.
+fn quick_criterion() -> Criterion {
+    let c = Criterion::default();
+    if std::env::var_os("BENCH_QUICK").is_some() {
+        c.sample_size(10)
+            .warm_up_time(std::time::Duration::from_millis(100))
+            .measurement_time(std::time::Duration::from_millis(500))
+    } else {
+        c
+    }
+}
+
+criterion_group!(
+    name = benches;
+    config = quick_criterion();
+    targets = arity16, arity256
+);
 
 fn main() {
     // Equivalent to `criterion_main!(benches)`, but run on a thread with an
@@ -124,7 +152,7 @@ fn main() {
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
             benches();
-            Criterion::default().configure_from_args().final_summary();
+            quick_criterion().configure_from_args().final_summary();
         })
         .expect("spawn bench harness thread")
         .join()
