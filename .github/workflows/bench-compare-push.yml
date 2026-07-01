@@ -1,0 +1,24 @@
+name: Bench compare (main)
+
+# Full-precision A/B benchmark comparison for every push to main: the pushed
+# commit against its immediate predecessor, via the reusable
+# bench-compare.yml workflow. No PR comment; results land in the job summary
+# and as a downloadable artifact, forming a running record of per-push
+# benchmark drift.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  compare:
+    # github.event.before is the all-zero SHA on a branch's first push (e.g. a
+    # freshly created default branch) — nothing to diff against yet.
+    if: github.event.before != '0000000000000000000000000000000000000000'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/bench-compare.yml
+    with:
+      base-ref: ${{ github.event.before }}
+      head-ref: ${{ github.sha }}
+      quick: false
+      post-comment: false
