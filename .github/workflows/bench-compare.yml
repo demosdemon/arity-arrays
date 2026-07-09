@@ -13,9 +13,13 @@ name: Bench compare
 # The base/head capture steps intentionally never invoke `just`/`xtask` — only
 # `cargo`/`cargo-criterion` directly. Those repo-tracked tools may not exist yet
 # at an older base-ref (notably the very first comparison run after this
-# workflow is added). `xtask compare` is the one step that reads repo-tracked
-# code, and it always runs after the head-ref checkout, so it only ever needs
-# the head commit's version of the tool.
+# workflow is added). `xtask` is built once up front from THIS workflow's ref
+# (before any capture checks out another ref) and stashed, so `Render
+# comparison` runs a tool whose CLI matches this workflow's invocation. Under
+# pull_request_target the workflow definition comes from the base branch, so a
+# tool built from the PR head — which may have changed the xtask CLI — would be
+# invoked with the wrong arguments; building from the workflow's own ref avoids
+# that skew.
 on:
   workflow_call:
     inputs:
@@ -107,6 +111,15 @@ jobs:
       - name: Install cargo-criterion
         run: cargo install --locked cargo-criterion
 
+      # Build and stash xtask from this workflow's ref BEFORE the capture steps
+      # check out other refs (see the file header). $RUNNER_TEMP is outside the
+      # work tree, so the binary survives those checkouts, and building early
+      # surfaces an xtask build failure before the long capture steps.
+      - name: Build and stash xtask
+        run: |
+          cargo build --release -p xtask
+          cp target/release/xtask "$RUNNER_TEMP/xtask"
+
       # No --all-features here (unlike ci.yml's `bench` smoke-test job): none of the
       # optional features (serde, serde_with, ethnum, std) gate any bench code (no
       # `#[cfg(feature = ...)]` in benches/), so --all-features would only add compile
@@ -155,7 +168,7 @@ jobs:
             HEAD_FILES=(head1.json head2.json)
             BASE_FILES=(base1.json base2.json)
           fi
-          cargo run -p xtask -- compare --head "${HEAD_FILES[@]}" --base "${BASE_FILES[@]}" > compare.md
+          "$RUNNER_TEMP/xtask" compare --head "${HEAD_FILES[@]}" --base "${BASE_FILES[@]}" > compare.md
           if [ "${{ inputs.quick }}" = "true" ]; then
             { printf '> [!NOTE]\n> Quick mode: reduced sample count, single-pass A/B (no interleaving), noisier than a full run.\n\n'; cat compare.md; } > compare.md.tmp
             mv compare.md.tmp compare.md
