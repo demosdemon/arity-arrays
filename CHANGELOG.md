@@ -7,16 +7,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- `arity-arrays`: `PackedArray::drop` no longer leaks its heap block when an
-  element's destructor panics. The deallocation is now armed in a drop guard
-  before the elements are dropped, so it still runs as the stack unwinds —
-  matching `GappedArray` and `std::Vec`. A Miri-checked regression test covers
-  the panicking-destructor path.
+- `arity-arrays`: `GappedArray<T, A>` — a pointer-sized, heap-backed array that
+  keeps spare capacity and allows gaps, so deletes never move elements and
+  inserts move only to reach a nearby hole. It trades memory for mutation
+  throughput (geometric power-of-two growth bounded by `A::LEN`), complementing
+  `PackedArray`'s occupancy-proportional layout. The surface mirrors the other
+  containers: `get`/`get_mut`, move-free `remove` with capacity retention,
+  `insert` with shift-or-respread placement, capacity management
+  (`with_capacity`/`reserve`/`shrink_to_fit`/`clear`), present-only and
+  all-slots double-ended iterators plus `IntoIterator`, panic-safe `Clone` and
+  `Drop`, `Eq`/`Hash`/`Debug` and thread-safety impls, conversions to and from
+  `FixedArray` and `PackedArray`, and optional `serde` (logical form) plus the
+  `serde_with::Compact` adapter.
 
 ### Changed
 
+- `arity-bitmap`: `Bitmap::select` is now O(log WIDTH) for both the native
+  integer backings and the 256-bit backing, replacing the previous linear scan.
+- `arity-index`: mark the trivial niche index accessors and conversions
+  `#[inline]` so they inline across crate boundaries.
 - Migrate the benchmark harness from `divan` to `criterion`, run via
   `cargo-criterion`. Benchmark results now export to JSON and feed an
   in-workspace `xtask` that regenerates the README comparison tables and SVG
@@ -25,6 +36,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   comparison posted as a PR comment, `@exec-complete-benchmark-comparison` triggers an
   on-demand full-precision re-run, and every push to `main` compares against the
   previous commit. Developer tooling only — no library API change.
+
+### Fixed
+
+- `arity-arrays`: `PackedArray::drop` no longer leaks its heap block when an
+  element's destructor panics. The deallocation is now armed in a drop guard
+  before the elements are dropped, so it still runs as the stack unwinds —
+  matching `GappedArray` and `std::Vec`. A Miri-checked regression test covers
+  the panicking-destructor path.
 
 ## [0.1.0] - 2026-06-28
 
