@@ -64,6 +64,11 @@ pub fn comparison_table(measurements: &[Measurement]) -> String {
         s.push('\n');
     }
     s.push_str(&convert_table(measurements));
+    let trie = trie_tables(measurements);
+    if !trie.is_empty() {
+        s.push('\n');
+        s.push_str(&trie);
+    }
     s
 }
 
@@ -234,6 +239,78 @@ fn convert_table(measurements: &[Measurement]) -> String {
     s
 }
 
+/// Trie tables: one per `(arity, op)` — rows are child stores, columns are trie
+/// shapes — at the median (ns). The trie family is four-dimensional
+/// (arity x op x store x shape), so it renders one table per `(arity, op)`
+/// rather than folding into the per-cell layout the other families use. Returns
+/// the empty string when there are no trie measurements.
+///
+/// The distinct `(arity, op)` groups are collected first, then each group's
+/// cells are gathered into a flat `(store, shape) -> nanos` map — this keeps
+/// every annotated local at the one-level-nesting depth the sibling tables use,
+/// so it does not trip `clippy::type_complexity`.
+fn trie_tables(measurements: &[Measurement]) -> String {
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::fmt::Write as _;
+
+    use crate::bench_id::BenchId;
+
+    // Distinct (arity, op) groups, in stable (alphabetical) order.
+    let mut groups: BTreeSet<(String, String)> = BTreeSet::new();
+    for m in measurements {
+        if let BenchId::Trie { arity, op, .. } = &m.id {
+            groups.insert((arity.to_string(), op.clone()));
+        }
+    }
+
+    let mut s = String::new();
+    for (arity, op) in &groups {
+        // (store, shape) -> nanos for this (arity, op).
+        let mut cells: BTreeMap<(String, String), f64> = BTreeMap::new();
+        for m in measurements {
+            if let BenchId::Trie {
+                arity: a,
+                op: o,
+                store,
+                shape,
+            } = &m.id
+                && a.to_string() == *arity
+                && o == op
+            {
+                cells.insert((store.clone(), shape.clone()), m.nanos);
+            }
+        }
+        let stores: BTreeSet<String> = cells.keys().map(|(store, _)| store.clone()).collect();
+        let shapes: BTreeSet<String> = cells.keys().map(|(_, shape)| shape.clone()).collect();
+
+        let _ = write!(s, "**Trie {arity} {op} (median ns)**");
+        s.push_str("\n\n| store |");
+        for shape in &shapes {
+            let _ = write!(s, " {shape} |");
+        }
+        s.push_str("\n| :--- |");
+        for _ in &shapes {
+            s.push_str(" ---: |");
+        }
+        s.push('\n');
+        for store in &stores {
+            let _ = write!(s, "| `{store}` |");
+            for shape in &shapes {
+                match cells.get(&(store.clone(), shape.clone())) {
+                    Some(nanos) => {
+                        let _ = write!(s, " {nanos:.2} |");
+                    }
+                    None => s.push_str(" – |"),
+                }
+            }
+            s.push('\n');
+        }
+        s.push('\n');
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +417,48 @@ mod tests {
         // Convert table (op x cell).
         assert!(table.contains("Conversion (median ns"), "convert heading");
         assert!(table.contains("`pack`"), "pack row present");
+    }
+
+    #[test]
+    fn comparison_table_covers_trie_family() {
+        use crate::bench_id::BenchId;
+        use crate::bench_id::TrieArity;
+        let ms = vec![
+            Measurement::point(
+                BenchId::Trie {
+                    arity: TrieArity::A16,
+                    op: "clone".to_owned(),
+                    store: "PackedStore".to_owned(),
+                    shape: "Bushy".to_owned(),
+                },
+                12.5,
+            ),
+            Measurement::point(
+                BenchId::Trie {
+                    arity: TrieArity::A256,
+                    op: "drop".to_owned(),
+                    store: "FixedStore".to_owned(),
+                    shape: "Realistic".to_owned(),
+                },
+                34.0,
+            ),
+        ];
+        let table = comparison_table(&ms);
+        assert!(
+            table.contains("**Trie arity16 clone (median ns)**"),
+            "arity16 clone heading present"
+        );
+        assert!(
+            table.contains("**Trie arity256 drop (median ns)**"),
+            "arity256 drop heading present"
+        );
+        assert!(
+            table.contains("| store | Bushy |"),
+            "store x shape header row"
+        );
+        assert!(
+            table.contains("| `PackedStore` | 12.50 |"),
+            "median cell rendered"
+        );
     }
 }
