@@ -176,7 +176,9 @@ pub fn join_single_ops(before: &[Measurement], after: &[Measurement]) -> BTreeMa
     out
 }
 
-/// Write one absolute-ns grouped-bar SVG per cell.
+/// Write the absolute-ns grouped-bar SVGs: one per cell for single-op and for
+/// workload, one `convert.svg`, and one `trie-<arity>-<op>.svg` per (arity,
+/// op).
 ///
 /// # Errors
 /// Returns [`ChartError`] if the output directory cannot be created or an SVG
