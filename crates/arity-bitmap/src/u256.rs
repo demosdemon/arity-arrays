@@ -190,10 +190,15 @@ mod custom {
             }
         }
         fn to_le_bytes(self, buf: &mut [u8]) {
+            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             buf[..16].copy_from_slice(&self.lo.to_le_bytes());
             buf[16..].copy_from_slice(&self.hi.to_le_bytes());
         }
         fn from_le_bytes(buf: &[u8]) -> Self {
+            // Guard the length before the `buf[..16]`/`buf[16..]` slicing below,
+            // which would otherwise panic with a slice-range message for a buffer
+            // shorter than one limb.
+            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             let mut lo = [0u8; 16];
             let mut hi = [0u8; 16];
             lo.copy_from_slice(&buf[..16]);
@@ -312,9 +317,11 @@ mod ethnum_backed {
             self & !(ONE << u32::from(i))
         }
         fn to_le_bytes(self, buf: &mut [u8]) {
+            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             buf.copy_from_slice(&Self::to_le_bytes(self));
         }
         fn from_le_bytes(buf: &[u8]) -> Self {
+            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             let mut arr = [0u8; 32];
             arr.copy_from_slice(buf);
             Self::from_le_bytes(arr)
@@ -429,10 +436,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "does not match destination slice length")]
+    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
     fn from_le_bytes_wrong_length_u256_panics() {
-        // U256 wants BYTES == 32; 31 bytes violates the contract.
-        let _ = <crate::U256 as crate::Bitmap>::from_le_bytes(&[0u8; 31]);
+        // U256 wants BYTES == 32; an 8-byte buffer (shorter than one 16-byte limb)
+        // is the case the length precondition must catch before the limb slicing.
+        let _ = <crate::U256 as crate::Bitmap>::from_le_bytes(&[0u8; 8]);
+    }
+
+    #[test]
+    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
+    fn to_le_bytes_wrong_length_u256_panics() {
+        let mut out = [0u8; 31]; // too small for U256 (BYTES == 32)
+        crate::Bitmap::to_le_bytes(<crate::U256 as crate::Bitmap>::ZERO, &mut out);
     }
 
     #[test]

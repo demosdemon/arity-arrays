@@ -38,6 +38,26 @@ pub use iter::BitIter;
 #[doc(hidden)]
 pub use u256::U256;
 
+/// Panic message shared by every `Bitmap::{from,to}_le_bytes` implementation
+/// when the byte buffer length does not equal [`Bitmap::BYTES`]. Owning the
+/// message — rather than leaning on `copy_from_slice`'s internal wording —
+/// keeps it uniform across backings (the two-limb `U256` would otherwise report
+/// a slice-range panic for a buffer shorter than one limb) and stable for the
+/// byte-length contract tests.
+///
+/// Gated to the same set of width features as the `Bitmap` impls that reference
+/// it: with no width feature selected the crate implements `Bitmap` for
+/// nothing, so the constant would otherwise be dead code.
+#[cfg(any(
+    feature = "8",
+    feature = "16",
+    feature = "32",
+    feature = "64",
+    feature = "128",
+    feature = "256"
+))]
+pub(crate) const BYTE_LEN_PANIC_MSG: &str = "byte buffer length must equal Bitmap::BYTES";
+
 /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
 trait Sealed {}
 

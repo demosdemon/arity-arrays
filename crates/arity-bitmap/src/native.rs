@@ -149,11 +149,13 @@ macro_rules! impl_native_bitmap {
             }
 
             fn to_le_bytes(self, buf: &mut [u8]) {
+                assert_eq!(buf.len(), Self::BYTES, "{}", $crate::BYTE_LEN_PANIC_MSG);
                 // Inherent primitive method (1 arg) — unambiguous with the trait's.
                 buf.copy_from_slice(&<$ty>::to_le_bytes(self));
             }
 
             fn from_le_bytes(buf: &[u8]) -> Self {
+                assert_eq!(buf.len(), Self::BYTES, "{}", $crate::BYTE_LEN_PANIC_MSG);
                 let mut arr = [0u8; $width / 8];
                 arr.copy_from_slice(buf);
                 // Inherent primitive method (owned array arg) — unambiguous.
@@ -316,14 +318,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "does not match destination slice length")]
+    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
     fn from_le_bytes_wrong_length_native_panics() {
         // u16 wants BYTES == 2; a 3-byte buffer violates the documented contract.
         let _ = <u16 as crate::Bitmap>::from_le_bytes(&[0u8; 3]);
     }
 
     #[test]
-    #[should_panic(expected = "does not match destination slice length")]
+    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
     fn to_le_bytes_wrong_length_native_panics() {
         let mut out = [0u8; 1]; // too small for u16 (BYTES == 2)
         crate::Bitmap::to_le_bytes(<u16 as crate::Bitmap>::ZERO, &mut out);
