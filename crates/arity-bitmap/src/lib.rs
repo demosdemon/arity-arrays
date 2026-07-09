@@ -1,4 +1,5 @@
 #![no_std]
+#![forbid(unsafe_code)]
 
 //! Fixed-width bitmaps indexed by [`arity_index`] niche integers, with a
 //! double-ended iterator over the set bits.

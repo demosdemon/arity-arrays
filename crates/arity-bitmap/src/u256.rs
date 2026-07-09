@@ -429,6 +429,13 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "does not match destination slice length")]
+    fn from_le_bytes_wrong_length_u256_panics() {
+        // U256 wants BYTES == 32; 31 bytes violates the contract.
+        let _ = <crate::U256 as crate::Bitmap>::from_le_bytes(&[0u8; 31]);
+    }
+
+    #[test]
     fn select_spans_limbs_inverse_of_rank() {
         let bm = U256::ZERO
             .with_bit(0)

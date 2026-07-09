@@ -116,6 +116,40 @@ fn op256_strategy() -> impl Strategy<Value = Op256> {
     ]
 }
 
+#[derive(Clone, Debug)]
+enum GapOp<V> {
+    Insert(u8, V),
+    Remove(u8),
+    GetMut(u8, V),
+    Reserve(u8),
+    ShrinkToFit,
+    Clear,
+}
+
+// Mutation weighted heavier than capacity churn so sequences build real gap
+// patterns before reshaping/clearing them.
+fn gap_op16() -> impl Strategy<Value = GapOp<u16>> {
+    prop_oneof![
+        4 => (0u8..16, any::<u16>()).prop_map(|(s, v)| GapOp::Insert(s, v)),
+        3 => (0u8..16).prop_map(GapOp::Remove),
+        2 => (0u8..16, any::<u16>()).prop_map(|(s, v)| GapOp::GetMut(s, v)),
+        1 => any::<u8>().prop_map(GapOp::Reserve),
+        1 => Just(GapOp::ShrinkToFit),
+        1 => Just(GapOp::Clear),
+    ]
+}
+
+fn gap_op256() -> impl Strategy<Value = GapOp<u32>> {
+    prop_oneof![
+        4 => (any::<u8>(), any::<u32>()).prop_map(|(s, v)| GapOp::Insert(s, v)),
+        3 => any::<u8>().prop_map(GapOp::Remove),
+        2 => (any::<u8>(), any::<u32>()).prop_map(|(s, v)| GapOp::GetMut(s, v)),
+        1 => any::<u8>().prop_map(GapOp::Reserve),
+        1 => Just(GapOp::ShrinkToFit),
+        1 => Just(GapOp::Clear),
+    ]
+}
+
 proptest! {
     #[test]
     fn packed_mutation_matches_btreemap_arity256(
@@ -205,16 +239,16 @@ proptest! {
 
 proptest! {
     #[test]
-    fn gapped_mutation_matches_btreemap(ops in proptest::collection::vec(op_strategy(), 0..200)) {
+    fn gapped_mutation_matches_btreemap(ops in proptest::collection::vec(gap_op16(), 0..200)) {
         let mut g: GappedArray<u16, Arity16> = GappedArray::new();
         let mut oracle: BTreeMap<u8, u16> = BTreeMap::new();
         for op in ops {
             match op {
-                Op::Insert(slot, val) => {
+                GapOp::Insert(slot, val) => {
                     let i = U4::new_masked(slot);
                     prop_assert_eq!(g.insert(i, val), oracle.insert(i.as_u8(), val));
                 }
-                Op::Remove(slot) => {
+                GapOp::Remove(slot) => {
                     let i = U4::new_masked(slot);
                     // delete-never-moves: capture a surviving element's address.
                     let survivor = (0..16u8)
@@ -228,10 +262,20 @@ proptest! {
                         prop_assert_eq!(std::ptr::from_ref(r) as usize, addr, "remove moved a survivor");
                     }
                 }
-                Op::GetMut(slot, val) => {
+                GapOp::GetMut(slot, val) => {
                     let i = U4::new_masked(slot);
                     if let Some(p) = g.get_mut(i) { *p = val; }
                     if let Some(o) = oracle.get_mut(&i.as_u8()) { *o = val; }
+                }
+                GapOp::Reserve(n) => {
+                    g.reserve(n as usize); // reserve preserves logical content
+                }
+                GapOp::ShrinkToFit => {
+                    g.shrink_to_fit();
+                }
+                GapOp::Clear => {
+                    g.clear();
+                    oracle.clear();
                 }
             }
             // Structural invariants.
@@ -251,18 +295,21 @@ proptest! {
 proptest! {
     #[test]
     fn gapped_mutation_matches_btreemap_arity256(
-        ops in proptest::collection::vec(op256_strategy(), 0..200),
+        ops in proptest::collection::vec(gap_op256(), 0..200),
     ) {
         let mut g: GappedArray<u32, Arity256> = GappedArray::new();
         let mut oracle: BTreeMap<u8, u32> = BTreeMap::new();
         for op in ops {
             match op {
-                Op256::Insert(slot, val) => prop_assert_eq!(g.insert(slot, val), oracle.insert(slot, val)),
-                Op256::Remove(slot) => prop_assert_eq!(g.remove(slot), oracle.remove(&slot)),
-                Op256::GetMut(slot, val) => {
+                GapOp::Insert(slot, val) => prop_assert_eq!(g.insert(slot, val), oracle.insert(slot, val)),
+                GapOp::Remove(slot) => prop_assert_eq!(g.remove(slot), oracle.remove(&slot)),
+                GapOp::GetMut(slot, val) => {
                     if let Some(p) = g.get_mut(slot) { *p = val; }
                     if let Some(o) = oracle.get_mut(&slot) { *o = val; }
                 }
+                GapOp::Reserve(n) => g.reserve(n as usize),
+                GapOp::ShrinkToFit => g.shrink_to_fit(),
+                GapOp::Clear => { g.clear(); oracle.clear(); }
             }
             prop_assert_eq!(g.count(), oracle.len());
             let cap = g.capacity();
