@@ -48,12 +48,19 @@ pub trait Arity: crate::Sealed {
     /// `hybrid-array` / `typenum` is an acknowledged sunset dependency: this
     /// associated type exists only because stable Rust cannot write
     /// `[T; A::LEN]` with `LEN` a trait associated `const`
-    /// (`generic_const_exprs` is unstable). To contain the blast radius,
-    /// `hybrid_array::Array` never appears in a public signature —
+    /// (`generic_const_exprs` is unstable). Its public exposure is kept small —
     /// [`FixedArray`](crate::FixedArray) exposes `Deref<Target = [T]>` /
-    /// `AsRef<[T]>` instead. When `generic_const_exprs` stabilizes the internal
-    /// storage can switch to `[T; A::LEN]`; keeping `Array` out of the public
-    /// surface is what makes that a non-breaking change.
+    /// `AsRef<[T]>` for element access rather than naming `Array` — but it is
+    /// not fully contained. `hybrid-array`/`typenum` names still leak through
+    /// two public points, so retiring the dependency (once
+    /// `generic_const_exprs` lets the storage become `[T; A::LEN]`) is
+    /// low-impact but **not** strictly non-breaking:
+    ///
+    /// - the `ArraySize` bound on this associated type (`type Size:
+    ///   ArraySize`), and
+    /// - [`FixedArray`](crate::FixedArray)'s owned `IntoIterator::IntoIter`,
+    ///   whose type names `<hybrid_array::Array<T, A::Size> as
+    ///   IntoIterator>::IntoIter`.
     type Size: ArraySize;
 }
 

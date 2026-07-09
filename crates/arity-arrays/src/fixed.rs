@@ -13,9 +13,12 @@ use crate::Arity;
 /// A full-width array with one `T` per slot, indexed by `A::Index` without
 /// bounds checks.
 ///
-/// `hybrid_array::Array` is an implementation detail — it never appears in a
-/// public signature (the type exposes `Deref<Target = [T]>` / `AsRef<[T]>`), so
-/// the `typenum` backing can be retired later without a breaking change.
+/// `hybrid_array::Array` is an implementation detail, kept out of the public
+/// surface for element access (the type exposes `Deref<Target = [T]>` /
+/// `AsRef<[T]>`). It is not fully hidden: the owned `IntoIterator` impl below
+/// names `hybrid-array`'s iterator in its public `IntoIter` associated type, so
+/// retiring the `typenum` backing is low-impact but not strictly non-breaking.
+/// See [`Arity::Size`] for the full list of leak points.
 pub struct FixedArray<T, A: Arity>(Array<T, A::Size>);
 
 impl<T, A: Arity> FixedArray<T, A> {
