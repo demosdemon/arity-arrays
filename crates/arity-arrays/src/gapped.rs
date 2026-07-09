@@ -402,10 +402,16 @@ impl<T, A: Arity> GappedArray<T, A> {
             let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < new_cap <= N");
             new_live = new_live.with_bit(p_idx);
         }
-        // SAFETY: `new_cap >= 1` because callers only pass `new_cap > capacity >= 1`
-        // (an allocated block has capacity >= 1); the 0..count copy loops degenerate
-        // harmlessly when count == 0. The copy initialises exactly the `new_live`
-        // slots before any read.
+        // SAFETY: `new_cap >= 1` in every caller. `rebuild_to` is reached only with
+        // an allocated block, and both callers pass `pow2_cap_for(k)` for some
+        // `k >= 1`: `reserve` reaches here only when its target exceeds the current
+        // capacity (`>= 1`), forcing `k = want >= 1`; `shrink_to_fit` reaches here
+        // only when `count >= 1`, so `k = count >= 1`. `pow2_cap_for` of a positive
+        // input is a power of two `>= 1`. (The earlier "callers only pass
+        // `new_cap > capacity`" premise was wrong: `shrink_to_fit` passes a *smaller*
+        // cap.) The `0..count` copy loops degenerate harmlessly when `count == 0`
+        // (an allocated-but-empty block, e.g. after `clear` then `reserve`); the copy
+        // initialises exactly the `new_live` slots before any read.
         let new_ptr = unsafe { alloc_block::<A, T>(occ, new_live, new_cap_exp, new_cap) };
         // SAFETY: `old_ptr` valid per the invariant; distinct from `new_ptr`.
         let src = unsafe { data_ptr(old_ptr) };
