@@ -61,13 +61,17 @@ impl_size_witness!(PackedArray);
 /// `inner` must point to a live allocation from `alloc_layout::<Inner<A, T>,
 /// T>(count)` with the `bitmap` field initialised.
 ///
-/// Note: the `data` field offset this returns can be strictly *less* than the
-/// element-array offset `alloc_layout` computes (which pads the header end up
-/// to `align_of::<T>()`; e.g. `Inner<Arity16, u8>` has field offset 5 vs layout
-/// offset 6). That is sound because every element access goes through this
-/// function (never the `alloc_layout` offset) and the block is sized to at
-/// least `offset_of!(Inner, data) + n * size_of::<T>()`. `alloc_block`
-/// `debug_assert!`s exactly that.
+/// Note: for `PackedArray`'s header — a single `bitmap` field ahead of the
+/// zero-sized `data` anchor — this field offset always equals the element-array
+/// offset `alloc_layout` computes. With one preceding field,
+/// `offset_of!(Inner, data)` is already a multiple of `align_of::<T>()`, so
+/// `alloc_layout`'s pad-to-`align_of::<T>()` adds nothing before the elements.
+/// (The two *can* diverge for a multi-field header: `GappedArray`'s trailing
+/// `cap_exp` byte gives its `Inner<Arity16, u8>` field offset 5 vs layout
+/// offset 6 — see `GappedArray`'s `data_ptr`.) Every element access goes
+/// through this function regardless, and `alloc_block` `debug_assert!`s the
+/// block is sized to at least `offset_of!(Inner, data) + n * size_of::<T>()` —
+/// a forward guard should the header ever gain trailing padding.
 unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
     // SAFETY: `inner` is valid per the precondition; `#[repr(C)]` places `data`
     // at the correct offset, so `&raw mut (*p).data` cast to `*mut T` is the
