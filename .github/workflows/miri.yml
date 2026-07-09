@@ -9,7 +9,9 @@ name: Miri
 # the feature-gated `serde_*` test targets compile to no-ops and need no shard.
 # A new *ungated* `tests/*.rs` target is NOT picked up automatically — add a
 # shard here for it. The mutation binary dominates (~4h at 256 cases), so it is
-# split by arity: the Arity256 full-domain sweep gets its own shard.
+# split by arity: the `mutation-256` shard runs every `*_arity256` test
+# (packed and gapped) via the `_arity256` substring filter, and the `mutation`
+# shard runs the rest via `--skip _arity256` — an exhaustive, disjoint split.
 on:
   workflow_call:
     inputs:
@@ -44,7 +46,7 @@ jobs:
           - name: mutation
             args: -p arity-arrays --test mutation -- --skip _arity256
           - name: mutation-256
-            args: -p arity-arrays --test mutation -- --exact packed_mutation_matches_btreemap_arity256
+            args: -p arity-arrays --test mutation -- _arity256
           - name: trie
             args: -p arity-arrays --test trie_internals
     env:
