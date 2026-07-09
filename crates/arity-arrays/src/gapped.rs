@@ -1626,7 +1626,6 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
         #[test]
         fn clone_panic_frees_partial_irregular(
             // Build an irregular layout, then panic partway through cloning it.
@@ -1702,7 +1701,6 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
         #[test]
         fn clear_drops_all_over_irregular_layout(
             build in proptest::collection::vec(
