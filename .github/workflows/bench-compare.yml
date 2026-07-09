@@ -116,8 +116,11 @@ jobs:
       # so each ref's two captures straddle the run's midpoint symmetrically
       # (base at slots 1+4, head at slots 2+3 — both centroid at 2.5), which
       # cancels slow *linear* thermal/turbo drift in the base-vs-head
-      # differential rather than merely sharing it; `xtask compare` averages the
-      # two captures per ref (point = mean, interval = envelope). Quick PR runs
+      # differential rather than merely sharing it — exact when the four captures
+      # are evenly spaced in wall-clock time; the back-to-back head pair skips a
+      # rebuild, a second-order asymmetry dwarfed by the multi-minute capture
+      # cost. `xtask compare` averages the two captures per ref (point = mean,
+      # interval = envelope). Quick PR runs
       # skip the second pair and stay single-pass. These capture steps still
       # invoke only cargo/cargo-criterion — never just/xtask — so they work at an
       # older base-ref that predates the repo-tracked tools.
