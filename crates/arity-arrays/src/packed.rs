@@ -628,17 +628,35 @@ impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
 
 impl<T, A: Arity> Drop for PackedArray<T, A> {
     fn drop(&mut self) {
+        // Free the block no matter what — armed before `drop_in_place` so it runs
+        // even if an element destructor unwinds through the slice drop glue (which
+        // still drops the remaining elements, but would skip a bare `dealloc`).
+        struct FreeOnDrop<A: Arity, T> {
+            ptr: NonNull<Inner<A, T>>,
+            count: usize,
+        }
+        impl<A: Arity, T> Drop for FreeOnDrop<A, T> {
+            fn drop(&mut self) {
+                // SAFETY: `ptr` came from `alloc(alloc_layout::<Inner<A, T>,
+                // T>(count))`; this is the sole deallocation of the block.
+                unsafe {
+                    dealloc(
+                        self.ptr.as_ptr().cast(),
+                        alloc_layout::<Inner<A, T>, T>(self.count),
+                    );
+                };
+            }
+        }
         let Some(ptr) = self.0 else { return };
         // SAFETY: `ptr` is valid per the invariant; the bitmap is initialised.
         let count = unsafe { ptr.as_ref().bitmap.count_ones() as usize };
         // SAFETY: `ptr` valid; `data_ptr` is the base of `count` initialised `T`.
         let dp = unsafe { data_ptr(ptr) };
+        let _free = FreeOnDrop::<A, T> { ptr, count };
         // SAFETY: `dp..dp+count` are initialised; `drop_in_place` over the slice
-        // drops each exactly once.
+        // drops each exactly once, then `_free` deallocs as this scope
+        // unwinds/returns.
         unsafe { core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(dp, count)) };
-        // SAFETY: `ptr` came from `alloc(alloc_layout::<Inner<A, T>, T>(count))`;
-        // elements are dropped; this is the sole deallocation.
-        unsafe { dealloc(ptr.as_ptr().cast(), alloc_layout::<Inner<A, T>, T>(count)) };
     }
 }
 
@@ -806,6 +824,41 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 0);
         drop(p);
         assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn drop_panic_drops_rest_and_frees() {
+        use std::panic;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        // The 2nd element to drop panics; all four must still be dropped and the
+        // block freed (Miri's leak checker flags the block otherwise).
+        struct Bomb {
+            drops: Arc<AtomicUsize>,
+            boom_at: usize,
+        }
+        impl Drop for Bomb {
+            fn drop(&mut self) {
+                let n = self.drops.fetch_add(1, Ordering::SeqCst);
+                assert!(n != self.boom_at, "boom");
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut src = FixedArray::<Option<Bomb>, Arity16>::new();
+        for s in 0..4u8 {
+            src[U4::new_masked(s)] = Some(Bomb {
+                drops: drops.clone(),
+                boom_at: 1,
+            });
+        }
+        let p = PackedArray::from(src);
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| drop(p)));
+        assert!(r.is_err());
+        // All four destructors ran despite the panic on the second.
+        assert_eq!(drops.load(Ordering::SeqCst), 4);
     }
 
     #[test]
