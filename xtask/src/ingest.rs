@@ -129,16 +129,6 @@ pub fn parse_run(jsonl: &str) -> Result<Vec<Measurement>, IngestError> {
 /// carry it. Averaging a single capture is the identity. Keyed by the bench
 /// id's canonical string form (parse/`Display` round-trip uniquely).
 #[must_use]
-// Only dead outside `#[cfg(test)]` builds: the tests below already call it, so
-// scoping the expectation to non-test builds keeps it from going unfulfilled
-// under `cfg(test)`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "public API for the CLI's forthcoming multi-capture averaging path; not yet called until that lands"
-    )
-)]
 pub fn average_runs(runs: &[Vec<Measurement>]) -> Vec<Measurement> {
     use std::collections::BTreeMap;
     // key -> (sum_point, count, min_lo, max_hi, id)

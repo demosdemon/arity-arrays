@@ -146,4 +146,4 @@ bench-charts run baseline='':
 # the job summary / PR comment, e.g. `just bench-compare branch main`.
 # Print the A/B delta table (run vs baseline) for two captures.
 bench-compare run baseline:
-    cargo run -p xtask -- compare bench-data/{{ run }}.json bench-data/{{ baseline }}.json
+    cargo run -p xtask -- compare --head bench-data/{{ run }}.json --base bench-data/{{ baseline }}.json
