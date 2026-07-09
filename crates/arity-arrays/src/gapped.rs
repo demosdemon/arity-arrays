@@ -237,12 +237,12 @@ unsafe fn alloc_block<A: Arity, T>(
         (&raw mut (*inner.as_ptr()).live).write(live);
         (&raw mut (*inner.as_ptr()).cap_exp).write(cap_exp);
     }
+    // Forward guard (debug-only): all element access goes through `data_ptr`, so
+    // the block must cover `offset_of!(Inner, data) + cap * size_of::<T>()`.
+    // `alloc_layout` already bounded `cap * size_of::<T>()` by `isize::MAX` via
+    // `Layout::array`, so the product cannot overflow here.
     debug_assert!(
-        core::mem::offset_of!(Inner<A, T>, data)
-            + cap
-                .checked_mul(core::mem::size_of::<T>())
-                .expect("element span overflow")
-            <= layout.size(),
+        core::mem::offset_of!(Inner<A, T>, data) + cap * core::mem::size_of::<T>() <= layout.size(),
         "data_ptr region must fit within the alloc_layout block",
     );
     inner
