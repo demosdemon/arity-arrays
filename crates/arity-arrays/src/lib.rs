@@ -63,3 +63,8 @@ pub use packed::PackedArray;
 
 /// Prevents downstream crates from implementing [`Arity`](crate::Arity).
 trait Sealed {}
+
+/// The crate README's usage example, compiled as a doctest so it cannot rot.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

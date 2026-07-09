@@ -19,6 +19,7 @@ arity-index = { path = "crates/arity-index", version = "0.1.0", default-features
 
 [workspace.lints.rust]
 let_underscore_drop = "warn"
+missing_docs = "warn"
 non_ascii_idents = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 
