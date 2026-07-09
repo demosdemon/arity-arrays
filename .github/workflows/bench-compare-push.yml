@@ -24,5 +24,7 @@ jobs:
       post-comment: false
       # Full-precision (100 samples, 3s warm-up + 5s measurement per point)
       # comfortably exceeds bench-compare.yml's quick-mode default across the
-      # full sweep x 2 captures (base, head).
-      timeout-minutes: 180
+      # full sweep x 4 captures (interleaved base/head/base/head, ~2x the
+      # two-capture budget), capped 30 min under GitHub's 360-minute
+      # hosted-runner ceiling.
+      timeout-minutes: 330
