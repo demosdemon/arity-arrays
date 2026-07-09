@@ -76,6 +76,45 @@ fn group_single_ops(measurements: &[Measurement]) -> BTreeMap<Cell, Grouped> {
     out
 }
 
+/// Reduce workload measurements to cell -> op -> subject -> nanos.
+fn group_workload(measurements: &[Measurement]) -> BTreeMap<Cell, Grouped> {
+    let mut out: BTreeMap<Cell, Grouped> = BTreeMap::new();
+    for m in measurements {
+        if let BenchId::Workload { cell, op, subject } = &m.id {
+            out.entry(*cell)
+                .or_default()
+                .entry(op.clone())
+                .or_default()
+                .insert(subject.clone(), m.nanos);
+        }
+    }
+    out
+}
+
+/// Reduce convert measurements to op -> `cell_slug` -> nanos, at the largest
+/// occupancy seen per (op, cell).
+fn group_convert(measurements: &[Measurement]) -> Grouped {
+    let mut max_occ: BTreeMap<(String, Cell), usize> = BTreeMap::new();
+    let mut out: Grouped = BTreeMap::new();
+    for m in measurements {
+        if let BenchId::Convert {
+            op,
+            cell,
+            occupancy,
+        } = &m.id
+        {
+            let seen = max_occ.entry((op.clone(), *cell)).or_insert(0);
+            if *occupancy >= *seen {
+                *seen = *occupancy;
+                out.entry(op.clone())
+                    .or_default()
+                    .insert(cell_slug(*cell).to_owned(), m.nanos);
+            }
+        }
+    }
+    out
+}
+
 /// Per-(cell, op, subject) `(before, after)` value pairs, unioned across both
 /// measurement sets. A pair present on only one side carries `None` for the
 /// other — the join never drops a one-sided bench id.
@@ -133,6 +172,27 @@ pub fn write_charts(
             &format!("{} single-op (ns, lower is better)", cell_slug(*cell)),
             "ns",
             ops,
+        )?;
+        written.push(path);
+    }
+    for (cell, ops) in &group_workload(measurements) {
+        let path = out_dir.join(format!("{}-workload.svg", cell_slug(*cell)));
+        render_grouped(
+            &path,
+            &format!("{} workload (ns, lower is better)", cell_slug(*cell)),
+            "ns",
+            ops,
+        )?;
+        written.push(path);
+    }
+    let convert = group_convert(measurements);
+    if !convert.is_empty() {
+        let path = out_dir.join("convert.svg");
+        render_grouped(
+            &path,
+            "convert pack/unpack (ns, lower is better)",
+            "ns",
+            &convert,
         )?;
         written.push(path);
     }
@@ -286,24 +346,24 @@ mod tests {
 
     fn sample() -> Vec<Measurement> {
         vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 1.1,
-            },
-            Measurement {
-                id: BenchId::Single {
+                1.1,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "FixedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 0.7,
-            },
+                0.7,
+            ),
         ]
     }
 
@@ -338,49 +398,100 @@ mod tests {
     #[test]
     fn join_single_ops_unions_both_sides() {
         let before = vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 1.1,
-            },
-            Measurement {
-                id: BenchId::Single {
+                1.1,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "Removed".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 9.9,
-            },
+                9.9,
+            ),
         ];
         let after = vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 2.2,
-            },
-            Measurement {
-                id: BenchId::Single {
+                2.2,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "New".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 3.3,
-            },
+                3.3,
+            ),
         ];
         let joined = join_single_ops(&before, &after);
         let ops = &joined[&Cell::A]["get_hit"];
         assert_eq!(ops["PackedArray"], (Some(1.1), Some(2.2)));
         assert_eq!(ops["Removed"], (Some(9.9), None));
         assert_eq!(ops["New"], (None, Some(3.3)));
+    }
+
+    #[test]
+    fn writes_workload_and_convert_charts() {
+        use crate::bench_id::BenchId;
+        use crate::bench_id::Cell;
+        let ms = vec![
+            Measurement::point(
+                BenchId::Single {
+                    cell: Cell::A,
+                    op: "get_hit".to_owned(),
+                    subject: "PackedArray".to_owned(),
+                    occupancy: 16,
+                },
+                1.1,
+            ),
+            Measurement::point(
+                BenchId::Workload {
+                    cell: Cell::A,
+                    op: "build".to_owned(),
+                    subject: "GappedArray".to_owned(),
+                },
+                42.0,
+            ),
+            Measurement::point(
+                BenchId::Convert {
+                    op: "pack".to_owned(),
+                    cell: Cell::A,
+                    occupancy: 16,
+                },
+                9.0,
+            ),
+        ];
+        let dir = std::env::temp_dir().join("xtask-charts-families-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let written = write_charts(&ms, &dir).expect("charts");
+        let names: Vec<String> = written
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "cell_a-single-op.svg"),
+            "single-op svg"
+        );
+        assert!(
+            names.iter().any(|n| n == "cell_a-workload.svg"),
+            "workload svg"
+        );
+        assert!(names.iter().any(|n| n == "convert.svg"), "convert svg");
+        let workload = std::fs::read_to_string(dir.join("cell_a-workload.svg")).unwrap();
+        assert!(workload.contains("GappedArray"), "workload subject present");
     }
 }

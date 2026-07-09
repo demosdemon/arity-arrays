@@ -16,7 +16,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: xtask charts <run.json> [<baseline.json>]\n       xtask compare <run.json> <baseline.json>";
+const USAGE: &str = "usage: xtask charts <run.json> [<baseline.json>]\n       xtask compare --head <run.json>... --base <baseline.json>...";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -89,18 +89,110 @@ fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `xtask compare <run.json> <baseline.json>`: print the markdown A/B delta
-/// table (run vs baseline) to stdout. Argument order matches `charts`
-/// (current/run first, comparison target/baseline second).
+/// `xtask compare --head <run.json>... --base <baseline.json>...`: average the
+/// captures on each side (interleaved A/B/B/A replicates) and print the
+/// markdown A/B delta table to stdout.
 fn run_compare(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let run_path = args.first().ok_or("missing <run.json> path")?;
-    let baseline_path = args.get(1).ok_or("missing <baseline.json> path")?;
-    let run_jsonl =
-        std::fs::read_to_string(run_path).map_err(|e| format!("read {run_path}: {e}"))?;
-    let baseline_jsonl =
-        std::fs::read_to_string(baseline_path).map_err(|e| format!("read {baseline_path}: {e}"))?;
-    let run = ingest::parse_run(&run_jsonl)?;
-    let baseline = ingest::parse_run(&baseline_jsonl)?;
-    print!("{}", compare::render_compare(&baseline, &run));
+    let (head_paths, base_paths) = parse_compare_args(args)?;
+    let head = ingest::average_runs(&read_runs(&head_paths)?);
+    let base = ingest::average_runs(&read_runs(&base_paths)?);
+    print!("{}", compare::render_compare(&base, &head));
     Ok(())
+}
+
+/// Split `--head <f>... --base <f>...` (either flag order) into two file
+/// groups. Each flag must precede at least one path.
+fn parse_compare_args(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
+    enum Side {
+        None,
+        Head,
+        Base,
+    }
+    let mut head = Vec::new();
+    let mut base = Vec::new();
+    let mut side = Side::None;
+    for a in args {
+        match a.as_str() {
+            "--head" => side = Side::Head,
+            "--base" => side = Side::Base,
+            other => match side {
+                Side::Head => head.push(other.to_owned()),
+                Side::Base => base.push(other.to_owned()),
+                Side::None => {
+                    return Err(format!(
+                        "unexpected argument {other:?} before --head/--base"
+                    ));
+                }
+            },
+        }
+    }
+    if head.is_empty() || base.is_empty() {
+        return Err("compare needs --head <file...> and --base <file...>".to_owned());
+    }
+    Ok((head, base))
+}
+
+fn read_runs(
+    paths: &[String],
+) -> Result<Vec<Vec<ingest::Measurement>>, Box<dyn std::error::Error>> {
+    let mut runs = Vec::new();
+    for p in paths {
+        let j = std::fs::read_to_string(p).map_err(|e| format!("read {p}: {e}"))?;
+        runs.push(ingest::parse_run(&j)?);
+    }
+    Ok(runs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_compare_args;
+
+    #[test]
+    fn splits_head_and_base_either_order() {
+        let (h, b) = parse_compare_args(&[
+            "--head".into(),
+            "h1.json".into(),
+            "h2.json".into(),
+            "--base".into(),
+            "b1.json".into(),
+        ])
+        .unwrap();
+        assert_eq!(h, ["h1.json", "h2.json"]);
+        assert_eq!(b, ["b1.json"]);
+
+        // Flag order does not matter.
+        let (h, b) = parse_compare_args(&[
+            "--base".into(),
+            "b1.json".into(),
+            "b2.json".into(),
+            "--head".into(),
+            "h1.json".into(),
+        ])
+        .unwrap();
+        assert_eq!(h, ["h1.json"]);
+        assert_eq!(b, ["b1.json", "b2.json"]);
+    }
+
+    #[test]
+    fn errors_on_missing_side_or_leading_arg() {
+        assert!(
+            parse_compare_args(&["--head".into(), "h.json".into()]).is_err(),
+            "no --base"
+        );
+        assert!(
+            parse_compare_args(&["--base".into(), "b.json".into()]).is_err(),
+            "no --head"
+        );
+        assert!(
+            parse_compare_args(&[
+                "stray.json".into(),
+                "--head".into(),
+                "h.json".into(),
+                "--base".into(),
+                "b.json".into(),
+            ])
+            .is_err(),
+            "arg before any flag"
+        );
+    }
 }

@@ -2,7 +2,8 @@ name: Bench compare
 
 # Reusable A/B benchmark comparison, shared by the trigger-specific callers
 # (bench-compare-pr.yml, bench-compare-dispatch.yml, bench-compare-push.yml,
-# bench-compare-comment.yml). Runs base-ref then head-ref sequentially on one
+# bench-compare-comment.yml). Runs base/head single-pass on quick runs, or
+# base/head/head/base (interleaved A/B/B/A) on full-precision runs, on one
 # runner so both captures share the same hardware/thermal noise floor, diffs
 # them via `xtask compare`, and always publishes to the job summary (plus a
 # sticky PR comment when the caller asks for one). No `permissions:` block
@@ -58,14 +59,20 @@ on:
       timeout-minutes:
         description: >-
           Per-run guardrail, in minutes. Default (90) covers quick mode:
-          measured at ~5.6s/point x 390 points x 2 captures (base, head) with
-          criterion's default nresamples (100_000, pre-dating the
+          quick runs stay single-pass (base once, head once) at this
+          default; measured at ~5.6s/point x 390 points x 2 captures (base,
+          head) with criterion's default nresamples (100_000, pre-dating the
           BENCH_QUICK/nresamples fix below); nresamples(1000) cuts CPU-time
           ~61% but wall-clock savings depend on the runner's core count,
           which the 60-minute prior default didn't leave enough margin for.
-          Non-quick callers (bench-compare-push.yml, bench-compare-comment.yml)
-          override this to 180 (full precision is ~9x slower per point:
-          100 samples/3s warm-up/5s measurement vs quick's 10/100ms/500ms).
+          Full-precision callers (bench-compare-push.yml,
+          bench-compare-comment.yml, bench-compare-dispatch.yml with
+          quick=false) override this to 330 for the interleaved
+          base/head/head/base run — four captures instead of quick's two
+          (~2x the two-capture budget), capped 30 min under GitHub's
+          360-minute hosted-runner ceiling (full precision is also ~9x
+          slower per point: 100 samples/3s warm-up/5s measurement vs
+          quick's 10/100ms/500ms).
         type: number
         required: false
         default: 90
@@ -117,21 +124,53 @@ jobs:
       # optional features (serde, serde_with, ethnum, std) gate any bench code (no
       # `#[cfg(feature = ...)]` in benches/), so --all-features would only add compile
       # time, not comparison coverage. Matches the existing local `bench-export` recipe.
+      #
+      # Interleave base/head/head/base on one runner (FULL-PRECISION runs only)
+      # so each ref's two captures straddle the run's midpoint symmetrically
+      # (base at slots 1+4, head at slots 2+3 — both centroid at 2.5), which
+      # cancels slow *linear* thermal/turbo drift in the base-vs-head
+      # differential rather than merely sharing it — exact when the four captures
+      # are evenly spaced in wall-clock time; the back-to-back head pair skips a
+      # rebuild, a second-order asymmetry dwarfed by the multi-minute capture
+      # cost. `xtask compare` averages the two captures per ref (point = mean,
+      # interval = envelope). Quick PR runs
+      # skip the second pair and stay single-pass. These capture steps still
+      # invoke only cargo/cargo-criterion — never just/xtask — so they work at an
+      # older base-ref that predates the repo-tracked tools.
       - name: Capture base
         run: |
           git checkout "$BASE_REF"
-          cargo criterion -p arity-arrays --message-format=json > base.json
+          cargo criterion -p arity-arrays --message-format=json > base1.json
 
       - name: Capture head
         run: |
           git checkout "$HEAD_REF"
-          cargo criterion -p arity-arrays --message-format=json > head.json
+          cargo criterion -p arity-arrays --message-format=json > head1.json
+
+      - name: Capture head (interleave replicate)
+        if: ${{ !inputs.quick }}
+        run: |
+          git checkout "$HEAD_REF"
+          cargo criterion -p arity-arrays --message-format=json > head2.json
+
+      - name: Capture base (interleave replicate)
+        if: ${{ !inputs.quick }}
+        run: |
+          git checkout "$BASE_REF"
+          cargo criterion -p arity-arrays --message-format=json > base2.json
 
       - name: Render comparison
         run: |
-          "$RUNNER_TEMP/xtask" compare head.json base.json > compare.md
           if [ "${{ inputs.quick }}" = "true" ]; then
-            { printf '> [!NOTE]\n> Quick mode: reduced sample count, noisier than a full run.\n\n'; cat compare.md; } > compare.md.tmp
+            HEAD_FILES=(head1.json)
+            BASE_FILES=(base1.json)
+          else
+            HEAD_FILES=(head1.json head2.json)
+            BASE_FILES=(base1.json base2.json)
+          fi
+          "$RUNNER_TEMP/xtask" compare --head "${HEAD_FILES[@]}" --base "${BASE_FILES[@]}" > compare.md
+          if [ "${{ inputs.quick }}" = "true" ]; then
+            { printf '> [!NOTE]\n> Quick mode: reduced sample count, single-pass A/B (no interleaving), noisier than a full run.\n\n'; cat compare.md; } > compare.md.tmp
             mv compare.md.tmp compare.md
           fi
 
@@ -139,8 +178,10 @@ jobs:
         with:
           name: bench-compare-${{ github.run_id }}
           path: |
-            base.json
-            head.json
+            base1.json
+            base2.json
+            head1.json
+            head2.json
             compare.md
 
       - name: Publish job summary

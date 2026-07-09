@@ -114,9 +114,11 @@ build/resize path is ~3× slower. It is the write-throughput corner, not a
 general-purpose default.
 
 > [!NOTE]
-> By-value single-op benches (`remove`, `insert_*`) drop the container inside the
-> timed region, so a payload's `Drop` cost is included. Use `black_box`-returning
-> workload benches to time operations in isolation.
+> The `remove`/`insert_*` single-op benches build a fresh container per iteration
+> outside the timed region (`iter_batched_ref`) and drop it outside the timed
+> region too, so each sample times only the operation, not container teardown.
+> Earlier revisions dropped the container in-region, which taxed the heap-backed
+> representations (Packed/Gapped/maps) asymmetrically against inline `FixedArray`.
 
 A second bench, `cargo bench -p arity-arrays --bench trie`, measures recursive
 `Clone` and `Drop` of a compressed-trie fixture whose children array is each
