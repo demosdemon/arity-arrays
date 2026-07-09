@@ -46,31 +46,46 @@ pub fn render_marked(existing: &str, generated: &str) -> Result<String, TableErr
     Ok(out)
 }
 
-/// Build the generated comparison block: one single-op median table per cell
-/// (A then B), each with one row per `op` and one column per subject, at the
-/// largest occupancy seen for that (op, subject). The same block is written
-/// into both READMEs, so neither cell's data is lost.
+/// Build the generated comparison block written into both READMEs: per cell, a
+/// single-op table (with an occupancy column) and a workload table, then one
+/// convert table. The same block is written into both READMEs.
 #[must_use]
 pub fn comparison_table(measurements: &[Measurement]) -> String {
     use crate::bench_id::Cell;
     let mut s = String::new();
-    s.push_str(&cell_table("Cell A (Arity16)", Cell::A, measurements));
-    s.push('\n');
-    s.push_str(&cell_table("Cell B (Arity256)", Cell::B, measurements));
+    for cell in [Cell::A, Cell::B] {
+        let heading = match cell {
+            Cell::A => "Cell A (Arity16)",
+            Cell::B => "Cell B (Arity256)",
+        };
+        s.push_str(&single_op_table(heading, cell, measurements));
+        s.push('\n');
+        s.push_str(&workload_table(heading, cell, measurements));
+        s.push('\n');
+    }
+    s.push_str(&convert_table(measurements));
     s
 }
 
-/// One cell's single-op median table, titled with `heading`.
-fn cell_table(heading: &str, want: crate::bench_id::Cell, measurements: &[Measurement]) -> String {
+/// One cell's single-op table: rows are ops, an `occ` column reports each row's
+/// occupancy (rows differ — `get_miss`/`insert_new` sweep the partial slices),
+/// and columns are subjects, at the largest occupancy seen per (op, subject).
+fn single_op_table(
+    heading: &str,
+    want: crate::bench_id::Cell,
+    measurements: &[Measurement],
+) -> String {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::fmt::Write as _;
 
     use crate::bench_id::BenchId;
 
-    // (op, subject) -> (max occupancy seen, nanos at that occupancy).
     let mut subjects = BTreeSet::new();
+    // (op, subject) -> (max occupancy, nanos at that occupancy)
     let mut cells: BTreeMap<(String, String), (usize, f64)> = BTreeMap::new();
+    // op -> max occupancy across its subjects (uniform per op in practice).
+    let mut op_occ: BTreeMap<String, usize> = BTreeMap::new();
     for m in measurements {
         if let BenchId::Single {
             cell,
@@ -89,17 +104,70 @@ fn cell_table(heading: &str, want: crate::bench_id::Cell, measurements: &[Measur
             if *occupancy >= entry.0 {
                 *entry = (*occupancy, m.nanos);
             }
+            let occ = op_occ.entry(op.clone()).or_insert(0);
+            *occ = (*occ).max(*occupancy);
         }
     }
     let subjects: Vec<String> = subjects.into_iter().collect();
     let ops: BTreeSet<String> = cells.keys().map(|(op, _)| op.clone()).collect();
 
-    let mut s = format!("**{heading} single-op (median, max occupancy)**\n\n");
+    let mut s = format!("**{heading} single-op (median ns)**\n\n");
+    s.push_str("| op | occ |");
+    for subj in &subjects {
+        let _ = write!(s, " {subj} |");
+    }
+    s.push_str("\n| :--- | ---: |");
+    for _ in &subjects {
+        s.push_str(" ---: |");
+    }
+    s.push('\n');
+    for op in &ops {
+        let occ = op_occ.get(op).copied().unwrap_or(0);
+        let _ = write!(s, "| `{op}` | {occ} |");
+        for subj in &subjects {
+            match cells.get(&(op.clone(), subj.clone())) {
+                Some((_, nanos)) => {
+                    let _ = write!(s, " {nanos:.2} |");
+                }
+                None => s.push_str(" – |"),
+            }
+        }
+        s.push('\n');
+    }
+    s
+}
+
+/// One cell's workload table: rows are workload ops (`build`, `churn`), columns
+/// are subjects. No occupancy (the macro sweeps the full arity).
+fn workload_table(
+    heading: &str,
+    want: crate::bench_id::Cell,
+    measurements: &[Measurement],
+) -> String {
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::fmt::Write as _;
+
+    use crate::bench_id::BenchId;
+
+    let mut subjects = BTreeSet::new();
+    let mut cells: BTreeMap<(String, String), f64> = BTreeMap::new();
+    for m in measurements {
+        if let BenchId::Workload { cell, op, subject } = &m.id {
+            if *cell != want {
+                continue;
+            }
+            subjects.insert(subject.clone());
+            cells.insert((op.clone(), subject.clone()), m.nanos);
+        }
+    }
+    let subjects: Vec<String> = subjects.into_iter().collect();
+    let ops: BTreeSet<String> = cells.keys().map(|(op, _)| op.clone()).collect();
+
+    let mut s = format!("**{heading} workload (median ns)**\n\n");
     s.push_str("| op |");
     for subj in &subjects {
-        s.push(' ');
-        s.push_str(subj);
-        s.push_str(" |");
+        let _ = write!(s, " {subj} |");
     }
     s.push_str("\n| :--- |");
     for _ in &subjects {
@@ -107,13 +175,56 @@ fn cell_table(heading: &str, want: crate::bench_id::Cell, measurements: &[Measur
     }
     s.push('\n');
     for op in &ops {
-        s.push_str("| `");
-        s.push_str(op);
-        s.push_str("` |");
+        let _ = write!(s, "| `{op}` |");
         for subj in &subjects {
             match cells.get(&(op.clone(), subj.clone())) {
+                Some(nanos) => {
+                    let _ = write!(s, " {nanos:.2} |");
+                }
+                None => s.push_str(" – |"),
+            }
+        }
+        s.push('\n');
+    }
+    s
+}
+
+/// The convert table: rows are conversion ops (`pack`, `unpack`), columns are
+/// cells, at the largest occupancy seen for each (op, cell).
+fn convert_table(measurements: &[Measurement]) -> String {
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::fmt::Write as _;
+
+    use crate::bench_id::BenchId;
+    use crate::bench_id::Cell;
+
+    // (op, cell) -> (max occupancy, nanos)
+    let mut cells: BTreeMap<(String, Cell), (usize, f64)> = BTreeMap::new();
+    for m in measurements {
+        if let BenchId::Convert {
+            op,
+            cell,
+            occupancy,
+        } = &m.id
+        {
+            let entry = cells.entry((op.clone(), *cell)).or_insert((0, 0.0));
+            if *occupancy >= entry.0 {
+                *entry = (*occupancy, m.nanos);
+            }
+        }
+    }
+    let ops: BTreeSet<String> = cells.keys().map(|(op, _)| op.clone()).collect();
+
+    let mut s = String::from("**Conversion (median ns, max occupancy)**\n\n");
+    s.push_str("| op | cell_a | cell_b |\n");
+    s.push_str("| :--- | ---: | ---: |\n");
+    for op in &ops {
+        let _ = write!(s, "| `{op}` |");
+        for cell in [Cell::A, Cell::B] {
+            match cells.get(&(op.clone(), cell)) {
                 Some((_, nanos)) => {
-                    let _ = write!(s, " {nanos:.2} ns |");
+                    let _ = write!(s, " {nanos:.2} |");
                 }
                 None => s.push_str(" – |"),
             }
@@ -151,10 +262,19 @@ mod tests {
     }
 
     #[test]
-    fn comparison_table_covers_both_cells() {
+    fn comparison_table_covers_single_workload_and_convert() {
         use crate::bench_id::BenchId;
         use crate::bench_id::Cell;
         let ms = vec![
+            Measurement::point(
+                BenchId::Single {
+                    cell: Cell::A,
+                    op: "get_miss".to_owned(),
+                    subject: "PackedArray".to_owned(),
+                    occupancy: 8,
+                },
+                0.8,
+            ),
             Measurement::point(
                 BenchId::Single {
                     cell: Cell::A,
@@ -164,21 +284,61 @@ mod tests {
                 },
                 1.1,
             ),
+            // Cell B single-op exercises the second arm of `for cell in [A, B]`.
             Measurement::point(
                 BenchId::Single {
                     cell: Cell::B,
                     op: "get_hit".to_owned(),
-                    subject: "HashMap".to_owned(),
+                    subject: "PackedArray".to_owned(),
+                    occupancy: 256,
+                },
+                1.5,
+            ),
+            Measurement::point(
+                BenchId::Workload {
+                    cell: Cell::A,
+                    op: "build".to_owned(),
+                    subject: "GappedArray".to_owned(),
+                },
+                42.0,
+            ),
+            Measurement::point(
+                BenchId::Convert {
+                    op: "pack".to_owned(),
+                    cell: Cell::B,
                     occupancy: 256,
                 },
                 7.3,
             ),
         ];
         let table = comparison_table(&ms);
-        // Both cells' data must survive into the single generated block.
-        assert!(table.contains("Cell A"), "cell A table present");
-        assert!(table.contains("Cell B"), "cell B table present");
-        assert!(table.contains("PackedArray"));
-        assert!(table.contains("HashMap"));
+        // Single-op table carries an occupancy column with the per-row value.
+        assert!(
+            table.contains("Cell A (Arity16) single-op (median ns)"),
+            "cell A single-op heading"
+        );
+        assert!(
+            table.contains("Cell B (Arity256) single-op (median ns)"),
+            "cell B single-op heading"
+        );
+        assert!(table.contains("| occ |"), "occupancy column present");
+        assert!(
+            table.contains("| `get_miss` | 8 |"),
+            "partial-sweep row shows its own occupancy"
+        );
+        assert!(
+            table.contains("| `get_hit` | 16 |"),
+            "cell A full-sweep row shows its own occupancy"
+        );
+        assert!(
+            table.contains("| `get_hit` | 256 |"),
+            "cell B full-sweep row shows its own occupancy"
+        );
+        // Workload table (no occupancy).
+        assert!(table.contains("workload (median ns)"), "workload heading");
+        assert!(table.contains("`build`"), "build row present");
+        // Convert table (op x cell).
+        assert!(table.contains("Conversion (median ns"), "convert heading");
+        assert!(table.contains("`pack`"), "pack row present");
     }
 }
