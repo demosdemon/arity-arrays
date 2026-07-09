@@ -7,6 +7,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
 ## [Unreleased]
 
+### Fixed
+
+- `arity-arrays`: `PackedArray::drop` no longer leaks its heap block when an
+  element's destructor panics. The deallocation is now armed in a drop guard
+  before the elements are dropped, so it still runs as the stack unwinds —
+  matching `GappedArray` and `std::Vec`. A Miri-checked regression test covers
+  the panicking-destructor path.
+
 ### Changed
 
 - Migrate the benchmark harness from `divan` to `criterion`, run via
