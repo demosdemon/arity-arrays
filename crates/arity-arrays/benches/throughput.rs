@@ -86,9 +86,9 @@ macro_rules! single_op_benches {
                     g.bench_with_input(
                         BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
                         &occ,
-                        |b, _| b.iter_batched(
+                        |b, _| b.iter_batched_ref(
                             || <$ctype as BenchContainer<$ty>>::fill(occ),
-                            |mut cont| black_box(cont.set(target, <$ty as Payload>::make(target))),
+                            |cont| black_box(cont.set(target, <$ty as Payload>::make(target))),
                             BatchSize::SmallInput,
                         ),
                     );
@@ -102,9 +102,9 @@ macro_rules! single_op_benches {
                     g.bench_with_input(
                         BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
                         &occ,
-                        |b, _| b.iter_batched(
+                        |b, _| b.iter_batched_ref(
                             || <$ctype as BenchContainer<$ty>>::fill(occ),
-                            |mut cont| black_box(cont.set(target, <$ty as Payload>::make(target))),
+                            |cont| black_box(cont.set(target, <$ty as Payload>::make(target))),
                             BatchSize::SmallInput,
                         ),
                     );
@@ -118,9 +118,9 @@ macro_rules! single_op_benches {
                     g.bench_with_input(
                         BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
                         &occ,
-                        |b, _| b.iter_batched(
+                        |b, _| b.iter_batched_ref(
                             || <$ctype as BenchContainer<$ty>>::fill(occ),
-                            |mut cont| black_box(cont.del(target)),
+                            |cont| black_box(cont.del(target)),
                             BatchSize::SmallInput,
                         ),
                     );
