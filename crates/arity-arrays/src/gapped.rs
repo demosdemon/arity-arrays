@@ -1686,6 +1686,55 @@ mod tests {
         }
     }
 
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+        #[test]
+        fn clear_drops_all_over_irregular_layout(
+            build in proptest::collection::vec(
+                prop_oneof![
+                    5 => (0u8..16, any::<u16>()).prop_map(|(s, v)| (0u8, s, v)),
+                    2 => (0u8..16).prop_map(|s| (1u8, s, 0u16)),
+                    2 => (0u8..16).prop_map(|n| (2u8, n, 0u16)),
+                    1 => Just((3u8, 0u8, 0u16)),
+                ],
+                0..64,
+            ),
+        ) {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            struct Bomb(Arc<AtomicUsize>);
+            impl Drop for Bomb {
+                fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
+            }
+
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut g: GappedArray<Bomb, Arity16> = GappedArray::new();
+            for (tag, s, _v) in &build {
+                match tag {
+                    0 => { g.insert(U4::new_masked(*s), Bomb(drops.clone())); }
+                    1 => { g.remove(U4::new_masked(*s)); }   // returned Bomb drops here
+                    2 => g.reserve(*s as usize),
+                    _ => g.shrink_to_fit(),
+                }
+            }
+            let live = g.count();
+            let cap = g.capacity();
+            drops.store(0, Ordering::SeqCst); // count only clear()'s drops
+
+            g.clear();
+            // clear() drops exactly the live elements, once each (drop loop runs because
+            // Bomb: Drop), and retains the allocation.
+            prop_assert_eq!(drops.load(Ordering::SeqCst), live);
+            prop_assert!(g.is_empty());
+            prop_assert_eq!(g.capacity(), cap);
+
+            // Dropping the (now empty) array adds no further drops.
+            drop(g);
+            prop_assert_eq!(drops.load(Ordering::SeqCst), live);
+        }
+    }
+
     #[test]
     fn capacity_api() {
         // with_capacity(0) is unallocated; rounds up otherwise; caps at N.
