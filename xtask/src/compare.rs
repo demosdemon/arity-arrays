@@ -68,33 +68,91 @@ const fn cell_heading(cell: Cell) -> &'static str {
     }
 }
 
-/// Build the A/B delta table: one single-op table per cell, columns `op |
-/// subject | base | head | Δ% | ` with a trailing `~` marker when the base/head
-/// intervals overlap (within noise), then a non-failing summary line.
-#[must_use]
-pub fn render_compare(before: &[Measurement], after: &[Measurement]) -> String {
-    let base = group_single(before);
-    let head = group_single(after);
-    let mut cells: BTreeSet<Cell> = BTreeSet::new();
-    cells.extend(base.keys().copied());
-    cells.extend(head.keys().copied());
+/// Per-cell workload grouping: cell -> op -> subject -> Interval (no
+/// occupancy).
+type GroupedW = BTreeMap<Cell, BTreeMap<String, BTreeMap<String, Interval>>>;
 
-    let mut s = String::new();
-    let mut total = 0u32;
-    let mut noisy = 0u32;
-    for cell in cells {
-        let (t, n, body) = cell_table(cell_heading(cell), cell, &base, &head);
-        s.push_str(&body);
-        s.push('\n');
-        total += t;
-        noisy += n;
+/// cell -> op -> subject -> Interval for the workload family (no occupancy).
+fn group_workload(ms: &[Measurement]) -> GroupedW {
+    let mut out: GroupedW = BTreeMap::new();
+    for m in ms {
+        if let BenchId::Workload { cell, op, subject } = &m.id {
+            out.entry(*cell)
+                .or_default()
+                .entry(op.clone())
+                .or_default()
+                .insert(subject.clone(), Interval {
+                    point: m.nanos,
+                    lo: m.lo_nanos,
+                    hi: m.hi_nanos,
+                });
+        }
     }
-    let real = total - noisy;
+    out
+}
+
+/// op -> `cell_slug` -> Interval for the convert family, at max occupancy.
+fn group_convert(ms: &[Measurement]) -> BTreeMap<String, BTreeMap<String, (usize, Interval)>> {
+    let mut out: BTreeMap<String, BTreeMap<String, (usize, Interval)>> = BTreeMap::new();
+    for m in ms {
+        if let BenchId::Convert {
+            op,
+            cell,
+            occupancy,
+        } = &m.id
+        {
+            let slug = match cell {
+                Cell::A => "cell_a",
+                Cell::B => "cell_b",
+            };
+            let entry = out
+                .entry(op.clone())
+                .or_default()
+                .entry(slug.to_owned())
+                .or_insert((0, Interval {
+                    point: 0.0,
+                    lo: 0.0,
+                    hi: 0.0,
+                }));
+            if *occupancy >= entry.0 {
+                *entry = (*occupancy, Interval {
+                    point: m.nanos,
+                    lo: m.lo_nanos,
+                    hi: m.hi_nanos,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Render one `| left1 | left2 | base | head | Δ% | mark |` row into `s`,
+/// returning `(is_delta, is_noisy)`.
+fn delta_row(
+    s: &mut String,
+    left1: &str,
+    left2: &str,
+    b: Option<Interval>,
+    h: Option<Interval>,
+) -> (bool, bool) {
+    let base_cell = b.map_or_else(|| "–".to_owned(), |iv| format!("{:.2}", iv.point));
+    let head_cell = h.map_or_else(|| "–".to_owned(), |iv| format!("{:.2}", iv.point));
+    let (pct, mark, is_delta, is_noisy) = match (b, h) {
+        (Some(bi), Some(hi)) if bi.point != 0.0 => {
+            let d = (hi.point - bi.point) / bi.point * 100.0;
+            if overlaps(bi, hi) {
+                (format!("{d:+.1}%"), "~", true, true)
+            } else {
+                (format!("{d:+.1}%"), "", true, false)
+            }
+        }
+        _ => ("–".to_owned(), "", false, false),
+    };
     let _ = writeln!(
         s,
-        "_{real}/{total} deltas exceed run-to-run noise (non-overlapping confidence intervals); `~` marks deltas within noise._"
+        "| {left1} | {left2} | {base_cell} | {head_cell} | {pct} | {mark} |"
     );
-    s
+    (is_delta, is_noisy)
 }
 
 /// Render one cell's single-op delta table. Returns `(delta_count,
@@ -127,27 +185,118 @@ fn cell_table(heading: &str, want: Cell, base: &Grouped, head: &Grouped) -> (u32
             .get(&op)
             .and_then(|s| s.get(&subject))
             .map(|(_, iv)| *iv);
-        let base_cell = b.map_or_else(|| "–".to_owned(), |iv| format!("{:.2}", iv.point));
-        let head_cell = h.map_or_else(|| "–".to_owned(), |iv| format!("{:.2}", iv.point));
-        let (pct, mark) = match (b, h) {
-            (Some(bi), Some(hi)) if bi.point != 0.0 => {
-                total += 1;
-                let d = (hi.point - bi.point) / bi.point * 100.0;
-                if overlaps(bi, hi) {
-                    noisy += 1;
-                    (format!("{d:+.1}%"), "~")
-                } else {
-                    (format!("{d:+.1}%"), "")
-                }
-            }
-            _ => ("–".to_owned(), ""),
-        };
-        let _ = writeln!(
-            s,
-            "| `{op}` | {subject} | {base_cell} | {head_cell} | {pct} | {mark} |"
-        );
+        let (is_delta, is_noisy) = delta_row(&mut s, &format!("`{op}`"), &subject, b, h);
+        total += u32::from(is_delta);
+        noisy += u32::from(is_noisy);
     }
     (total, noisy, s)
+}
+
+/// Render one cell's workload delta table. Returns `(delta_count, noisy_count,
+/// markdown)` — mirrors `cell_table` for the occupancy-free workload family.
+fn workload_table(
+    heading: &str,
+    want: Cell,
+    base: &GroupedW,
+    head: &GroupedW,
+) -> (u32, u32, String) {
+    let mut s = format!("**{heading} workload (base vs head, median ns)**\n\n");
+    s.push_str("| op | subject | base | head | Δ% | |\n");
+    s.push_str("| :--- | :--- | ---: | ---: | ---: | :-- |\n");
+    let empty = BTreeMap::new();
+    let b_ops = base.get(&want).unwrap_or(&empty);
+    let h_ops = head.get(&want).unwrap_or(&empty);
+    let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
+    for (op, subs) in b_ops.iter().chain(h_ops.iter()) {
+        for subject in subs.keys() {
+            keys.insert((op.clone(), subject.clone()));
+        }
+    }
+    let mut total = 0u32;
+    let mut noisy = 0u32;
+    for (op, subject) in keys {
+        let b = b_ops.get(&op).and_then(|m| m.get(&subject)).copied();
+        let h = h_ops.get(&op).and_then(|m| m.get(&subject)).copied();
+        let (is_delta, is_noisy) = delta_row(&mut s, &format!("`{op}`"), &subject, b, h);
+        total += u32::from(is_delta);
+        noisy += u32::from(is_noisy);
+    }
+    (total, noisy, s)
+}
+
+/// Build the A/B delta table: per cell a single-op table then a workload table,
+/// then one convert table — each with base/head medians, a trailing `~` marker
+/// when the base/head confidence intervals overlap (within noise), and one
+/// non-failing summary counting deltas that exceed noise across every family.
+#[must_use]
+pub fn render_compare(before: &[Measurement], after: &[Measurement]) -> String {
+    let mut s = String::new();
+    let mut total = 0u32;
+    let mut noisy = 0u32;
+
+    // Single-op tables (per cell).
+    let base = group_single(before);
+    let head = group_single(after);
+    let mut cells: BTreeSet<Cell> = BTreeSet::new();
+    cells.extend(base.keys().copied());
+    cells.extend(head.keys().copied());
+    for cell in cells {
+        let (t, n, body) = cell_table(cell_heading(cell), cell, &base, &head);
+        s.push_str(&body);
+        s.push('\n');
+        total += t;
+        noisy += n;
+    }
+
+    // Workload tables (per cell).
+    let base_w = group_workload(before);
+    let head_w = group_workload(after);
+    let mut w_cells: BTreeSet<Cell> = BTreeSet::new();
+    w_cells.extend(base_w.keys().copied());
+    w_cells.extend(head_w.keys().copied());
+    for cell in w_cells {
+        let (t, n, body) = workload_table(cell_heading(cell), cell, &base_w, &head_w);
+        s.push_str(&body);
+        s.push('\n');
+        total += t;
+        noisy += n;
+    }
+
+    // Convert table (op x cell).
+    let base_c = group_convert(before);
+    let head_c = group_convert(after);
+    if !base_c.is_empty() || !head_c.is_empty() {
+        s.push_str("**Conversion (base vs head, median ns, max occupancy)**\n\n");
+        s.push_str("| op | cell | base | head | Δ% | |\n");
+        s.push_str("| :--- | :--- | ---: | ---: | ---: | :-- |\n");
+        let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
+        for (op, cells_m) in base_c.iter().chain(head_c.iter()) {
+            for slug in cells_m.keys() {
+                keys.insert((op.clone(), slug.clone()));
+            }
+        }
+        for (op, slug) in keys {
+            let b = base_c
+                .get(&op)
+                .and_then(|m| m.get(&slug))
+                .map(|(_, iv)| *iv);
+            let h = head_c
+                .get(&op)
+                .and_then(|m| m.get(&slug))
+                .map(|(_, iv)| *iv);
+            let (is_delta, is_noisy) = delta_row(&mut s, &format!("`{op}`"), &slug, b, h);
+            total += u32::from(is_delta);
+            noisy += u32::from(is_noisy);
+        }
+        s.push('\n');
+    }
+
+    let real = total - noisy;
+    let _ = writeln!(
+        s,
+        "_{real}/{total} deltas exceed run-to-run noise (non-overlapping confidence intervals); `~` marks deltas within noise._"
+    );
+    s
 }
 
 #[cfg(test)]
@@ -267,5 +416,59 @@ mod tests {
         let table = render_compare(&before, &after);
         assert!(table.contains("| `get_hit` | New | – | 3.30 | – |  |"));
         assert!(table.contains("| `get_hit` | Removed | 9.90 | – | – |  |"));
+    }
+
+    #[test]
+    fn workload_and_convert_families_appear() {
+        use crate::bench_id::BenchId;
+        let before = vec![
+            Measurement::point(
+                BenchId::Workload {
+                    cell: Cell::A,
+                    op: "build".to_owned(),
+                    subject: "GappedArray".to_owned(),
+                },
+                40.0,
+            ),
+            Measurement::point(
+                BenchId::Convert {
+                    op: "pack".to_owned(),
+                    cell: Cell::A,
+                    occupancy: 16,
+                },
+                9.0,
+            ),
+        ];
+        let after = vec![
+            Measurement::point(
+                BenchId::Workload {
+                    cell: Cell::A,
+                    op: "build".to_owned(),
+                    subject: "GappedArray".to_owned(),
+                },
+                60.0,
+            ),
+            Measurement::point(
+                BenchId::Convert {
+                    op: "pack".to_owned(),
+                    cell: Cell::A,
+                    occupancy: 16,
+                },
+                18.0,
+            ),
+        ];
+        let table = render_compare(&before, &after);
+        assert!(
+            table.contains("workload (base vs head"),
+            "workload section present"
+        );
+        assert!(table.contains("`build`"), "build row present");
+        assert!(
+            table.contains("Conversion (base vs head"),
+            "convert section present"
+        );
+        assert!(table.contains("`pack`"), "pack row present");
+        assert!(table.contains("+50.0%"), "build delta");
+        assert!(table.contains("+100.0%"), "convert delta");
     }
 }
