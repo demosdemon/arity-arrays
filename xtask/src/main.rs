@@ -90,7 +90,7 @@ fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// `xtask compare --head <run.json>... --base <baseline.json>...`: average the
-/// captures on each side (interleaved A/B/A/B replicates) and print the
+/// captures on each side (interleaved A/B/B/A replicates) and print the
 /// markdown A/B delta table to stdout.
 fn run_compare(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let (head_paths, base_paths) = parse_compare_args(args)?;

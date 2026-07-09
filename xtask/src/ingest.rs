@@ -121,7 +121,7 @@ pub fn parse_run(jsonl: &str) -> Result<Vec<Measurement>, IngestError> {
     Ok(out)
 }
 
-/// Average N per-side captures (the interleaved A/B/A/B replicates) into one
+/// Average N per-side captures (the interleaved A/B/B/A replicates) into one
 /// measurement set: the point estimate is the arithmetic mean of the captures'
 /// points; the confidence interval is their envelope (min lower bound, max
 /// upper bound) — a deliberately conservative combined-uncertainty band. A
