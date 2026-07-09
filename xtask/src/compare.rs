@@ -126,6 +126,70 @@ fn group_convert(ms: &[Measurement]) -> BTreeMap<String, BTreeMap<String, (usize
     out
 }
 
+/// `(arity, op)` -> (store, shape) -> Interval for the trie family (no
+/// occupancy).
+type GroupedT = BTreeMap<(String, String), BTreeMap<(String, String), Interval>>;
+
+/// Group trie measurements by `(arity, op)`, then by `(store, shape)`.
+fn group_trie(ms: &[Measurement]) -> GroupedT {
+    let mut out: GroupedT = BTreeMap::new();
+    for m in ms {
+        if let BenchId::Trie {
+            arity,
+            op,
+            store,
+            shape,
+        } = &m.id
+        {
+            out.entry((arity.to_string(), op.clone()))
+                .or_default()
+                .insert((store.clone(), shape.clone()), Interval {
+                    point: m.nanos,
+                    lo: m.lo_nanos,
+                    hi: m.hi_nanos,
+                });
+        }
+    }
+    out
+}
+
+/// Render the trie delta tables — one per `(arity, op)`, rows = store × shape —
+/// reusing `delta_row`. Returns `(delta_count, noisy_count, markdown)`.
+fn trie_tables(base: &GroupedT, head: &GroupedT) -> (u32, u32, String) {
+    let mut s = String::new();
+    let mut total = 0u32;
+    let mut noisy = 0u32;
+
+    let mut groups: BTreeSet<(String, String)> = BTreeSet::new();
+    groups.extend(base.keys().cloned());
+    groups.extend(head.keys().cloned());
+
+    let empty = BTreeMap::new();
+    for (arity, op) in groups {
+        let _ = write!(s, "**Trie {arity} {op} (base vs head, median ns)**");
+        s.push_str("\n\n| store | shape | base | head | Δ% | |\n");
+        s.push_str("| :--- | :--- | ---: | ---: | ---: | :-- |\n");
+
+        let b_cells = base.get(&(arity.clone(), op.clone())).unwrap_or(&empty);
+        let h_cells = head.get(&(arity.clone(), op.clone())).unwrap_or(&empty);
+        let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
+        keys.extend(b_cells.keys().cloned());
+        keys.extend(h_cells.keys().cloned());
+        for (store, shape) in keys {
+            // `base_iv`/`head_iv`, not `bi`/`hi`, so the head interval never
+            // reads as the `Interval.hi` upper-bound field.
+            let base_iv = b_cells.get(&(store.clone(), shape.clone())).copied();
+            let head_iv = h_cells.get(&(store.clone(), shape.clone())).copied();
+            let (is_delta, is_noisy) =
+                delta_row(&mut s, &format!("`{store}`"), &shape, base_iv, head_iv);
+            total += u32::from(is_delta);
+            noisy += u32::from(is_noisy);
+        }
+        s.push('\n');
+    }
+    (total, noisy, s)
+}
+
 /// Render one `| left1 | left2 | base | head | Δ% | mark |` row into `s`,
 /// returning `(is_delta, is_noisy)`.
 fn delta_row(
@@ -289,6 +353,16 @@ pub fn render_compare(before: &[Measurement], after: &[Measurement]) -> String {
             noisy += u32::from(is_noisy);
         }
         s.push('\n');
+    }
+
+    // Trie tables (per arity x op).
+    let base_t = group_trie(before);
+    let head_t = group_trie(after);
+    if !base_t.is_empty() || !head_t.is_empty() {
+        let (t, n, body) = trie_tables(&base_t, &head_t);
+        s.push_str(&body);
+        total += t;
+        noisy += n;
     }
 
     let real = total - noisy;
@@ -470,5 +544,43 @@ mod tests {
         assert!(table.contains("`pack`"), "pack row present");
         assert!(table.contains("+50.0%"), "build delta");
         assert!(table.contains("+100.0%"), "convert delta");
+    }
+
+    #[test]
+    fn trie_family_appears() {
+        use crate::bench_id::BenchId;
+        use crate::bench_id::TrieArity;
+        let before = vec![Measurement::point(
+            BenchId::Trie {
+                arity: TrieArity::A16,
+                op: "clone".to_owned(),
+                store: "PackedStore".to_owned(),
+                shape: "Bushy".to_owned(),
+            },
+            10.0,
+        )];
+        let after = vec![Measurement::point(
+            BenchId::Trie {
+                arity: TrieArity::A16,
+                op: "clone".to_owned(),
+                store: "PackedStore".to_owned(),
+                shape: "Bushy".to_owned(),
+            },
+            20.0,
+        )];
+        let table = render_compare(&before, &after);
+        assert!(
+            table.contains("**Trie arity16 clone (base vs head, median ns)**"),
+            "trie section present"
+        );
+        assert!(
+            table.contains("| `PackedStore` | Bushy |"),
+            "store x shape row present"
+        );
+        assert!(table.contains("+100.0%"), "trie delta rendered");
+        assert!(
+            table.contains("1/1 deltas exceed"),
+            "trie delta counted in the family-spanning summary"
+        );
     }
 }
