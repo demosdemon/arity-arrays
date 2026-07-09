@@ -101,11 +101,12 @@ unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<I
     // SAFETY: `inner` is freshly allocated and sized for `Inner<A, T>`; writing
     // the bitmap initialises the header before any element.
     unsafe { (&raw mut (*inner.as_ptr()).bitmap).write(bitmap) };
+    // Forward guard (debug-only): all element access goes through `data_ptr`, so
+    // the block must cover `offset_of!(Inner, data) + count * size_of::<T>()`.
+    // `alloc_layout` already bounded `count * size_of::<T>()` by `isize::MAX` via
+    // `Layout::array`, so the product cannot overflow here.
     debug_assert!(
-        core::mem::offset_of!(Inner<A, T>, data)
-            + count
-                .checked_mul(core::mem::size_of::<T>())
-                .expect("element span overflow")
+        core::mem::offset_of!(Inner<A, T>, data) + count * core::mem::size_of::<T>()
             <= layout.size(),
         "data_ptr region must fit within the alloc_layout block",
     );
