@@ -1618,7 +1618,7 @@ mod tests {
                 ],
                 0..64,
             ),
-            boom_frac in 0.0f64..1.0,
+            boom_sel in any::<u8>(),
         ) {
             use std::sync::Arc;
             use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1662,16 +1662,9 @@ mod tests {
             // Isolate the clone-phase accounting (build did some drops via remove/overwrite).
             drops.store(0, Ordering::SeqCst);
             clones.store(0, Ordering::SeqCst);
-            // `count` is bounded by Arity16::N (<=16), so the f64 round-trip below
-            // never truncates, loses sign, or loses precision in practice; the casts
-            // are just how `boom_frac` (a [0,1) proptest fraction) maps to an index.
-            #[expect(
-                clippy::cast_precision_loss,
-                clippy::cast_sign_loss,
-                clippy::cast_possible_truncation,
-                reason = "count is tiny (<=16); this maps a [0,1) fraction to a bounded index"
-            )]
-            let boom = ((boom_frac * count as f64) as usize).min(count - 1);
+            // Map an arbitrary byte to a valid clone index in `0..count`; modulo
+            // makes it exercise both boom == 0 (panic-on-first) and boom == count-1.
+            let boom = (boom_sel as usize) % count;
             boom_at.store(boom, Ordering::SeqCst);
 
             // Clone panics on the (boom+1)-th element; GappedFillGuard must drop exactly
