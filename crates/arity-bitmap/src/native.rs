@@ -315,5 +315,19 @@ mod tests {
         assert_eq!(<u16 as Bitmap>::from_le_bytes(&buf), bm);
     }
 
+    #[test]
+    #[should_panic(expected = "does not match destination slice length")]
+    fn from_le_bytes_wrong_length_native_panics() {
+        // u16 wants BYTES == 2; a 3-byte buffer violates the documented contract.
+        let _ = <u16 as crate::Bitmap>::from_le_bytes(&[0u8; 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match destination slice length")]
+    fn to_le_bytes_wrong_length_native_panics() {
+        let mut out = [0u8; 1]; // too small for u16 (BYTES == 2)
+        crate::Bitmap::to_le_bytes(<u16 as crate::Bitmap>::ZERO, &mut out);
+    }
+
     extern crate alloc;
 }
