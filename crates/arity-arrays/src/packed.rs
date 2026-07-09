@@ -60,6 +60,14 @@ impl_size_witness!(PackedArray);
 /// # Safety
 /// `inner` must point to a live allocation from `alloc_layout::<Inner<A, T>,
 /// T>(count)` with the `bitmap` field initialised.
+///
+/// Note: the `data` field offset this returns can be strictly *less* than the
+/// element-array offset `alloc_layout` computes (which pads the header end up
+/// to `align_of::<T>()`; e.g. `Inner<Arity16, u8>` has field offset 5 vs layout
+/// offset 6). That is sound because every element access goes through this
+/// function (never the `alloc_layout` offset) and the block is sized to at
+/// least `offset_of!(Inner, data) + n * size_of::<T>()`. `alloc_block`
+/// `debug_assert!`s exactly that.
 unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
     // SAFETY: `inner` is valid per the precondition; `#[repr(C)]` places `data`
     // at the correct offset, so `&raw mut (*p).data` cast to `*mut T` is the
@@ -89,6 +97,14 @@ unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<I
     // SAFETY: `inner` is freshly allocated and sized for `Inner<A, T>`; writing
     // the bitmap initialises the header before any element.
     unsafe { (&raw mut (*inner.as_ptr()).bitmap).write(bitmap) };
+    debug_assert!(
+        core::mem::offset_of!(Inner<A, T>, data)
+            + count
+                .checked_mul(core::mem::size_of::<T>())
+                .expect("element span overflow")
+            <= layout.size(),
+        "data_ptr region must fit within the alloc_layout block",
+    );
     inner
 }
 
