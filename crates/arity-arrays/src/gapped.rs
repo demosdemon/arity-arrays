@@ -1305,6 +1305,8 @@ impl_logical_serde!(GappedArray, "GappedArray");
 #[cfg(test)]
 mod tests {
     extern crate std;
+    use proptest::prelude::*;
+
     use super::*;
     use crate::Arity16;
     use crate::Arity256;
@@ -1621,6 +1623,131 @@ mod tests {
         assert_eq!(drops.load(Ordering::SeqCst), 2); // the 2 cloned elements freed
         drop(g);
         assert_eq!(drops.load(Ordering::SeqCst), 6);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+        #[test]
+        fn clone_panic_frees_partial_irregular(
+            // Build an irregular layout, then panic partway through cloning it.
+            // Insert weighted heavy so `count >= 1` is the common case.
+            build in proptest::collection::vec(
+                prop_oneof![
+                    5 => (0u8..16, any::<u16>()).prop_map(|(s, v)| (0u8, s, v)),  // insert
+                    2 => (0u8..16).prop_map(|s| (1u8, s, 0u16)),                  // remove
+                    2 => (0u8..16).prop_map(|n| (2u8, n, 0u16)),                  // reserve n
+                    1 => Just((3u8, 0u8, 0u16)),                                  // shrink_to_fit
+                ],
+                0..64,
+            ),
+            boom_sel in any::<u8>(),
+        ) {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            struct Bomb {
+                drops: Arc<AtomicUsize>,
+                clones: Arc<AtomicUsize>,
+                boom_at: Arc<AtomicUsize>,
+            }
+            impl Clone for Bomb {
+                fn clone(&self) -> Self {
+                    // The n-th clone (0-indexed) whose index equals `boom_at` panics.
+                    let n = self.clones.fetch_add(1, Ordering::SeqCst);
+                    assert!(n != self.boom_at.load(Ordering::SeqCst), "boom");
+                    Self { drops: self.drops.clone(), clones: self.clones.clone(), boom_at: self.boom_at.clone() }
+                }
+            }
+            impl Drop for Bomb {
+                fn drop(&mut self) { self.drops.fetch_add(1, Ordering::SeqCst); }
+            }
+
+            let drops = Arc::new(AtomicUsize::new(0));
+            let clones = Arc::new(AtomicUsize::new(0));
+            let boom_at = Arc::new(AtomicUsize::new(usize::MAX)); // no panic during build
+
+            // Build an irregular `live` bitmap. Inserts/removes move Bombs (no clone);
+            // reserve/shrink relocate bitwise; reserve/insert/remove/shrink permutations
+            // produce holes (capacity > count) and non-spread layouts.
+            let mut g: GappedArray<Bomb, Arity16> = GappedArray::new();
+            for (tag, s, _v) in &build {
+                match tag {
+                    0 => { g.insert(U4::new_masked(*s), Bomb { drops: drops.clone(), clones: clones.clone(), boom_at: boom_at.clone() }); }
+                    1 => { g.remove(U4::new_masked(*s)); } // removed Bomb drops here
+                    2 => g.reserve(*s as usize),
+                    _ => g.shrink_to_fit(),
+                }
+            }
+            let count = g.count();
+            prop_assume!(count >= 1); // need >= 1 element to clone-panic
+
+            // Isolate the clone-phase accounting (build did some drops via remove/overwrite).
+            drops.store(0, Ordering::SeqCst);
+            clones.store(0, Ordering::SeqCst);
+            // Map an arbitrary byte to a valid clone index in `0..count`; modulo
+            // makes it exercise both boom == 0 (panic-on-first) and boom == count-1.
+            let boom = (boom_sel as usize) % count;
+            boom_at.store(boom, Ordering::SeqCst);
+
+            // Clone panics on the (boom+1)-th element; GappedFillGuard must drop exactly
+            // the `boom` already-cloned elements as the clone unwinds.
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { drop(g.clone()); }));
+            prop_assert!(r.is_err());
+            prop_assert_eq!(drops.load(Ordering::SeqCst), boom); // freed exactly the cloned ones, no leak/double-drop
+
+            // Dropping the original drops its `count` elements.
+            drop(g);
+            prop_assert_eq!(drops.load(Ordering::SeqCst), boom + count);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+        #[test]
+        fn clear_drops_all_over_irregular_layout(
+            build in proptest::collection::vec(
+                prop_oneof![
+                    5 => (0u8..16, any::<u16>()).prop_map(|(s, v)| (0u8, s, v)),
+                    2 => (0u8..16).prop_map(|s| (1u8, s, 0u16)),
+                    2 => (0u8..16).prop_map(|n| (2u8, n, 0u16)),
+                    1 => Just((3u8, 0u8, 0u16)),
+                ],
+                0..64,
+            ),
+        ) {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            struct Bomb(Arc<AtomicUsize>);
+            impl Drop for Bomb {
+                fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
+            }
+
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut g: GappedArray<Bomb, Arity16> = GappedArray::new();
+            for (tag, s, _v) in &build {
+                match tag {
+                    0 => { g.insert(U4::new_masked(*s), Bomb(drops.clone())); }
+                    1 => { g.remove(U4::new_masked(*s)); }   // returned Bomb drops here
+                    2 => g.reserve(*s as usize),
+                    _ => g.shrink_to_fit(),
+                }
+            }
+            let live = g.count();
+            let cap = g.capacity();
+            drops.store(0, Ordering::SeqCst); // count only clear()'s drops
+
+            g.clear();
+            // clear() drops exactly the live elements, once each (drop loop runs because
+            // Bomb: Drop), and retains the allocation.
+            prop_assert_eq!(drops.load(Ordering::SeqCst), live);
+            prop_assert!(g.is_empty());
+            prop_assert_eq!(g.capacity(), cap);
+
+            // Dropping the (now empty) array adds no further drops.
+            drop(g);
+            prop_assert_eq!(drops.load(Ordering::SeqCst), live);
+        }
     }
 
     #[test]
