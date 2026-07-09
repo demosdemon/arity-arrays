@@ -272,6 +272,10 @@ impl<T, A: Arity> GappedArray<T, A> {
     }
 
     /// Returns the logical-membership bitmap (`A::Bitmap::ZERO` when empty).
+    ///
+    /// `A::Bitmap` is the arity's backing integer; for
+    /// [`Arity256`](crate::Arity256) it is the `#[doc(hidden)]` `U256`,
+    /// which can be named as `<Arity256 as Arity>::Bitmap`.
     #[must_use]
     pub fn bitmap(&self) -> A::Bitmap {
         self.0.map_or(A::Bitmap::ZERO, |ptr| {

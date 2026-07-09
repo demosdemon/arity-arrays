@@ -47,8 +47,8 @@ memory_report`:
 | Feature | Default | Description |
 | :--- | :---: | :--- |
 | `8`, `16`, `32`, `64`, `128`, `256` | ✓ | Per-arity gating — compile only the `Arity{N}` markers you use. Forwards to the matching `arity-index`/`arity-bitmap` features. The hexary (firewood) shape is `default-features = false, features = ["16"]`. |
-| `serde` | | `Serialize`/`Deserialize` for `FixedArray` (a sequence of `LEN` elements) and `PackedArray` (a sequence of ascending `(index, value)` pairs, validated on decode). |
-| `serde_with` | | Adds the [`Compact`] adapter (`#[serde_as(as = "Compact")]`) — a compact, backing-independent `PackedArray` encoding (fixed little-endian bitmap + dense values). Implies `serde`. |
+| `serde` | | `Serialize`/`Deserialize` for `FixedArray` (a sequence of `LEN` elements) and for `PackedArray` and `GappedArray` (each a sequence of ascending `(index, value)` pairs, validated on decode). |
+| `serde_with` | | Adds the [`Compact`] adapter (`#[serde_as(as = "Compact")]`) — a compact, backing-independent encoding for `PackedArray` and `GappedArray` (fixed little-endian bitmap + dense values). Implies `serde`. |
 | `ethnum` | | Forwards to `arity-bitmap/ethnum` (the arity-256 backing swap). |
 | `std` | | Forwards `std` to the optional std-capable dependencies; the crate is `no_std` + `alloc`. |
 

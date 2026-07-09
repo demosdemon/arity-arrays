@@ -215,7 +215,12 @@ impl<T, A: Arity> FixedArray<Option<T>, A> {
         Self::from_fn(|_| None)
     }
 
-    /// Returns the number of `Some` slots.
+    /// Returns the number of `Some` slots (occupancy).
+    ///
+    /// This differs from the slice-inherited `len` (via `Deref<Target = [T]>`),
+    /// which is always `A::LEN` — the slot count, i.e. capacity — and from
+    /// `is_empty`, which is always `false` (`A::LEN` is never zero). `count`
+    /// reports how many slots are `Some`; `len` reports how many slots exist.
     #[must_use]
     pub fn count(&self) -> usize {
         self.iter().filter(|slot| slot.is_some()).count()
