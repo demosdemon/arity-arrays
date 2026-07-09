@@ -19,6 +19,9 @@ pub enum Op {
     Insert(u8, Vec<u8>),
     Remove(u8),
     GetMut(u8, Vec<u8>),
+    Reserve(u8),
+    ShrinkToFit,
+    Clear,
 }
 
 /// Map an arbitrary byte to a valid index for arity `A`. The mask is total for
@@ -37,6 +40,10 @@ trait ArrayOracle<A: Arity>: Clone + Default {
     fn get_mut(&mut self, i: A::Index) -> Option<&mut Vec<u8>>;
     fn get(&self, i: A::Index) -> Option<&Vec<u8>>;
     fn count(&self) -> usize;
+    // Capacity ops: Packed has no slack, so reserve/shrink are no-ops there.
+    fn reserve(&mut self, _n: usize) {}
+    fn shrink_to_fit(&mut self) {}
+    fn clear(&mut self);
 }
 
 impl<A: Arity> ArrayOracle<A> for PackedArray<Vec<u8>, A> {
@@ -55,6 +62,9 @@ impl<A: Arity> ArrayOracle<A> for PackedArray<Vec<u8>, A> {
     fn count(&self) -> usize {
         PackedArray::count(self)
     }
+    fn clear(&mut self) {
+        *self = PackedArray::new();
+    }
 }
 
 impl<A: Arity> ArrayOracle<A> for GappedArray<Vec<u8>, A> {
@@ -72,6 +82,15 @@ impl<A: Arity> ArrayOracle<A> for GappedArray<Vec<u8>, A> {
     }
     fn count(&self) -> usize {
         GappedArray::count(self)
+    }
+    fn reserve(&mut self, n: usize) {
+        GappedArray::reserve(self, n);
+    }
+    fn shrink_to_fit(&mut self) {
+        GappedArray::shrink_to_fit(self);
+    }
+    fn clear(&mut self) {
+        GappedArray::clear(self);
     }
 }
 
@@ -96,30 +115,51 @@ pub fn mutation_run<A: Arity, C: ArrayOracle<A>>(ops: Vec<Op>) {
     let mut oracle: BTreeMap<usize, Vec<u8>> = BTreeMap::new();
 
     for op in ops {
-        let i = match &op {
-            Op::Insert(slot, _) | Op::Remove(slot) | Op::GetMut(slot, _) => idx::<A>(*slot),
-        };
-        match op {
-            Op::Insert(_, val) => {
+        // `touched` is `Some` only for slot-carrying ops; capacity ops skip the
+        // per-slot check but still run the count check below.
+        let touched: Option<A::Index> = match op {
+            Op::Insert(slot, val) => {
+                let i = idx::<A>(slot);
                 let prev_a = arr.insert(i, val.clone());
                 let prev_o = oracle.insert(i.as_usize(), val);
                 assert_eq!(prev_a, prev_o);
+                Some(i)
             }
-            Op::Remove(_) => {
+            Op::Remove(slot) => {
+                let i = idx::<A>(slot);
                 assert_eq!(arr.remove(i), oracle.remove(&i.as_usize()));
+                Some(i)
             }
-            Op::GetMut(_, val) => {
+            Op::GetMut(slot, val) => {
+                let i = idx::<A>(slot);
                 if let Some(p) = arr.get_mut(i) {
                     *p = val.clone();
                 }
                 if let Some(o) = oracle.get_mut(&i.as_usize()) {
                     *o = val;
                 }
+                Some(i)
             }
-        }
-        // O(1) post-op check: count plus the single touched slot.
+            Op::Reserve(n) => {
+                arr.reserve(n as usize);
+                None
+            }
+            Op::ShrinkToFit => {
+                arr.shrink_to_fit();
+                None
+            }
+            Op::Clear => {
+                arr.clear();
+                oracle.clear();
+                None
+            }
+        };
+        // Count always; the touched slot for slot-carrying ops (unchanged density
+        // for Insert/Remove/GetMut).
         assert_eq!(arr.count(), oracle.len());
-        assert_eq!(arr.get(i), oracle.get(&i.as_usize()));
+        if let Some(i) = touched {
+            assert_eq!(arr.get(i), oracle.get(&i.as_usize()));
+        }
     }
 
     // End-of-run: clone equivalence + full-domain sweep. Both drop after, so
