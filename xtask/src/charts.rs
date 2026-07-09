@@ -115,6 +115,29 @@ fn group_convert(measurements: &[Measurement]) -> Grouped {
     out
 }
 
+/// Reduce trie measurements to `(arity, op)` -> shape -> store -> nanos, one
+/// `Grouped` per `(arity, op)` for a grouped-bar SVG whose x-axis is shape and
+/// whose bars are stores.
+fn group_trie(measurements: &[Measurement]) -> BTreeMap<(String, String), Grouped> {
+    let mut out: BTreeMap<(String, String), Grouped> = BTreeMap::new();
+    for m in measurements {
+        if let BenchId::Trie {
+            arity,
+            op,
+            store,
+            shape,
+        } = &m.id
+        {
+            out.entry((arity.to_string(), op.clone()))
+                .or_default()
+                .entry(shape.clone())
+                .or_default()
+                .insert(store.clone(), m.nanos);
+        }
+    }
+    out
+}
+
 /// Per-(cell, op, subject) `(before, after)` value pairs, unioned across both
 /// measurement sets. A pair present on only one side carries `None` for the
 /// other — the join never drops a one-sided bench id.
@@ -193,6 +216,16 @@ pub fn write_charts(
             "convert pack/unpack (ns, lower is better)",
             "ns",
             &convert,
+        )?;
+        written.push(path);
+    }
+    for ((arity, op), groups) in &group_trie(measurements) {
+        let path = out_dir.join(format!("trie-{arity}-{op}.svg"));
+        render_grouped(
+            &path,
+            &format!("trie {arity} {op} (ns, lower is better)"),
+            "ns",
+            groups,
         )?;
         written.push(path);
     }
@@ -493,5 +526,34 @@ mod tests {
         assert!(names.iter().any(|n| n == "convert.svg"), "convert svg");
         let workload = std::fs::read_to_string(dir.join("cell_a-workload.svg")).unwrap();
         assert!(workload.contains("GappedArray"), "workload subject present");
+    }
+
+    #[test]
+    fn writes_trie_charts() {
+        use crate::bench_id::BenchId;
+        use crate::bench_id::TrieArity;
+        let ms = vec![Measurement::point(
+            BenchId::Trie {
+                arity: TrieArity::A16,
+                op: "clone".to_owned(),
+                store: "PackedStore".to_owned(),
+                shape: "Bushy".to_owned(),
+            },
+            12.5,
+        )];
+        let dir = std::env::temp_dir().join("xtask-charts-trie-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let written = write_charts(&ms, &dir).expect("charts");
+        let names: Vec<String> = written
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "trie-arity16-clone.svg"),
+            "trie svg written"
+        );
+        let svg = std::fs::read_to_string(dir.join("trie-arity16-clone.svg")).unwrap();
+        assert!(svg.contains("<svg"), "output is an SVG document");
+        assert!(svg.contains("PackedStore"), "store label present");
     }
 }
