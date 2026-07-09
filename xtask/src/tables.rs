@@ -155,24 +155,24 @@ mod tests {
         use crate::bench_id::BenchId;
         use crate::bench_id::Cell;
         let ms = vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 1.1,
-            },
-            Measurement {
-                id: BenchId::Single {
+                1.1,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::B,
                     op: "get_hit".to_owned(),
                     subject: "HashMap".to_owned(),
                     occupancy: 256,
                 },
-                nanos: 7.3,
-            },
+                7.3,
+            ),
         ];
         let table = comparison_table(&ms);
         // Both cells' data must survive into the single generated block.

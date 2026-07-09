@@ -52,15 +52,15 @@ mod tests {
     use crate::bench_id::BenchId;
 
     fn measurement(cell: Cell, op: &str, subject: &str, nanos: f64) -> Measurement {
-        Measurement {
-            id: BenchId::Single {
+        Measurement::point(
+            BenchId::Single {
                 cell,
                 op: op.to_owned(),
                 subject: subject.to_owned(),
                 occupancy: 16,
             },
             nanos,
-        }
+        )
     }
 
     #[test]

@@ -286,24 +286,24 @@ mod tests {
 
     fn sample() -> Vec<Measurement> {
         vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 1.1,
-            },
-            Measurement {
-                id: BenchId::Single {
+                1.1,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "FixedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 0.7,
-            },
+                0.7,
+            ),
         ]
     }
 
@@ -338,44 +338,44 @@ mod tests {
     #[test]
     fn join_single_ops_unions_both_sides() {
         let before = vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 1.1,
-            },
-            Measurement {
-                id: BenchId::Single {
+                1.1,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "Removed".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 9.9,
-            },
+                9.9,
+            ),
         ];
         let after = vec![
-            Measurement {
-                id: BenchId::Single {
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "PackedArray".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 2.2,
-            },
-            Measurement {
-                id: BenchId::Single {
+                2.2,
+            ),
+            Measurement::point(
+                BenchId::Single {
                     cell: Cell::A,
                     op: "get_hit".to_owned(),
                     subject: "New".to_owned(),
                     occupancy: 16,
                 },
-                nanos: 3.3,
-            },
+                3.3,
+            ),
         ];
         let joined = join_single_ops(&before, &after);
         let ops = &joined[&Cell::A]["get_hit"];
