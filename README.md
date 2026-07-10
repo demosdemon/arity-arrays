@@ -134,9 +134,9 @@ In dependency order:
 
 | Crate | Purpose |
 | :--- | :--- |
-| [`arity-index`](crates/arity-index) | Bounds-check-free niche integer index types (`U3`–`U7`, and `u8` for arity-256) with double-ended range iterators. No `alloc`. |
-| [`arity-bitmap`](crates/arity-bitmap) | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by the niche integers, with a double-ended set-bit iterator. **No `unsafe` code.** No `alloc`. |
-| [`arity-arrays`](crates/arity-arrays) | `FixedArray`, `PackedArray`, and `GappedArray` over the sealed `Arity` trait. The only crate that needs `alloc`, and the only one with `unsafe`. |
+| [`arity-index`](crates/arity-index) | Bounds-check-free niche integer index types (`U3`–`U7`, and `u8` for arity-256) with double-ended range iterators. A small, contained `unsafe` surface (niche constructors and range-iterator internals). No `alloc`. |
+| [`arity-bitmap`](crates/arity-bitmap) | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by the niche integers, with a double-ended set-bit iterator. **No `unsafe` code** (enforced by `#![forbid(unsafe_code)]`). No `alloc`. |
+| [`arity-arrays`](crates/arity-arrays) | `FixedArray`, `PackedArray`, and `GappedArray` over the sealed `Arity` trait. The only crate that needs `alloc`; carries `unsafe` for the packed heap layout — as does `arity-index`, for its niche/range internals. Only `arity-bitmap` is `unsafe`-free. |
 
 Splitting this way keeps the primitive types reusable and lets their tests run
 without touching the allocator. `arity-bitmap` depends on `arity-index` so the

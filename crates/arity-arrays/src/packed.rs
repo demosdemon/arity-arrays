@@ -31,6 +31,10 @@ struct Inner<A: Arity, T> {
 /// the present elements. The `NonNull` null-pointer niche makes this type the
 /// size of a pointer for every `A`.
 ///
+/// `Ord` and `PartialOrd` are intentionally **not** implemented: like
+/// [`GappedArray`](crate::GappedArray), a sparse occupancy map has no canonical
+/// total order, and adding them later is non-breaking.
+///
 /// # Safety
 ///
 /// Invariant upheld by every constructor and mutator: when `self.0` is
@@ -152,6 +156,10 @@ impl<T, A: Arity> PackedArray<T, A> {
     }
 
     /// Returns the bitmap of present slots (`A::Bitmap::ZERO` when empty).
+    ///
+    /// `A::Bitmap` is the arity's backing integer; for
+    /// [`Arity256`](crate::Arity256) it is the `#[doc(hidden)]` `U256`,
+    /// which can be named as `<Arity256 as Arity>::Bitmap`.
     #[must_use]
     pub const fn bitmap(&self) -> A::Bitmap {
         match self.0 {

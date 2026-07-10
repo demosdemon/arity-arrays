@@ -158,3 +158,8 @@ pub trait Bitmap: Copy + Eq + Raw {
         BitIter::new(self)
     }
 }
+
+/// The crate README's usage example, compiled as a doctest so it cannot rot.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
