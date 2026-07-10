@@ -33,6 +33,7 @@ mod custom {
     impl U256 {
         /// Splits a bit index `i` (`< 256`) into `(limb_is_hi,
         /// bit_within_limb)`.
+        #[inline]
         const fn split(i: u8) -> (bool, u32) {
             if i < 128 {
                 (false, i as u32)
@@ -43,6 +44,7 @@ mod custom {
 
         /// Builds a `U256` from its two little-endian 128-bit limbs. Internal
         /// helper for the byte surface; not part of the public API.
+        #[inline]
         pub(crate) const fn from_limbs(lo: u128, hi: u128) -> Self {
             Self { lo, hi }
         }
@@ -50,6 +52,7 @@ mod custom {
 
     /// Position (`< 128`) of the `n`-th set bit of a `u128` limb. Precondition:
     /// `n < limb.count_ones()`. Popcount-guided binary search, `O(log 128)`.
+    #[inline]
     const fn select_in_u128(limb: u128, n: u32) -> usize {
         let mut n = n;
         let mut x = limb;
@@ -72,12 +75,15 @@ mod custom {
     impl Sealed for U256 {}
 
     impl Raw for U256 {
+        #[inline]
         fn raw_is_zero(self) -> bool {
             self.lo == 0 && self.hi == 0
         }
+        #[inline]
         fn raw_popcount(self) -> u32 {
             self.lo.count_ones() + self.hi.count_ones()
         }
+        #[inline]
         fn raw_lowest_pos(self) -> usize {
             if self.lo != 0 {
                 self.lo.trailing_zeros() as usize
@@ -85,6 +91,7 @@ mod custom {
                 128 + self.hi.trailing_zeros() as usize
             }
         }
+        #[inline]
         fn raw_highest_pos(self) -> usize {
             if self.hi != 0 {
                 128 + self.hi.ilog2() as usize
@@ -92,6 +99,7 @@ mod custom {
                 self.lo.ilog2() as usize
             }
         }
+        #[inline]
         fn raw_clear_lowest(self) -> Self {
             if self.lo != 0 {
                 Self {
@@ -105,6 +113,7 @@ mod custom {
                 }
             }
         }
+        #[inline]
         fn raw_clear_highest(self) -> Self {
             if self.hi != 0 {
                 Self {
@@ -120,6 +129,7 @@ mod custom {
                 self
             }
         }
+        #[inline]
         fn raw_select(self, n: u32) -> Option<usize> {
             let lo_pop = self.lo.count_ones();
             if n < lo_pop {
@@ -140,17 +150,21 @@ mod custom {
         const WIDTH: usize = 256;
         const ZERO: Self = Self { lo: 0, hi: 0 };
 
+        #[inline]
         fn is_zero(self) -> bool {
             self.lo == 0 && self.hi == 0
         }
+        #[inline]
         fn count_ones(self) -> u32 {
             self.lo.count_ones() + self.hi.count_ones()
         }
+        #[inline]
         fn test(self, i: u8) -> bool {
             let (is_hi, bit) = Self::split(i);
             let limb = if is_hi { self.hi } else { self.lo };
             limb & (1u128 << bit) != 0
         }
+        #[inline]
         fn with_bit(self, i: u8) -> Self {
             let (is_hi, bit) = Self::split(i);
             if is_hi {
@@ -165,6 +179,7 @@ mod custom {
                 }
             }
         }
+        #[inline]
         fn rank(self, i: u8) -> u32 {
             let (is_hi, bit) = Self::split(i);
             if is_hi {
@@ -175,6 +190,7 @@ mod custom {
                 (self.lo & lo_mask).count_ones()
             }
         }
+        #[inline]
         fn without_bit(self, i: u8) -> Self {
             let (is_hi, bit) = Self::split(i);
             if is_hi {
@@ -189,11 +205,13 @@ mod custom {
                 }
             }
         }
+        #[inline]
         fn to_le_bytes(self, buf: &mut [u8]) {
             assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             buf[..16].copy_from_slice(&self.lo.to_le_bytes());
             buf[16..].copy_from_slice(&self.hi.to_le_bytes());
         }
+        #[inline]
         fn from_le_bytes(buf: &[u8]) -> Self {
             // Guard the length before the `buf[..16]`/`buf[16..]` slicing below,
             // which would otherwise panic with a slice-range message for a buffer
@@ -227,21 +245,26 @@ mod ethnum_backed {
     impl Sealed for U256 {}
 
     impl Raw for U256 {
+        #[inline]
         fn raw_is_zero(self) -> bool {
             self == ZERO
         }
+        #[inline]
         fn raw_popcount(self) -> u32 {
             // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
             // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
             // or the trait path here would recurse.
             Self::count_ones(self)
         }
+        #[inline]
         fn raw_lowest_pos(self) -> usize {
             self.trailing_zeros() as usize
         }
+        #[inline]
         fn raw_highest_pos(self) -> usize {
             255 - self.leading_zeros() as usize
         }
+        #[inline]
         fn raw_clear_lowest(self) -> Self {
             if self == ZERO {
                 self
@@ -249,6 +272,7 @@ mod ethnum_backed {
                 self & (self - ONE)
             }
         }
+        #[inline]
         fn raw_clear_highest(self) -> Self {
             if self == ZERO {
                 self
@@ -256,6 +280,7 @@ mod ethnum_backed {
                 self & !(ONE << (255 - self.leading_zeros()))
             }
         }
+        #[inline]
         fn raw_select(self, n: u32) -> Option<usize> {
             // `Self::count_ones` binds to ethnum's inherent method.
             if n >= Self::count_ones(self) {
@@ -288,21 +313,26 @@ mod ethnum_backed {
         const WIDTH: usize = 256;
         const ZERO: Self = ZERO;
 
+        #[inline]
         fn is_zero(self) -> bool {
             self == ZERO
         }
+        #[inline]
         fn count_ones(self) -> u32 {
             // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
             // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
             // or the trait path here would recurse.
             Self::count_ones(self)
         }
+        #[inline]
         fn test(self, i: u8) -> bool {
             (self >> u32::from(i)) & ONE != ZERO
         }
+        #[inline]
         fn with_bit(self, i: u8) -> Self {
             self | (ONE << u32::from(i))
         }
+        #[inline]
         fn rank(self, i: u8) -> u32 {
             if i == 0 {
                 0
@@ -313,13 +343,16 @@ mod ethnum_backed {
                 Self::count_ones(self & ((ONE << u32::from(i)) - ONE))
             }
         }
+        #[inline]
         fn without_bit(self, i: u8) -> Self {
             self & !(ONE << u32::from(i))
         }
+        #[inline]
         fn to_le_bytes(self, buf: &mut [u8]) {
             assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             buf.copy_from_slice(&Self::to_le_bytes(self));
         }
+        #[inline]
         fn from_le_bytes(buf: &[u8]) -> Self {
             assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
             let mut arr = [0u8; 32];

@@ -44,7 +44,20 @@ impl<T, A: Arity> FixedArray<T, A> {
     #[must_use]
     pub fn get(&self, index: A::Index) -> &T {
         // SAFETY: `A::Index::as_usize()` is always `< Index::COUNT == A::LEN`,
-        // which equals the array length, so `index` is in bounds.
+        // which equals the array length, so `index` is in bounds. On this
+        // machine's toolchain (rustc 1.98.0-nightly (f46ec5218 2026-06-30),
+        // aarch64-apple-darwin) `cargo asm` on a release build shows the safe
+        // form `&self.0.as_slice()[index.as_usize()]` compiles identically to
+        // `get_unchecked` — a bare `add`/`ret`, no bounds-check branch, no
+        // `panic_bounds_check` call — because the optimizer here propagates
+        // the niche index's value-range metadata through `as_usize()` to the
+        // index site. That elision is an optimizer behavior, not a language
+        // guarantee: whether LLVM proves the bound depends on the rustc/LLVM
+        // version, opt-level, and target, and this machine's toolchain is not
+        // representative of every MSRV-1.92-compatible configuration this
+        // crate supports. `get_unchecked` is retained so the branch-free
+        // access holds unconditionally instead of depending on the optimizer
+        // reproducing this elision everywhere.
         unsafe { self.0.as_slice().get_unchecked(index.as_usize()) }
     }
 
@@ -55,6 +68,12 @@ impl<T, A: Arity> FixedArray<T, A> {
     #[must_use]
     pub fn get_mut(&mut self, index: A::Index) -> &mut T {
         // SAFETY: as in `get` — `index.as_usize() < A::LEN == array length`.
+        // By the same reasoning as `get` (above): the safe form compiles
+        // identically for the same reason `get`'s does (`get_mut` was not
+        // probed separately), and that elision is an optimizer behavior, not a
+        // guarantee across the MSRV/opt-levels/targets this crate supports,
+        // so `get_unchecked_mut` is retained to guarantee the branch-free
+        // access unconditionally, as in `get`.
         unsafe { self.0.as_mut_slice().get_unchecked_mut(index.as_usize()) }
     }
 

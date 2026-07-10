@@ -16,6 +16,7 @@ pub struct BitIter<B: Bitmap> {
 }
 
 impl<B: Bitmap> BitIter<B> {
+    #[inline]
     pub(crate) const fn new(remaining: B) -> Self {
         Self { remaining }
     }
@@ -24,6 +25,7 @@ impl<B: Bitmap> BitIter<B> {
 impl<B: Bitmap> Iterator for BitIter<B> {
     type Item = <B as Bitmap>::Index;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining.raw_is_zero() {
             return None;
@@ -34,6 +36,7 @@ impl<B: Bitmap> Iterator for BitIter<B> {
         Some(<B as Bitmap>::Index::try_from_usize(pos).expect("set-bit position < WIDTH"))
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let n = self.remaining.raw_popcount() as usize;
         (n, Some(n))
@@ -41,6 +44,7 @@ impl<B: Bitmap> Iterator for BitIter<B> {
 }
 
 impl<B: Bitmap> DoubleEndedIterator for BitIter<B> {
+    #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.remaining.raw_is_zero() {
             return None;
@@ -52,6 +56,7 @@ impl<B: Bitmap> DoubleEndedIterator for BitIter<B> {
 }
 
 impl<B: Bitmap> ExactSizeIterator for BitIter<B> {
+    #[inline]
     fn len(&self) -> usize {
         self.remaining.raw_popcount() as usize
     }
