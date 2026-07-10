@@ -68,9 +68,9 @@ impl<T, A: Arity> FixedArray<T, A> {
     #[must_use]
     pub fn get_mut(&mut self, index: A::Index) -> &mut T {
         // SAFETY: as in `get` — `index.as_usize() < A::LEN == array length`.
-        // Same measured evidence as `get` (above): on this toolchain the safe
-        // form is byte-identical to `get_unchecked_mut`, but that elision is
-        // an optimizer behavior specific to this machine's toolchain, not a
+        // By the same reasoning as `get` (above): the safe form compiles
+        // identically for the same reason `get`'s does (`get_mut` was not
+        // probed separately), and that elision is an optimizer behavior, not a
         // guarantee across the MSRV/opt-levels/targets this crate supports,
         // so `get_unchecked_mut` is retained to guarantee the branch-free
         // access unconditionally, as in `get`.
