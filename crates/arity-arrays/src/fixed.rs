@@ -52,9 +52,9 @@ impl<T, A: Arity> FixedArray<T, A> {
         // `panic_bounds_check` call — because the optimizer here propagates
         // the niche index's value-range metadata through `as_usize()` to the
         // index site. That elision is an optimizer behavior, not a language
-        // guarantee: this toolchain's MIR inliner is unusually aggressive
-        // (see the crate's `#[inline]` rationale) and is not representative
-        // of every MSRV-1.92-compatible rustc/LLVM/opt-level/target this
+        // guarantee: whether LLVM proves the bound depends on the rustc/LLVM
+        // version, opt-level, and target, and this machine's toolchain is not
+        // representative of every MSRV-1.92-compatible configuration this
         // crate supports. `get_unchecked` is retained so the branch-free
         // access holds unconditionally instead of depending on the optimizer
         // reproducing this elision everywhere.
@@ -72,7 +72,8 @@ impl<T, A: Arity> FixedArray<T, A> {
         // form is byte-identical to `get_unchecked_mut`, but that elision is
         // an optimizer behavior specific to this machine's toolchain, not a
         // guarantee across the MSRV/opt-levels/targets this crate supports,
-        // so `get_unchecked_mut` is retained to guarantee it.
+        // so `get_unchecked_mut` is retained to guarantee the branch-free
+        // access unconditionally, as in `get`.
         unsafe { self.0.as_mut_slice().get_unchecked_mut(index.as_usize()) }
     }
 
