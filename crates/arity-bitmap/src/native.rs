@@ -62,26 +62,32 @@ macro_rules! impl_native_bitmap {
         impl Sealed for $ty {}
 
         impl Raw for $ty {
+            #[inline(always)]
             fn raw_is_zero(self) -> bool {
                 self == 0
             }
 
+            #[inline(always)]
             fn raw_popcount(self) -> u32 {
                 self.count_ones()
             }
 
+            #[inline(always)]
             fn raw_lowest_pos(self) -> usize {
                 self.trailing_zeros() as usize
             }
 
+            #[inline]
             fn raw_highest_pos(self) -> usize {
                 self.ilog2() as usize
             }
 
+            #[inline]
             fn raw_clear_lowest(self) -> Self {
                 self & self.wrapping_sub(1)
             }
 
+            #[inline]
             fn raw_clear_highest(self) -> Self {
                 if self == 0 {
                     0
@@ -90,6 +96,7 @@ macro_rules! impl_native_bitmap {
                 }
             }
 
+            #[inline]
             fn raw_select(self, n: u32) -> Option<usize> {
                 if n >= self.raw_popcount() {
                     return None;
@@ -123,37 +130,45 @@ macro_rules! impl_native_bitmap {
             const WIDTH: usize = $width;
             const ZERO: Self = 0;
 
+            #[inline(always)]
             fn is_zero(self) -> bool {
                 self == 0
             }
 
+            #[inline(always)]
             fn count_ones(self) -> u32 {
                 <$ty>::count_ones(self)
             }
 
+            #[inline]
             fn test(self, i: $idx) -> bool {
                 self & (1 << i.as_usize()) != 0
             }
 
+            #[inline]
             fn with_bit(self, i: $idx) -> Self {
                 self | (1 << i.as_usize())
             }
 
+            #[inline]
             fn rank(self, i: $idx) -> u32 {
                 let below = (1 << i.as_usize()) - 1;
                 (self & below).count_ones()
             }
 
+            #[inline]
             fn without_bit(self, i: $idx) -> Self {
                 self & !(1 << i.as_usize())
             }
 
+            #[inline]
             fn to_le_bytes(self, buf: &mut [u8]) {
                 assert_eq!(buf.len(), Self::BYTES, "{}", $crate::BYTE_LEN_PANIC_MSG);
                 // Inherent primitive method (1 arg) — unambiguous with the trait's.
                 buf.copy_from_slice(&<$ty>::to_le_bytes(self));
             }
 
+            #[inline]
             fn from_le_bytes(buf: &[u8]) -> Self {
                 assert_eq!(buf.len(), Self::BYTES, "{}", $crate::BYTE_LEN_PANIC_MSG);
                 let mut arr = [0u8; $width / 8];
