@@ -1,0 +1,35 @@
+---
+source: xtask/tests/render_snapshots.rs
+expression: "xtask::tables::comparison_table(&run)"
+---
+**Cell A (Arity16) single-op (median ns)**
+
+| op | occ | PackedArray |
+| :--- | ---: | ---: |
+| `get_hit` | 4 | 1.10 |
+
+**Cell A (Arity16) workload (median ns)**
+
+| op |
+| :--- |
+
+**Cell B (Arity256) single-op (median ns)**
+
+| op | occ |
+| :--- | ---: |
+
+**Cell B (Arity256) workload (median ns)**
+
+| op |
+| :--- |
+
+**Conversion (median ns, max occupancy)**
+
+| op | cell_a | cell_b |
+| :--- | ---: | ---: |
+
+**Trie arity16 clone (median ns)**
+
+| store | Bushy |
+| :--- | ---: |
+| `PackedStore` | 250.00 |

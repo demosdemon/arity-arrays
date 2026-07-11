@@ -1,5 +1,5 @@
 {
-  "rust-analyzer.cargo.features": [],
+  "rust-analyzer.cargo.features": ["ec2-bench"],
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.check.overrideCommand": [
     "cargo",
@@ -8,6 +8,6 @@
     "--all-targets",
     "--keep-going",
     "--message-format=json-diagnostic-rendered-ansi",
-    // "--features=",
+    "--features=ec2-bench",
   ],
 }

@@ -1,0 +1,5 @@
+# See https://doc.rust-lang.org/clippy/lint_configuration.html
+# for full configuration options.
+
+allow-unwrap-in-tests = true
+allow-indexing-slicing-in-tests = true

@@ -23,12 +23,12 @@ impl fmt::Display for Cell {
 }
 
 impl FromStr for Cell {
-    type Err = BenchIdParseError;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "cell_a" => Ok(Self::A),
             "cell_b" => Ok(Self::B),
-            other => Err(BenchIdParseError(format!("unknown cell {other:?}"))),
+            other => anyhow::bail!("malformed benchmark id: unknown cell {other:?}"),
         }
     }
 }
@@ -50,12 +50,12 @@ impl fmt::Display for TrieArity {
 }
 
 impl FromStr for TrieArity {
-    type Err = BenchIdParseError;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "arity16" => Ok(Self::A16),
             "arity256" => Ok(Self::A256),
-            other => Err(BenchIdParseError(format!("unknown arity {other:?}"))),
+            other => anyhow::bail!("malformed benchmark id: unknown arity {other:?}"),
         }
     }
 }
@@ -94,25 +94,13 @@ pub enum BenchId {
 /// Throughput ops that carry no occupancy segment.
 const WORKLOAD_OPS: &[&str] = &["build", "churn"];
 
-/// Error from parsing a benchmark id path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BenchIdParseError(pub String);
-
-impl fmt::Display for BenchIdParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "malformed benchmark id: {}", self.0)
-    }
-}
-
-impl std::error::Error for BenchIdParseError {}
-
-fn occ(s: &str) -> Result<usize, BenchIdParseError> {
+fn occ(s: &str) -> anyhow::Result<usize> {
     s.parse::<usize>()
-        .map_err(|_| BenchIdParseError(format!("occupancy {s:?} is not a number")))
+        .map_err(|_| anyhow::anyhow!("malformed benchmark id: occupancy {s:?} is not a number"))
 }
 
 impl FromStr for BenchId {
-    type Err = BenchIdParseError;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('/').collect();
@@ -141,7 +129,7 @@ impl FromStr for BenchId {
                     occupancy: occ(occupancy)?,
                 })
             }
-            _ => Err(BenchIdParseError(format!("unrecognized id path {s:?}"))),
+            _ => anyhow::bail!("malformed benchmark id: unrecognized id path {s:?}"),
         }
     }
 }

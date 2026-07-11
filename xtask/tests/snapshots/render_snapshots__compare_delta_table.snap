@@ -1,0 +1,17 @@
+---
+source: xtask/tests/render_snapshots.rs
+expression: "xtask::delta::render_compare(&avg, &avg)"
+---
+**Cell A (Arity16) single-op (base vs head, median ns)**
+
+| op | subject | base | head | Δ% | |
+| :--- | :--- | ---: | ---: | ---: | :-- |
+| `get_hit` | PackedArray | 1.10 | 1.10 | +0.0% | ~ |
+
+**Trie arity16 clone (base vs head, median ns)**
+
+| store | shape | base | head | Δ% | |
+| :--- | :--- | ---: | ---: | ---: | :-- |
+| `PackedStore` | Bushy | 250.00 | 250.00 | +0.0% | ~ |
+
+_0/2 deltas exceed run-to-run noise (non-overlapping confidence intervals); `~` marks deltas within noise._

@@ -83,6 +83,23 @@ jobs:
           tool: just,cargo-hack
       - run: just features
 
+  ec2-bench-feature:
+    # Compiles and unit-tests the off-by-default ec2-bench feature in isolation.
+    # Hermetic: NO AWS credentials and no network to AWS — the tests never call
+    # AWS. Real end-to-end launches are manual/local only.
+    name: ec2-bench feature (clippy/build/test/doc)
+    needs: [nostd, docs]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+      - run: just ec2-bench-check
+
   test:
     name: test ${{ matrix.os }} / ${{ matrix.toolchain }}
     needs: [features]

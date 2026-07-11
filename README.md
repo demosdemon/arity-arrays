@@ -80,6 +80,8 @@ workflow's `workflow_dispatch` inputs trigger an ad-hoc comparison between any t
 None of these commit anything — see `.github/workflows/bench-compare.yml`. Compare two
 local captures the same way with `just bench-compare <run> <baseline>`.
 
+See [xtask/README.md](xtask/README.md) for the EC2 benchmark runner (`xtask ec2-bench`).
+
 Current state, medians on an Apple M3 Max (MacBook Pro), the array layouts vs
 the standard maps (`usize` keys) at Arity256, full occupancy:
 

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
+use std::fmt::Write;
 
 use crate::bench_id::BenchId;
 use crate::bench_id::Cell;

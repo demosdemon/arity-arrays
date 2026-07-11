@@ -27,26 +27,40 @@ fmt-check:
 # Workspace lints promote pedantic/nursery to warnings and deny undocumented unsafe.
 # Lint with Clippy over every target and feature.
 lint:
-    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --exclude xtask --all-targets --all-features -- -D warnings
+    cargo clippy -p xtask --all-targets -- -D warnings
 
+# Scoping to a package tests it with --all-features, so `just test xtask` compiles
+# xtask's ec2-bench feature and the full AWS SDK tree; the unscoped default excludes
+# xtask from the --all-features pass and runs it feature-free, keeping AWS out of
+# the common lane.
 # Run tests (default: whole workspace; pass a package to scope, e.g. `just test arity-bitmap`).
 test pkg='':
-    cargo test {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }} --all-features
+    cargo test {{ if pkg == '' { '--workspace --exclude xtask' } else { '--package ' + pkg } }} --all-features
+    {{ if pkg == '' { 'cargo test -p xtask' } else { '' } }}
 
 # nextest runs unit + integration + (in test mode) bench targets via --all-targets;
 # doctests run separately via `cargo test --doc` because nextest cannot execute
-# them. The default-features pass mirrors CI's fast shipping-default check. The
-# msrv lane drops xtask, which needs a newer Rust than the workspace MSRV.
+# them. xtask has no doctest line of its own: it is a binary crate with no `[lib]`
+# target, so `cargo test --doc` finds nothing to run there. The default-features
+# pass mirrors CI's fast shipping-default check. The msrv lane drops xtask, which
+# needs a newer Rust than the workspace MSRV.
 # Run the workspace test suite exactly as CI does, for a given toolchain lane.
 ci-test toolchain='stable':
-    cargo nextest run --workspace{{ if toolchain == 'msrv' { ' --exclude xtask' } else { '' } }} --all-features --all-targets
-    cargo test --workspace{{ if toolchain == 'msrv' { ' --exclude xtask' } else { '' } }} --all-features --doc
-    cargo nextest run --workspace{{ if toolchain == 'msrv' { ' --exclude xtask' } else { '' } }}
+    cargo nextest run --workspace --exclude xtask --all-features --all-targets
+    cargo test --workspace --exclude xtask --all-features --doc
+    cargo nextest run --workspace --exclude xtask
+    {{ if toolchain == 'msrv' { '' } else { 'cargo nextest run -p xtask --all-targets' } }}
 
-# --all-features documents every feature-gated item and matches CI.
+# --all-features documents every feature-gated item and matches CI. Scoping to a
+# package therefore compiles that package's every feature: `just doc xtask` builds
+# xtask's ec2-bench feature and the full AWS SDK tree, whereas the unscoped default
+# excludes xtask from the --all-features pass and documents it feature-free,
+# keeping AWS out of the common lane.
 # Build docs with warnings denied (default: whole workspace; pass a package to scope).
 doc pkg='':
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features {{ if pkg == '' { '--workspace --exclude xtask' } else { '--package ' + pkg } }}
+    {{ if pkg == '' { 'RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p xtask' } else { '' } }}
 
 # Locks the #![no_std] discipline: if any selected feature transitively pulls std,
 # the build fails (no std in the sysroot). Requires the target first:
@@ -85,7 +99,7 @@ features:
 # Mirrors the CI jobs that gate a PR, minus `nostd` — its cross-compile target may
 # not be installed locally (`rustup target add thumbv7em-none-eabihf && just nostd`).
 # Run the fast checks (everything except the slow Miri pass).
-ci: fmt-check lint features ci-test doc
+ci: fmt-check lint features ci-test doc ec2-bench-check
 
 # Run a fuzz target on the host (omit the CI-only gnu target pin). Default 60s.
 fuzz target time="60":
@@ -108,6 +122,17 @@ fuzz-linux target time="60":
       -v arity-arrays-fuzz-registry:/usr/local/cargo/registry \
       -w /src/fuzz arity-arrays-fuzz \
       cargo fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
+
+# Hermetic: uses no AWS credentials or network. Mirrors the CI ec2-bench-feature
+# job. This is the canonical check for the off-by-default ec2-bench feature and the
+# only place CI compiles it automatically. A manual `just test xtask` or `just doc
+# xtask` also compiles it, because explicitly scoping to xtask enables all of its
+# features.
+# Clippy/test/doc the ec2-bench feature (AWS EC2 bench runner).
+ec2-bench-check:
+    cargo clippy -p xtask --features ec2-bench --all-targets -- -D warnings
+    cargo nextest run -p xtask --features ec2-bench
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p xtask --features ec2-bench
 
 # Pass criterion args after `--`, e.g. `just bench -- --sample-size 50`.
 # Run both criterion benches via cargo-criterion.

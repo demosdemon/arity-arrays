@@ -7,7 +7,7 @@
 //! overhead, not an analytic function of occupancy.
 #![cfg(not(miri))]
 
-use core::fmt::Write as _;
+use core::fmt::Write;
 use core::mem::size_of;
 
 use arity_arrays::Arity;

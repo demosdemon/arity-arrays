@@ -1,6 +1,7 @@
 //! Parse cargo-criterion's newline-delimited JSON (`--message-format=json`)
 //! into normalized nanosecond measurements keyed by a typed `BenchId`.
 
+use anyhow::Context;
 use serde::Deserialize;
 
 use crate::bench_id::BenchId;
@@ -21,12 +22,6 @@ pub struct Measurement {
 impl Measurement {
     /// A point measurement with a zero-width confidence interval (bounds equal
     /// the point). For tests and any consumer that needs only the point.
-    // `#[must_use]` + `const` are mandatory, not optional: the workspace
-    // promotes clippy pedantic/nursery to warnings and `just ci` runs
-    // `clippy --all-targets -D warnings`, so a plain `pub fn` here trips
-    // `must_use_candidate` and `missing_const_for_fn` and fails the gate.
-    // (Moving the `String`-bearing `BenchId` into the return is valid in a
-    // `const fn` — nothing is dropped in the body.)
     #[cfg(test)]
     #[must_use]
     pub const fn point(id: BenchId, nanos: f64) -> Self {
@@ -60,57 +55,35 @@ struct Estimate {
     unit: String,
 }
 
-/// Error from ingesting a cargo-criterion run.
-#[derive(Debug)]
-pub enum IngestError {
-    Json(serde_json::Error),
-    Id(crate::bench_id::BenchIdParseError),
-    Unit(String),
-    MissingMedian(String),
-}
-
-impl std::fmt::Display for IngestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "invalid JSON line: {e}"),
-            Self::Id(e) => write!(f, "{e}"),
-            Self::Unit(u) => write!(f, "unknown time unit {u:?}"),
-            Self::MissingMedian(id) => write!(f, "benchmark {id:?} has no median estimate"),
-        }
-    }
-}
-
-impl std::error::Error for IngestError {}
-
-fn to_nanos(estimate: f64, unit: &str) -> Result<f64, IngestError> {
+fn to_nanos(estimate: f64, unit: &str) -> anyhow::Result<f64> {
     let factor = match unit {
         "ps" => 1e-3,
         "ns" => 1.0,
         "us" | "µs" => 1e3,
         "ms" => 1e6,
         "s" => 1e9,
-        other => return Err(IngestError::Unit(other.to_owned())),
+        other => anyhow::bail!("unknown time unit {other:?}"),
     };
     Ok(estimate * factor)
 }
 
 /// Parse a full cargo-criterion `--message-format=json` stream. Blank lines and
 /// every message other than `benchmark-complete` are ignored.
-pub fn parse_run(jsonl: &str) -> Result<Vec<Measurement>, IngestError> {
+pub fn parse_run(jsonl: &str) -> anyhow::Result<Vec<Measurement>> {
     let mut out = Vec::new();
     for raw in jsonl.lines() {
         let line = raw.trim();
         if line.is_empty() {
             continue;
         }
-        let parsed: Line = serde_json::from_str(line).map_err(IngestError::Json)?;
+        let parsed: Line = serde_json::from_str(line).context("invalid JSON line")?;
         if parsed.reason != "benchmark-complete" {
             continue;
         }
         let est = parsed
             .median
-            .ok_or_else(|| IngestError::MissingMedian(parsed.id.clone()))?;
-        let id = parsed.id.parse::<BenchId>().map_err(IngestError::Id)?;
+            .with_context(|| format!("benchmark {:?} has no median estimate", parsed.id))?;
+        let id = parsed.id.parse::<BenchId>()?;
         out.push(Measurement {
             id,
             nanos: to_nanos(est.estimate, &est.unit)?,
@@ -199,10 +172,11 @@ mod tests {
         // A benchmark-complete line with no `median` object is a hard error, not
         // a silently dropped measurement.
         let no_median = r#"{"reason":"benchmark-complete","id":"throughput/cell_a/build/PackedArray","typical":{"estimate":1.0,"lower_bound":1.0,"upper_bound":1.0,"unit":"ns"}}"#;
-        assert!(matches!(
-            parse_run(no_median),
-            Err(IngestError::MissingMedian(_))
-        ));
+        let err = parse_run(no_median).unwrap_err();
+        assert!(
+            err.to_string().contains("has no median estimate"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]

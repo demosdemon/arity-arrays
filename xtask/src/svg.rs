@@ -11,18 +11,6 @@ use crate::bench_id::BenchId;
 use crate::bench_id::Cell;
 use crate::ingest::Measurement;
 
-/// Error from rendering charts.
-#[derive(Debug)]
-pub struct ChartError(pub String);
-
-impl std::fmt::Display for ChartError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ChartError {}
-
 /// op -> subject -> value (ns, or % change). The renderer is value-agnostic.
 type Grouped = BTreeMap<String, BTreeMap<String, f64>>;
 
@@ -145,6 +133,7 @@ pub type Paired = BTreeMap<String, BTreeMap<String, (Option<f64>, Option<f64>)>>
 
 /// Join two single-op measurement sets into `(before, after)` pairs keyed by
 /// the union of both sides' `(op, subject)` keys. Pure; unit tested.
+#[must_use]
 pub fn join_single_ops(before: &[Measurement], after: &[Measurement]) -> BTreeMap<Cell, Paired> {
     let mut out: BTreeMap<Cell, Paired> = BTreeMap::new();
     for (cell, ops) in group_single_ops(before) {
@@ -179,16 +168,8 @@ pub fn join_single_ops(before: &[Measurement], after: &[Measurement]) -> BTreeMa
 /// Write the absolute-ns grouped-bar SVGs: one per cell for single-op and for
 /// workload, one `convert.svg`, and one `trie-<arity>-<op>.svg` per (arity,
 /// op).
-///
-/// # Errors
-/// Returns [`ChartError`] if the output directory cannot be created or an SVG
-/// cannot be rendered/written.
-pub fn write_charts(
-    measurements: &[Measurement],
-    out_dir: &Path,
-) -> Result<Vec<PathBuf>, ChartError> {
-    std::fs::create_dir_all(out_dir)
-        .map_err(|e| ChartError(format!("create {}: {e}", out_dir.display())))?;
+pub fn write_charts(measurements: &[Measurement], out_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    crate::fs::create_dir_all(out_dir)?;
     let mut written = Vec::new();
     for (cell, ops) in &group_single_ops(measurements) {
         let path = out_dir.join(format!("{}-single-op.svg", cell_slug(*cell)));
@@ -235,17 +216,12 @@ pub fn write_charts(
 }
 
 /// Write one run-vs-baseline delta SVG per cell (% change, after vs before).
-///
-/// # Errors
-/// Returns [`ChartError`] if the output directory cannot be created or an SVG
-/// cannot be rendered/written.
 pub fn write_delta(
     before: &[Measurement],
     after: &[Measurement],
     out_dir: &Path,
-) -> Result<Vec<PathBuf>, ChartError> {
-    std::fs::create_dir_all(out_dir)
-        .map_err(|e| ChartError(format!("create {}: {e}", out_dir.display())))?;
+) -> anyhow::Result<Vec<PathBuf>> {
+    crate::fs::create_dir_all(out_dir)?;
     let mut written = Vec::new();
     for (cell, ops) in join_single_ops(before, after) {
         let mut pct: Grouped = BTreeMap::new();
@@ -287,12 +263,7 @@ pub fn write_delta(
     clippy::cast_possible_truncation,
     reason = "x is a plotters tick value in [0, n_ops); fract guard in the formatter ensures it is non-negative and integral before the cast"
 )]
-fn render_grouped(
-    path: &Path,
-    caption: &str,
-    y_desc: &str,
-    ops: &Grouped,
-) -> Result<(), ChartError> {
+fn render_grouped(path: &Path, caption: &str, y_desc: &str, ops: &Grouped) -> anyhow::Result<()> {
     let subjects: BTreeSet<String> = ops.values().flat_map(|s| s.keys().cloned()).collect();
     let subjects: Vec<String> = subjects.into_iter().collect();
     let op_names: Vec<String> = ops.keys().cloned().collect();
@@ -312,7 +283,7 @@ fn render_grouped(
     let y_range = (lo - if lo < 0.0 { pad } else { 0.0 })..(hi + pad);
 
     let root = SVGBackend::new(path, (900, 480)).into_drawing_area();
-    root.fill(&WHITE).map_err(|e| ChartError(e.to_string()))?;
+    root.fill(&WHITE)?;
 
     // Float x-domain so manually-positioned grouped bars keep sub-integer
     // widths. (An integer domain truncates neighbouring bars to width 0.)
@@ -321,8 +292,7 @@ fn render_grouped(
         .margin(16)
         .x_label_area_size(48)
         .y_label_area_size(56)
-        .build_cartesian_2d(0.0_f64..(n_ops as f64), y_range)
-        .map_err(|e| ChartError(e.to_string()))?;
+        .build_cartesian_2d(0.0_f64..(n_ops as f64), y_range)?;
 
     chart
         .configure_mesh()
@@ -339,8 +309,7 @@ fn render_grouped(
                 String::new()
             }
         })
-        .draw()
-        .map_err(|e| ChartError(e.to_string()))?;
+        .draw()?;
 
     let n_sub = subjects.len().max(1);
     for (si, subject) in subjects.iter().enumerate() {
@@ -358,8 +327,7 @@ fn render_grouped(
                     [(base + f0, 0.0), (base + f1, value)],
                     color.filled(),
                 ))
-            }))
-            .map_err(|e| ChartError(e.to_string()))?
+            }))?
             .label(subject.clone())
             .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 10, y + 5)], color.filled()));
     }
@@ -367,9 +335,8 @@ fn render_grouped(
         .configure_series_labels()
         .background_style(WHITE.mix(0.8))
         .border_style(BLACK)
-        .draw()
-        .map_err(|e| ChartError(e.to_string()))?;
-    root.present().map_err(|e| ChartError(e.to_string()))?;
+        .draw()?;
+    root.present()?;
     Ok(())
 }
 
