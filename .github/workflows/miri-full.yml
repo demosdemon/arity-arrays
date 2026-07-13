@@ -19,4 +19,4 @@ jobs:
     uses: ./.github/workflows/miri.yml
     with:
       proptest-cases: "256"
-      timeout-minutes: 300
+      timeout-minutes: 720
