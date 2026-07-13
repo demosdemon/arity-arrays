@@ -384,13 +384,7 @@ mod tests {
         assert_eq!((!0u16).nearest_clear_in(0, 16), None);
 
         // Top-index (from + 1 == WIDTH) boundary: only bit 15 clear.
-        #[expect(
-            clippy::identity_op,
-            reason = "the `!0u16 &` spells out \"all bits\" explicitly for readability \
-                      alongside the `!(1u16 << 15)` clear-one-bit term, even though it is a \
-                      no-op"
-        )]
-        let top_clear = !0u16 & !(1u16 << 15);
+        let top_clear = !(1u16 << 15);
         assert_eq!(
             top_clear.nearest_clear_at_or_below(15).map(U4::as_usize),
             Some(15)
@@ -401,13 +395,7 @@ mod tests {
         );
 
         // u8 top-index boundary.
-        #[expect(
-            clippy::identity_op,
-            reason = "the `!0u8 &` spells out \"all bits\" explicitly for readability \
-                      alongside the `!(1u8 << 7)` clear-one-bit term, even though it is a \
-                      no-op"
-        )]
-        let b = !0u8 & !(1u8 << 7);
+        let b = !(1u8 << 7);
         assert_eq!(b.nearest_clear_at_or_below(7).map(U3::as_usize), Some(7));
     }
 
