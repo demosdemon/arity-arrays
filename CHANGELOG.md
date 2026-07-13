@@ -36,6 +36,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   comparison posted as a PR comment, `@exec-complete-benchmark-comparison` triggers an
   on-demand full-precision re-run, and every push to `main` compares against the
   previous commit. Developer tooling only — no library API change.
+- `arity-bitmap`: add `Bitmap::nearest_clear_at_or_below` and
+  `Bitmap::nearest_clear_in`, O(1)-per-limb queries for the nearest clear bit at
+  or below, or within, a range. Their result is safety-load-bearing for
+  `arity-arrays`'s unchecked pointer arithmetic (documented at the source).
+- `arity-arrays`: the `insert_new` throughput benchmark now sweeps a
+  spare-capacity occupancy point per cell, so it measures `GappedArray`'s common
+  hole-fill/shift insert path instead of only the grow path. Developer tooling
+  only — no library API change.
 
 ### Fixed
 
@@ -44,6 +52,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   before the elements are dropped, so it still runs as the stack unwinds —
   matching `GappedArray` and `std::Vec`. A Miri-checked regression test covers
   the panicking-destructor path.
+- `arity-arrays`: `GappedArray` insert now locates the nearest hole with an
+  O(log WIDTH) bitmap query instead of an O(distance) bit-by-bit scan, restoring
+  its mutation-throughput advantage on the near-full / sequential workload it is
+  designed for (previously ~3.8× slower `build` and ~2.3× slower `churn` than
+  `PackedArray` for small payloads at wide arity).
 
 ## [0.1.0] - 2026-06-28
 
