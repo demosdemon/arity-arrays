@@ -34,8 +34,14 @@ use support::churn_ops;
 const OCC_A: &[usize] = &[1, 4, 8, 16];
 const OCC_B: &[usize] = &[1, 16, 64, 128, 256];
 // get_miss / insert_new need an absent slot, so they exclude the full point.
-const OCC_A_PARTIAL: &[usize] = &[1, 4, 8];
-const OCC_B_PARTIAL: &[usize] = &[1, 16, 64, 128];
+// The trailing non-power-of-two point (`12`, `192`) leaves spare capacity for
+// GappedArray (`pow2_cap_for` rounds it up: cap 16 / 256), so the timed insert
+// exercises the common hole-fill/shift path instead of only the grow branch the
+// power-of-two points force. It is the sweep maximum, so the summary table
+// reports the steady-state cost; the power-of-two points keep the grow path in
+// the per-occupancy charts.
+const OCC_A_PARTIAL: &[usize] = &[1, 4, 8, 12];
+const OCC_B_PARTIAL: &[usize] = &[1, 16, 64, 128, 192];
 
 // Present mid-rank slot: slots 0..occupancy are contiguous, so rank == slot and
 // the mid-rank element is at slot occupancy/2.
