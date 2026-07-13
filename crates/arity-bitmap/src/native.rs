@@ -123,6 +123,50 @@ macro_rules! impl_native_bitmap {
                     size /= 2;
                 }
             }
+
+            #[inline]
+            fn raw_nearest_clear_at_or_below(self, from: usize) -> Option<usize> {
+                debug_assert!(from < $width);
+                // Complement, masked to bits [0, from] inclusive. `from + 1`
+                // can equal WIDTH, which would overflow the shift, so saturate.
+                let mask: $ty = if from + 1 >= $width {
+                    !0
+                } else {
+                    ((1 as $ty) << (from + 1)).wrapping_sub(1)
+                };
+                let holes = !self & mask;
+                if holes == 0 {
+                    None
+                } else {
+                    // Highest set bit of `holes` = greatest clear bit <= from.
+                    Some(holes.ilog2() as usize)
+                }
+            }
+
+            #[inline]
+            fn raw_nearest_clear_in(self, from: usize, limit: usize) -> Option<usize> {
+                debug_assert!(from <= limit && limit <= $width);
+                // Bits [from, limit): the low-`limit` mask minus the low-`from`
+                // mask. Either bound can equal WIDTH; saturate to avoid the
+                // overflowing shift.
+                let low_limit: $ty = if limit >= $width {
+                    !0
+                } else {
+                    ((1 as $ty) << limit).wrapping_sub(1)
+                };
+                let low_from: $ty = if from >= $width {
+                    !0
+                } else {
+                    ((1 as $ty) << from).wrapping_sub(1)
+                };
+                let holes = !self & low_limit & !low_from;
+                if holes == 0 {
+                    None
+                } else {
+                    // Lowest set bit of `holes` = least clear bit >= from.
+                    Some(holes.trailing_zeros() as usize)
+                }
+            }
         }
 
         impl Bitmap for $ty {
@@ -317,6 +361,54 @@ mod tests {
         for i in bm.bits() {
             assert_eq!(bm.select(bm.rank(i)), Some(i));
         }
+    }
+
+    #[test]
+    fn nearest_clear_queries_native() {
+        // Bits 1,2,3 set (a dense run), the rest clear.
+        let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(2)).with_bit(u4(3));
+
+        // at_or_below: greatest clear index <= from.
+        assert_eq!(bm.nearest_clear_at_or_below(3).map(U4::as_usize), Some(0));
+        assert_eq!(bm.nearest_clear_at_or_below(2).map(U4::as_usize), Some(0));
+        assert_eq!(bm.nearest_clear_at_or_below(0).map(U4::as_usize), Some(0));
+
+        // in [from, limit): least clear index >= from and < limit.
+        assert_eq!(bm.nearest_clear_in(1, 6).map(U4::as_usize), Some(4));
+        assert_eq!(bm.nearest_clear_in(4, 6).map(U4::as_usize), Some(4));
+        assert_eq!(bm.nearest_clear_in(1, 4), None); // 1,2,3 set → [1,4) full
+        assert_eq!(bm.nearest_clear_in(3, 3), None); // empty range
+
+        // Fully set: no clear bit anywhere.
+        assert_eq!((!0u16).nearest_clear_at_or_below(15), None);
+        assert_eq!((!0u16).nearest_clear_in(0, 16), None);
+
+        // Top-index (from + 1 == WIDTH) boundary: only bit 15 clear.
+        #[expect(
+            clippy::identity_op,
+            reason = "the `!0u16 &` spells out \"all bits\" explicitly for readability \
+                      alongside the `!(1u16 << 15)` clear-one-bit term, even though it is a \
+                      no-op"
+        )]
+        let top_clear = !0u16 & !(1u16 << 15);
+        assert_eq!(
+            top_clear.nearest_clear_at_or_below(15).map(U4::as_usize),
+            Some(15)
+        );
+        assert_eq!(
+            top_clear.nearest_clear_in(0, 16).map(U4::as_usize),
+            Some(15)
+        );
+
+        // u8 top-index boundary.
+        #[expect(
+            clippy::identity_op,
+            reason = "the `!0u8 &` spells out \"all bits\" explicitly for readability \
+                      alongside the `!(1u8 << 7)` clear-one-bit term, even though it is a \
+                      no-op"
+        )]
+        let b = !0u8 & !(1u8 << 7);
+        assert_eq!(b.nearest_clear_at_or_below(7).map(U3::as_usize), Some(7));
     }
 
     #[test]

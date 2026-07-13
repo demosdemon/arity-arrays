@@ -89,6 +89,27 @@ trait Raw: Sealed + Copy + Eq {
     /// popcount-guided binary search). Every backend implements this directly;
     /// there is no `O(n)` fallback.
     fn raw_select(self, n: u32) -> Option<usize>;
+    /// Returns the position (`< WIDTH`) of the greatest **clear** bit at or
+    /// below `from` (searching toward bit 0), or `None` if bits `0..=from` are
+    /// all set. `from` must be `< WIDTH`. O(1) per limb.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` performs unchecked pointer arithmetic on the returned
+    /// position, trusting it is `< WIDTH` and names a *clear* bit. An
+    /// implementation that returns a set or out-of-range position turns a safe
+    /// API call into undefined behavior there. This safe trait is the contract;
+    /// treat edits to it as safety-load-bearing.
+    fn raw_nearest_clear_at_or_below(self, from: usize) -> Option<usize>;
+    /// Returns the position of the least **clear** bit in the half-open range
+    /// `[from, limit)` (searching toward `limit`), or `None` if that range is
+    /// fully set. Requires `from <= limit <= WIDTH`. O(1) per limb.
+    ///
+    /// # Safety-critical
+    /// Same contract as
+    /// [`raw_nearest_clear_at_or_below`](Raw::raw_nearest_clear_at_or_below):
+    /// `arity-arrays` performs unchecked pointer arithmetic on the returned
+    /// position, so a set or out-of-range result is undefined behavior there.
+    fn raw_nearest_clear_in(self, from: usize, limit: usize) -> Option<usize>;
 }
 
 /// A fixed-width bitmap addressed by a [`Niche`] index type.
@@ -141,6 +162,39 @@ pub trait Bitmap: Copy + Eq + Raw {
         Some(
             <Self::Index as Niche>::try_from_usize(pos)
                 .expect("raw_select yields a position < WIDTH == Index::COUNT"),
+        )
+    }
+    /// Returns the index of the greatest **clear** bit at or below `from`
+    /// (searching toward index 0), or `None` if every bit in `0..=from` is set.
+    /// `from` must be `< WIDTH`. Runs in `O(1)` per limb.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` uses the returned index for unchecked pointer arithmetic,
+    /// trusting it names a clear slot `< WIDTH`. A backing that returns a set
+    /// or out-of-range position turns a safe call into undefined behavior
+    /// there.
+    fn nearest_clear_at_or_below(self, from: usize) -> Option<Self::Index> {
+        let pos = self.raw_nearest_clear_at_or_below(from)?;
+        // `raw_nearest_clear_at_or_below` yields `pos < WIDTH == Index::COUNT`.
+        Some(
+            <Self::Index as Niche>::try_from_usize(pos)
+                .expect("clear-bit position < WIDTH == Index::COUNT"),
+        )
+    }
+    /// Returns the index of the least **clear** bit in the half-open range
+    /// `[from, limit)` (searching toward `limit`), or `None` if that range is
+    /// fully set. Requires `from <= limit <= WIDTH`. Runs in `O(1)` per limb.
+    ///
+    /// # Safety-critical
+    /// As with [`nearest_clear_at_or_below`](Bitmap::nearest_clear_at_or_below),
+    /// `arity-arrays` performs unchecked pointer arithmetic on the returned
+    /// index, so a set or out-of-range result is undefined behavior there.
+    fn nearest_clear_in(self, from: usize, limit: usize) -> Option<Self::Index> {
+        let pos = self.raw_nearest_clear_in(from, limit)?;
+        // `raw_nearest_clear_in` yields `pos < limit <= WIDTH == Index::COUNT`.
+        Some(
+            <Self::Index as Niche>::try_from_usize(pos)
+                .expect("clear-bit position < WIDTH == Index::COUNT"),
         )
     }
     /// Writes the bitmap as `BYTES` little-endian bytes into `buf`.

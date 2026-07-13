@@ -72,6 +72,23 @@ mod custom {
         }
     }
 
+    /// Two-limb little-endian mask of bits `[0, k)` for the custom `U256`
+    /// (`k <= 256`): `(lo_mask, hi_mask)`.
+    #[inline]
+    const fn low_mask(k: usize) -> (u128, u128) {
+        if k == 0 {
+            (0, 0)
+        } else if k < 128 {
+            ((1u128 << k) - 1, 0)
+        } else if k == 128 {
+            (!0, 0)
+        } else if k < 256 {
+            (!0, (1u128 << (k - 128)) - 1)
+        } else {
+            (!0, !0)
+        }
+    }
+
     impl Sealed for U256 {}
 
     impl Raw for U256 {
@@ -141,6 +158,37 @@ mod custom {
                 } else {
                     None
                 }
+            }
+        }
+        #[inline]
+        fn raw_nearest_clear_at_or_below(self, from: usize) -> Option<usize> {
+            debug_assert!(from < 256);
+            // Bits [0, from] inclusive == low_mask(from + 1).
+            let (lo_mask, hi_mask) = low_mask(from + 1);
+            let holes_lo = !self.lo & lo_mask;
+            let holes_hi = !self.hi & hi_mask;
+            if holes_hi != 0 {
+                Some(128 + holes_hi.ilog2() as usize)
+            } else if holes_lo != 0 {
+                Some(holes_lo.ilog2() as usize)
+            } else {
+                None
+            }
+        }
+
+        #[inline]
+        fn raw_nearest_clear_in(self, from: usize, limit: usize) -> Option<usize> {
+            debug_assert!(from <= limit && limit <= 256);
+            let (l_lo, l_hi) = low_mask(limit);
+            let (f_lo, f_hi) = low_mask(from);
+            let holes_lo = !self.lo & l_lo & !f_lo;
+            let holes_hi = !self.hi & l_hi & !f_hi;
+            if holes_lo != 0 {
+                Some(holes_lo.trailing_zeros() as usize)
+            } else if holes_hi != 0 {
+                Some(128 + holes_hi.trailing_zeros() as usize)
+            } else {
+                None
             }
         }
     }
@@ -242,6 +290,17 @@ mod ethnum_backed {
     const ZERO: U256 = U256::from_words(0, 0);
     const ONE: U256 = U256::from_words(0, 1);
 
+    /// Mask of bits `[0, k)` for the ethnum `U256` (`k <= 256`).
+    #[inline]
+    fn low_mask(k: usize) -> U256 {
+        if k >= 256 {
+            !ZERO
+        } else {
+            let k = u32::try_from(k).expect("k < 256 fits u32");
+            (ONE << k) - ONE
+        }
+    }
+
     impl Sealed for U256 {}
 
     impl Raw for U256 {
@@ -304,6 +363,29 @@ mod ethnum_backed {
                     return Some(pos);
                 }
                 size /= 2;
+            }
+        }
+        #[inline]
+        fn raw_nearest_clear_at_or_below(self, from: usize) -> Option<usize> {
+            debug_assert!(from < 256);
+            // Bits [0, from] inclusive == low_mask(from + 1).
+            let holes = !self & low_mask(from + 1);
+            if holes == ZERO {
+                None
+            } else {
+                // 255 - leading_zeros = highest set bit = greatest clear <= from.
+                Some(255 - holes.leading_zeros() as usize)
+            }
+        }
+
+        #[inline]
+        fn raw_nearest_clear_in(self, from: usize, limit: usize) -> Option<usize> {
+            debug_assert!(from <= limit && limit <= 256);
+            let holes = !self & low_mask(limit) & !low_mask(from);
+            if holes == ZERO {
+                None
+            } else {
+                Some(holes.trailing_zeros() as usize)
             }
         }
     }
@@ -498,6 +580,53 @@ mod tests {
         for i in bm.bits() {
             assert_eq!(bm.select(bm.rank(i)), Some(i));
         }
+    }
+
+    #[test]
+    fn nearest_clear_queries_u256() {
+        // Dense run 126,127,128,129 set (spans the limb boundary), rest clear.
+        let bm = U256::ZERO
+            .with_bit(126)
+            .with_bit(127)
+            .with_bit(128)
+            .with_bit(129);
+        assert_eq!(
+            bm.nearest_clear_at_or_below(129).map(Niche::as_usize),
+            Some(125)
+        );
+        assert_eq!(
+            bm.nearest_clear_at_or_below(128).map(Niche::as_usize),
+            Some(125)
+        );
+        assert_eq!(
+            bm.nearest_clear_in(126, 200).map(Niche::as_usize),
+            Some(130)
+        );
+        assert_eq!(bm.nearest_clear_in(126, 130), None); // [126,130) fully set
+
+        // Top-index (bit 255) boundary: bits 0..=254 set, 255 clear.
+        let mut top_clear = U256::ZERO;
+        for i in 0u8..=254 {
+            top_clear = top_clear.with_bit(i);
+        }
+        assert_eq!(
+            top_clear
+                .nearest_clear_at_or_below(255)
+                .map(Niche::as_usize),
+            Some(255)
+        );
+        assert_eq!(
+            top_clear.nearest_clear_in(0, 256).map(Niche::as_usize),
+            Some(255)
+        );
+
+        // Fully set: no clear bit anywhere.
+        let mut all = U256::ZERO;
+        for i in 0u8..=255 {
+            all = all.with_bit(i);
+        }
+        assert_eq!(all.nearest_clear_at_or_below(255), None);
+        assert_eq!(all.nearest_clear_in(0, 256), None);
     }
 
     #[test]

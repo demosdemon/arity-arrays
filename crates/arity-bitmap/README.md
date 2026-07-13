@@ -23,6 +23,15 @@ let set: Vec<u8> = bm.bits().map(U4::as_u8).collect();
 assert_eq!(set, vec![1, 4, 9]);
 ```
 
+### Safety-critical query methods
+
+`Bitmap::nearest_clear_at_or_below` and `Bitmap::nearest_clear_in` locate the
+nearest **clear** bit at or below, or within, a range in `O(1)` per limb.
+`arity-arrays` uses their result for unchecked pointer arithmetic, so their
+contract — a returned position always names a clear bit `< WIDTH` — is
+safety-load-bearing for that crate even though this one is
+`#![forbid(unsafe_code)]`.
+
 ## Cargo features
 
 | Feature | Default | Description |
