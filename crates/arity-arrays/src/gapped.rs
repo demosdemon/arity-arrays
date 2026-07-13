@@ -600,16 +600,13 @@ impl<T, A: Arity> GappedArray<T, A> {
         };
         let count = occ.count_ones() as usize;
         let (p_lo, p_hi) = Self::neighbor_bounds(occ, live, cap, count, index);
-        // Hole strictly between the neighbors → place with no move.
-        // `p_lo >= -1` (sentinel) so `p_lo + 1 >= 0`; cast_unsigned is safe.
-        let mut p = (p_lo + 1).cast_unsigned();
-        while p < p_hi {
-            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap <= N");
-            if !live.test(p_idx) {
-                self.write_into_hole(index, p, value);
-                return;
-            }
-            p += 1;
+        // Hole strictly between the neighbors → place with no move. The probe is
+        // the least clear bit in `[p_lo + 1, p_hi)`; `p_lo >= -1` (sentinel) so
+        // `p_lo + 1 >= 0` and cast_unsigned is safe. O(log W), not O(p_hi - p_lo).
+        let lo = (p_lo + 1).cast_unsigned();
+        if let Some(hole) = live.nearest_clear_in(lo, p_hi) {
+            self.write_into_hole(index, hole.as_usize(), value);
+            return;
         }
         // Neighbors are physically adjacent. Choose the cheapest of: shift the
         // run left to the nearest hole, shift it right to the nearest hole, or
@@ -634,38 +631,27 @@ impl<T, A: Arity> GappedArray<T, A> {
         }
     }
 
-    /// Nearest hole at a physical slot `< from` (scanning down). Returns
+    /// Nearest hole at a physical slot `<= from` (scanning toward 0). Returns
     /// `(hole_pos, live_elements_crossed)`. Pure over `live` so the caller's
-    /// header snapshot is reused.
+    /// header snapshot is reused. O(log W) via the bitmap, not O(from). When
+    /// reached from `place_absent`, `from == p_lo` is a live slot, so the hole
+    /// is strictly below it and `crossed == from - hole_pos >= 1`.
     fn nearest_hole_left(live: A::Bitmap, from: isize) -> Option<(usize, usize)> {
-        let mut p = from; // from == p_lo (a live slot or -1)
-        let mut crossed = 0usize;
-        while p >= 0 {
-            let p_idx = <A::Index as Niche>::try_from_usize(p.cast_unsigned()).expect("p < cap");
-            if !live.test(p_idx) {
-                return Some((p.cast_unsigned(), crossed));
-            }
-            crossed += 1;
-            p -= 1;
-        }
-        None
+        // `from == -1` (sentinel: `index` is the new minimum) → no hole below.
+        let from = usize::try_from(from).ok()?;
+        let hole = live.nearest_clear_at_or_below(from)?.as_usize();
+        Some((hole, from - hole))
     }
 
     /// Nearest hole at a physical slot `>= from` (scanning up to `cap`).
     /// Returns `(hole_pos, live_elements_crossed)`. Pure over `live` so the
-    /// caller's header snapshot is reused.
+    /// caller's header snapshot is reused. O(log W) via the bitmap, not
+    /// O(cap - from). When reached from `place_absent`, `from == p_hi` is a
+    /// live slot (or `cap`), so the hole is strictly above it and
+    /// `crossed == hole_pos - from >= 1` (or `None` when `from == cap`).
     fn nearest_hole_right(live: A::Bitmap, from: usize, cap: usize) -> Option<(usize, usize)> {
-        let mut crossed = 0usize;
-        let mut p = from; // from == p_hi (a live slot or cap)
-        while p < cap {
-            let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < cap");
-            if !live.test(p_idx) {
-                return Some((p, crossed));
-            }
-            crossed += 1;
-            p += 1;
-        }
-        None
+        let hole = live.nearest_clear_in(from, cap)?.as_usize();
+        Some((hole, hole - from))
     }
 
     /// Shift the live run `(hole, p_hi)` down by one to open slot `p_hi - 1`,
@@ -1564,6 +1550,26 @@ mod tests {
             assert_eq!(g.count(), oracle.len());
             for s in 0..16u8 {
                 assert_eq!(g.get(U4::new_masked(s)).copied(), oracle.get(&s).copied());
+            }
+        }
+    }
+
+    #[test]
+    fn insert_finds_distant_holes_via_bitmap_search() {
+        use std::collections::BTreeMap;
+        // Wide capacity with a dense low run, then scatter higher indices so
+        // inserts must locate holes far from the rank-neighbors (the path whose
+        // hole search this exercises). Oracle-checked at every step.
+        let mut g = GappedArray::<u16, Arity256>::with_capacity(256);
+        let mut oracle: BTreeMap<u8, u16> = BTreeMap::new();
+        for s in 0..64u8 {
+            assert_eq!(g.insert(s, u16::from(s)), oracle.insert(s, u16::from(s)));
+        }
+        for s in [200u8, 100, 150, 65, 66, 250, 128, 1, 63] {
+            assert_eq!(g.insert(s, u16::from(s)), oracle.insert(s, u16::from(s)));
+            assert_eq!(g.count(), oracle.len());
+            for k in 0..=255u8 {
+                assert_eq!(g.get(k).copied(), oracle.get(&k).copied());
             }
         }
     }
