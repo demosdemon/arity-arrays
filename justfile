@@ -60,7 +60,7 @@ nostd:
 # Check unsafe code under Miri — SLOW: a full workspace run takes ~6-10 min.
 miri pkg='':
     MIRIFLAGS="{{ miri_flags }}" PROPTEST_CASES={{ proptest_cases }} \
-        cargo +nightly miri test {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}
+        cargo +nightly miri nextest run {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}
 
 # Install the pinned developer tooling (cargo subtools + just) via mise.
 setup:
