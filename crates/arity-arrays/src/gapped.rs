@@ -130,6 +130,17 @@ struct Inner<A: Arity, T> {
 /// `r`-th present element. Every physical slot read in this module relies on
 /// this invariant.
 ///
+/// # Capacity overflow
+///
+/// Every allocating operation — `insert`, `with_capacity`, `reserve`, `Clone`,
+/// and every `From` conversion that builds a `GappedArray` — requires
+/// `size_of::<T>() * A::LEN <= isize::MAX`. A `T` large enough to cross that
+/// bound (tens of petabytes per element on 64-bit for `A::LEN == 256`) makes
+/// those operations panic on capacity overflow — mirroring
+/// `Vec::with_capacity`'s overflow behavior, though the panic message text
+/// differs (see `alloc_layout`). This is unreachable for any practical
+/// element type.
+///
 /// # Example
 ///
 /// ```
@@ -543,7 +554,8 @@ impl<T, A: Arity> GappedArray<T, A> {
     ///
     /// Panics if the internal bitmap invariant is violated (i.e., `occupancy`
     /// and `live` have mismatched popcount). This cannot happen through the
-    /// public API.
+    /// public API. Also panics on capacity overflow — see the type-level note
+    /// (`size_of::<T>() * A::LEN <= isize::MAX`).
     pub fn insert(&mut self, index: A::Index, value: T) -> Option<T> {
         // Empty → fresh single-slot block.
         let Some(ptr) = self.0 else {
@@ -774,6 +786,11 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Creates an array with capacity for at least `n` elements (rounded up to
     /// a power of two, capped at `A::LEN`). `with_capacity(0)` is the
     /// unallocated state. Eager: the reservation lives in the heap header.
+    ///
+    /// # Panics
+    ///
+    /// Panics on capacity overflow — see the type-level note
+    /// (`size_of::<T>() * A::LEN <= isize::MAX`).
     #[must_use]
     pub fn with_capacity(n: usize) -> Self {
         let cap = pow2_cap_for::<A>(n);
@@ -789,6 +806,11 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Ensures capacity for at least `count + n` elements (power of two, capped
     /// at `A::LEN`). Saturating: `n` may be `usize::MAX`.
+    ///
+    /// # Panics
+    ///
+    /// Panics on capacity overflow — see the type-level note
+    /// (`size_of::<T>() * A::LEN <= isize::MAX`).
     pub fn reserve(&mut self, n: usize) {
         let want = self.count().saturating_add(n);
         let target = pow2_cap_for::<A>(want);
@@ -1883,5 +1905,23 @@ mod tests {
         let all_clone = all.clone();
         assert!(std::format!("{all:?}").contains("GappedAllIter"));
         assert_eq!(all.count(), all_clone.count());
+    }
+
+    #[test]
+    fn dense_types_are_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<GappedArray<u16, Arity16>>();
+        assert_send_sync::<GappedPresentIter<'static, u16, Arity16>>();
+        assert_send_sync::<GappedAllIter<'static, u16, Arity16>>();
+
+        // `Arity256`'s bitmap is `U256`, the only non-primitive backing; it
+        // exercises the `A::Bitmap: Send + Sync` bound that primitive
+        // backings satisfy trivially.
+        #[cfg(feature = "256")]
+        {
+            assert_send_sync::<GappedArray<u16, Arity256>>();
+            assert_send_sync::<GappedPresentIter<'static, u16, Arity256>>();
+            assert_send_sync::<GappedAllIter<'static, u16, Arity256>>();
+        }
     }
 }

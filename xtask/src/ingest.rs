@@ -80,7 +80,15 @@ impl std::fmt::Display for IngestError {
     }
 }
 
-impl std::error::Error for IngestError {}
+impl std::error::Error for IngestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(e) => Some(e),
+            Self::Id(e) => Some(e),
+            Self::Unit(_) | Self::MissingMedian(_) => None,
+        }
+    }
+}
 
 fn to_nanos(estimate: f64, unit: &str) -> Result<f64, IngestError> {
     let factor = match unit {
@@ -281,5 +289,19 @@ mod tests {
         }];
         let id_avg = average_runs(std::slice::from_ref(&single));
         assert_eq!(id_avg, single);
+    }
+
+    #[test]
+    fn source_exposes_the_wrapped_cause() {
+        use std::error::Error;
+
+        let json_err = parse_run("{ not json").expect_err("invalid JSON is an error");
+        assert!(
+            json_err.source().is_some(),
+            "Json variant exposes its cause"
+        );
+
+        let unit_err = to_nanos(1.0, "furlongs").expect_err("unknown unit is an error");
+        assert!(unit_err.source().is_none(), "Unit variant has no cause");
     }
 }

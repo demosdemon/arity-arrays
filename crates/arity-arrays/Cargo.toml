@@ -13,6 +13,11 @@ autobenches = false
 keywords = ["array", "sparse", "packed", "trie", "no-std"]
 categories = ["no-std", "data-structures", "memory-management"]
 
+[package.metadata.docs.rs]
+# Build with every feature enabled so gated items (e.g. the `serde_with`-only
+# `Compact` adapter) are documented instead of 404ing on docs.rs.
+all-features = true
+
 [dependencies]
 arity-bitmap = { workspace = true, default-features = false }
 arity-index = { workspace = true, default-features = false }

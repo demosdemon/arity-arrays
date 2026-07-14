@@ -1,13 +1,17 @@
 #![no_std]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 //! Fixed-width bitmaps indexed by [`arity_index`] niche integers, with a
 //! double-ended iterator over the set bits.
 //!
 //! The [`Bitmap`] trait is implemented for `u8`, `u16`, `u32`, `u64`, `u128`
-//! (indexed by `U3`–`U7`) and the 256-bit [`U256`] (indexed by `u8`). The crate
-//! contains no `unsafe` code: every bit position is reconstructed through the
-//! statically-bounded [`arity_index::Niche`] index.
+//! (indexed by `U3`–`U7`) and the 256-bit [`U256`] (indexed by `u8`).
+//! The crate performs no `unsafe` operations — there are no `unsafe {}`
+//! blocks; every bit position is reconstructed through the statically-bounded
+//! [`arity_index::Niche`] index. Its only `unsafe` is a private trait
+//! declaration and its per-type impl markers, asserting the bit-position
+//! contract that dependent crates (e.g. `arity-arrays`) rely on for unchecked
+//! pointer arithmetic.
 //!
 //! ```
 //! # extern crate alloc;
@@ -49,8 +53,9 @@ trait Sealed {}
 /// Crate-internal bit-scanning mechanics used by
 /// [`BitIter`](crate::BitIter).
 ///
-/// Declared in this private module so it is unnameable/uncallable outside
-/// the crate. It is a *supertrait* of [`Bitmap`](crate::Bitmap), so
+/// Declared as a crate-private item (not exported, not `pub`) so it is
+/// unnameable/uncallable outside the crate. It is a *supertrait* of
+/// [`Bitmap`](crate::Bitmap), so
 /// every `Bitmap` implies these mechanics — which is what lets
 /// `Bitmap::bits()` be called from generic downstream code. It returns
 /// raw `usize` bit positions (not the index type) to avoid a
@@ -60,19 +65,74 @@ trait Sealed {}
 /// `!self.raw_is_zero()` and return a position `< WIDTH`.
 /// `raw_clear_lowest`/`raw_clear_highest` are total: a zero bitmap is
 /// returned unchanged (zero), so they need no precondition.
-trait Raw: Sealed + Copy + Eq {
+///
+/// # Safety
+///
+/// This trait is `unsafe` because dependent crates (notably `arity-arrays`)
+/// perform unchecked pointer arithmetic on the values these methods return,
+/// trusting each documented contract exactly. An implementation that returns
+/// an out-of-range or wrong position (a set bit where a clear one is promised,
+/// a position `>= WIDTH`, a popcount inconsistent with the other methods) turns
+/// a safe API call in a dependent crate into undefined behavior. Implement only
+/// for a type whose bit-scanning primitives are known to honor every contract.
+#[expect(
+    unsafe_code,
+    reason = "the unsafe marker makes the bit-position contract mechanically \
+              safety-load-bearing: dependent crates do unchecked pointer \
+              arithmetic on these return values"
+)]
+unsafe trait Raw: Sealed + Copy + Eq {
     fn raw_is_zero(self) -> bool;
+    /// Returns the number of set bits (`<= WIDTH`).
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` trusts the popcount/scan coherence of these mechanics for
+    /// unchecked pointer arithmetic; an inconsistent result is undefined
+    /// behavior there.
     fn raw_popcount(self) -> u32;
+    /// Returns the position (`< WIDTH`) of the lowest set bit. Precondition:
+    /// `!self.raw_is_zero()`.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` trusts the popcount/scan coherence of these mechanics for
+    /// unchecked pointer arithmetic; an inconsistent result is undefined
+    /// behavior there.
     fn raw_lowest_pos(self) -> usize;
+    /// Returns the position (`< WIDTH`) of the highest set bit. Precondition:
+    /// `!self.raw_is_zero()`.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` trusts the popcount/scan coherence of these mechanics for
+    /// unchecked pointer arithmetic; an inconsistent result is undefined
+    /// behavior there.
     fn raw_highest_pos(self) -> usize;
+    /// Returns `self` with the lowest set bit cleared. Total: a zero bitmap is
+    /// returned unchanged.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` trusts the popcount/scan coherence of these mechanics for
+    /// unchecked pointer arithmetic; an inconsistent result is undefined
+    /// behavior there.
     #[must_use]
     fn raw_clear_lowest(self) -> Self;
+    /// Returns `self` with the highest set bit cleared. Total: a zero bitmap is
+    /// returned unchanged.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` trusts the popcount/scan coherence of these mechanics for
+    /// unchecked pointer arithmetic; an inconsistent result is undefined
+    /// behavior there.
     #[must_use]
     fn raw_clear_highest(self) -> Self;
     /// Returns the bit position (`< WIDTH`) of the `n`-th set bit (0-based), or
     /// `None` if `n >= raw_popcount()`. Runs in `O(log WIDTH)` per limb (a
     /// popcount-guided binary search). Every backend implements this directly;
     /// there is no `O(n)` fallback.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` performs unchecked pointer arithmetic on the returned
+    /// position, trusting it is `< WIDTH` and names a *set* bit. A wrong or
+    /// out-of-range result turns a safe API call into undefined behavior there.
     fn raw_select(self, n: u32) -> Option<usize>;
     /// Returns the position (`< WIDTH`) of the greatest **clear** bit at or
     /// below `from` (searching toward bit 0), or `None` if bits `0..=from` are
@@ -82,8 +142,8 @@ trait Raw: Sealed + Copy + Eq {
     /// `arity-arrays` performs unchecked pointer arithmetic on the returned
     /// position, trusting it is `< WIDTH` and names a *clear* bit. An
     /// implementation that returns a set or out-of-range position turns a safe
-    /// API call into undefined behavior there. This safe trait is the contract;
-    /// treat edits to it as safety-load-bearing.
+    /// API call into undefined behavior there. This method's documented
+    /// contract is safety-load-bearing; treat edits to it accordingly.
     fn raw_nearest_clear_at_or_below(self, from: usize) -> Option<usize>;
     /// Returns the position of the least **clear** bit in the half-open range
     /// `[from, limit)` (searching toward `limit`), or `None` if that range is
@@ -127,6 +187,13 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// Returns `true` if no bit is set.
     fn is_zero(self) -> bool;
     /// Returns the number of set bits.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` uses `rank`/`count_ones`/`select`/`bits` coherence for
+    /// unchecked pointer arithmetic (the rank of a set index is trusted to be
+    /// `< count`, `select` to name a set slot, `bits` to yield each set bit
+    /// once ascending). A backing that violates this coherence causes
+    /// undefined behavior there.
     fn count_ones(self) -> u32;
     /// Returns `true` if the bit at `i` is set.
     fn test(self, i: Self::Index) -> bool;
@@ -135,6 +202,13 @@ pub trait Bitmap: Copy + Eq + Raw {
     fn with_bit(self, i: Self::Index) -> Self;
     /// Returns the number of set bits strictly below `i` (the dense rank of
     /// `i`).
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` uses `rank`/`count_ones`/`select`/`bits` coherence for
+    /// unchecked pointer arithmetic (the rank of a set index is trusted to be
+    /// `< count`, `select` to name a set slot, `bits` to yield each set bit
+    /// once ascending). A backing that violates this coherence causes
+    /// undefined behavior there.
     fn rank(self, i: Self::Index) -> u32;
     /// Returns `self` with the bit at `i` cleared (the inverse of
     /// [`with_bit`](Bitmap::with_bit)). Clearing an unset bit is a no-op.
@@ -145,6 +219,13 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// `select(rank(i)) == Some(i)` for every set `i`.
     ///
     /// Runs in `O(log WIDTH)` per limb.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` uses `rank`/`count_ones`/`select`/`bits` coherence for
+    /// unchecked pointer arithmetic (the rank of a set index is trusted to be
+    /// `< count`, `select` to name a set slot, `bits` to yield each set bit
+    /// once ascending). A backing that violates this coherence causes
+    /// undefined behavior there.
     fn select(self, n: u32) -> Option<Self::Index> {
         let pos = self.raw_select(n)?;
         // `raw_select` yields `pos < WIDTH == Self::Index::COUNT`, so the
@@ -209,6 +290,13 @@ pub trait Bitmap: Copy + Eq + Raw {
         Some(Self::from_bytes(bytes))
     }
     /// Iterates over the set bits, ascending, as a double-ended iterator.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` uses `rank`/`count_ones`/`select`/`bits` coherence for
+    /// unchecked pointer arithmetic (the rank of a set index is trusted to be
+    /// `< count`, `select` to name a set slot, `bits` to yield each set bit
+    /// once ascending). A backing that violates this coherence causes
+    /// undefined behavior there.
     fn bits(self) -> BitIter<Self> {
         BitIter::new(self)
     }

@@ -31,7 +31,7 @@ memory_report`:
 
 ### Cell A — Arity16 + [u8; 32]
 
-| occupancy | PackedArray | GappedArray | FixedArray | Box<[Option<T>]> |
+| occupancy | `PackedArray` | `GappedArray` | `FixedArray` | `Box<[Option<T>]>` |
 |----------:|------------:|------------:|-----------:|-----------------:|
 | 0 | 8 | 8 | 528 | 544 |
 | 1 | 42 | 46 | 528 | 544 |
@@ -58,7 +58,7 @@ Each arity wires a niche index type to a bitmap backing of matching width:
 
 ¹ Arity-256 uses the native `u8` as its index. `u8`'s maximum (255) is already
 `< 256`, so indexing a 256-element array elides the bounds check without a custom
-type; `Option<u8>` is 2 bytes, but no `Option<index>` is stored on a hot path, so
+type; `Option<u8>` is 2 bytes, but no `Option<u8>` is stored on a hot path, so
 this costs nothing in practice.
 
 The wiring is a compile-time guarantee: for every arity,
@@ -80,8 +80,13 @@ workflow's `workflow_dispatch` inputs trigger an ad-hoc comparison between any t
 None of these commit anything — see `.github/workflows/bench-compare.yml`. Compare two
 local captures the same way with `just bench-compare <run> <baseline>`.
 
-Current state, medians on an AWS Graviton5 CPU (EC2 `c9g.4xlarge`), the array
-layouts vs the standard maps (`usize` keys) at Arity256, full occupancy:
+Medians below were captured on an AWS Graviton5 CPU (EC2 `c9g.4xlarge`); absolute
+nanoseconds are machine-specific, but the comparison between representations — and
+against `usize`-keyed `BTreeMap`/`HashMap` — is the durable signal:
+
+In the tables, `BoxArr` is a naive `Box<[Option<T>]>` baseline; the `*Store` rows
+pair each representation (and a `BTreeMap` baseline) with a trie fixture; and the
+trie shapes are Chain (deep), Bushy (broad), and Realistic (tapered).
 
 <!-- bench:start -->
 **Cell A (Arity16) single-op (median ns)**
@@ -166,10 +171,13 @@ layouts vs the standard maps (`usize` keys) at Arity256, full occupancy:
 
 <!-- bench:end -->
 
-`GappedArray` trades memory and lookup cost for cheap mutation: at Arity16 its
-build/churn workload is ~2× faster than `PackedArray`; at Arity256 the
-build/resize path is ~3× slower. It is the write-throughput corner, not a
-general-purpose default.
+`GappedArray` makes single-op deletes and gap-filling inserts cheap — deletes
+never move elements, and an insert fills a nearby gap — at the cost of reads and
+memory. Against `PackedArray`: `remove` is ~4× faster and `insert_new` ~2.4×
+faster at Arity16 (`remove` ~2× faster, `insert_new` about even at Arity256).
+But `get_hit` is ~18× slower (it scans past gaps), and on the aggregate
+build/churn workloads it runs ~15-50% slower. Reach for it when deletes
+dominate; `PackedArray` is the better default.
 
 > [!NOTE]
 > The `remove`/`insert_*` single-op benches build a fresh container per iteration
@@ -180,11 +188,12 @@ general-purpose default.
 
 A second bench, `cargo bench -p arity-arrays --bench trie`, measures recursive
 `Clone` and `Drop` of a compressed-trie fixture whose children array is each
-representation, with non-POD node contents (`Edge` children owning a `Box`/`Arc`
-subtree, plus a boxed value). It isolates the per-element clone/drop cost — where
-`FixedArray` touches all `A::LEN` slots per node, `PackedArray` pays per live
-child, and `GappedArray` pays for its power-of-two capacity (≥ the live count) —
-across Chain (deep), Bushy (broad), and Realistic (tapered) shapes.
+representation, with non-plain-old-data (non-POD) node contents (`Edge` children
+owning a `Box`/`Arc` subtree, plus a boxed value). It isolates the per-element
+clone/drop cost — where `FixedArray` touches all `A::LEN` slots per node,
+`PackedArray` pays per live child, and `GappedArray` pays for its power-of-two
+capacity (≥ the live count) — across Chain (deep), Bushy (broad), and Realistic
+(tapered) shapes.
 
 ## Crates
 
@@ -193,20 +202,20 @@ In dependency order:
 | Crate | Purpose |
 | :--- | :--- |
 | [`arity-index`](crates/arity-index) | Bounds-check-free niche integer index types (`U3`–`U7`, and `u8` for arity-256) with double-ended range iterators. A small, contained `unsafe` surface (niche constructors and range-iterator internals). No `alloc`. |
-| [`arity-bitmap`](crates/arity-bitmap) | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by the niche integers, with a double-ended set-bit iterator. **No `unsafe` code** (enforced by `#![forbid(unsafe_code)]`). No `alloc`. |
-| [`arity-arrays`](crates/arity-arrays) | `FixedArray`, `PackedArray`, and `GappedArray` over the sealed `Arity` trait. The only crate that needs `alloc`; carries `unsafe` for the packed heap layout — as does `arity-index`, for its niche/range internals. Only `arity-bitmap` is `unsafe`-free. |
+| [`arity-bitmap`](crates/arity-bitmap) | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by the niche integers, with a double-ended set-bit iterator. **No `unsafe` operations** (`#![deny(unsafe_code)]`; its only `unsafe` is an audited private `unsafe impl` contract marker). No `alloc`. |
+| [`arity-arrays`](crates/arity-arrays) | `FixedArray`, `PackedArray`, and `GappedArray` over the sealed `Arity` trait. The only crate that needs `alloc`; carries `unsafe` for all three representations — bounds-check-elided indexing in `FixedArray`, and the heap layouts of `PackedArray` and `GappedArray` — as does `arity-index`, for its niche/range internals. |
 
 Splitting this way keeps the primitive types reusable and lets their tests run
 without touching the allocator. `arity-bitmap` depends on `arity-index` so the
 `Bitmap` trait speaks in the typed index rather than raw `usize` — which makes
-every bit position statically `< WIDTH`, eliminating the shift-UB precondition
-entirely.
+every bit position statically `< WIDTH`, eliminating the shift-undefined-behavior
+(UB) precondition entirely.
 
 ## Example
 
 ```rust
 use arity_arrays::{Arity16, FixedArray, PackedArray};
-use arity_arrays::index::{Niche, U4};
+use arity_arrays::index::U4;
 
 let mut full = FixedArray::<Option<u32>, Arity16>::new();
 full[U4::new_masked(1)] = Some(10);
@@ -239,12 +248,12 @@ crate's README for the full table.
 
 ## Versioning and MSRV
 
-These crates are at **`0.1.0`** — production-*worthy*, but reserving the right to
-refine the API with real downstream use before a `1.0` stability commitment.
-Under Cargo semver, `0.1.x` signals that a breaking change bumps the minor
-version.
+These crates are not at a uniform version: `arity-arrays` and `arity-bitmap` are
+**`0.2.0-alpha.1`**, `arity-index` is **`0.1.1`** — production-*worthy*, but
+reserving the right to refine the API with real downstream use before a `1.0`
+commitment. Under Cargo semver, each crate's `0.y.z` version means a breaking
+change to that crate bumps its minor (`y`) version.
 
-- The arity features are additive and safe to combine.
 - `ethnum` is a **public dependency**, pulled in by the `256` feature: its `U256`
   is re-exported as the documented `arity_bitmap::U256`, the sole 256-bit backing.
   The supported surface is the `Bitmap` trait; `ethnum`'s inherent integer
@@ -253,7 +262,8 @@ version.
 - The serde wire formats (the logical form and `Compact`) are snapshot-locked but
   **not yet guaranteed stable**: they may change before `1.0` if a production
   consumer's encoding needs differ.
-- **MSRV: 1.92.** MSRV bumps are documented as a minor-version event.
+- **Minimum Supported Rust Version (MSRV): 1.92.** MSRV bumps are documented as a
+  minor-version event.
 
 ## License
 

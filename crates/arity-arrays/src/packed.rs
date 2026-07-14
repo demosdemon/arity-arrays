@@ -52,6 +52,17 @@ struct Inner<A: Arity, T> {
 /// counterpart). The pointer-niche that makes this type pointer-sized lives on
 /// the outer `NonNull`, not the bitmap, so the size guarantee does not depend
 /// on the bitmap being `NonZero`.
+///
+/// # Capacity overflow
+///
+/// Every allocating operation — `insert`, `Clone`, and every `From` conversion
+/// that builds a `PackedArray` — requires
+/// `size_of::<T>() * A::LEN <= isize::MAX`. A `T` large enough to cross that
+/// bound (tens of petabytes per element on 64-bit for `A::LEN == 256`) makes
+/// those operations panic on capacity overflow — mirroring
+/// `Vec::with_capacity`'s overflow behavior, though the panic message text
+/// differs (see `alloc_layout`). This is unreachable for any practical
+/// element type.
 pub struct PackedArray<T, A: Arity>(
     Option<NonNull<Inner<A, T>>>,
     PhantomData<alloc::boxed::Box<T>>,
@@ -287,6 +298,11 @@ impl<T, A: Arity> PackedArray<T, A> {
     ///
     /// On a new insertion the array reallocates to exactly hold one more
     /// element (`O(count)` move). Overwriting a present slot is in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics on capacity overflow — see the type-level note
+    /// (`size_of::<T>() * A::LEN <= isize::MAX`).
     pub fn insert(&mut self, index: A::Index, value: T) -> Option<T> {
         let Some(ptr) = self.0 else {
             // Empty → fresh single-element block.
@@ -1243,5 +1259,23 @@ mod tests {
         let all_clone = all.clone();
         assert!(std::format!("{all:?}").contains("PackedAllIter"));
         assert_eq!(all.count(), all_clone.count());
+    }
+
+    #[test]
+    fn dense_types_are_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<PackedArray<u16, Arity16>>();
+        assert_send_sync::<PackedPresentIter<'static, u16, Arity16>>();
+        assert_send_sync::<PackedAllIter<'static, u16, Arity16>>();
+
+        // `Arity256`'s bitmap is `U256`, the only non-primitive backing; it
+        // exercises the `A::Bitmap: Send + Sync` bound that primitive
+        // backings satisfy trivially.
+        #[cfg(feature = "256")]
+        {
+            assert_send_sync::<PackedArray<u16, Arity256>>();
+            assert_send_sync::<PackedPresentIter<'static, u16, Arity256>>();
+            assert_send_sync::<PackedAllIter<'static, u16, Arity256>>();
+        }
     }
 }

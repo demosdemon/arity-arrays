@@ -61,7 +61,16 @@ macro_rules! impl_native_bitmap {
 
         impl Sealed for $ty {}
 
-        impl Raw for $ty {
+        #[expect(
+            unsafe_code,
+            reason = "unsafe impl asserts the Raw bit-position contract; the \
+                      impl body performs no unsafe operations"
+        )]
+        // SAFETY: raw_popcount returns a count <= WIDTH; raw_select/
+        // raw_lowest_pos/raw_highest_pos return positions < WIDTH;
+        // raw_clear_lowest/raw_clear_highest clear exactly the named bit. The
+        // Raw contract holds for every native integer width.
+        unsafe impl Raw for $ty {
             #[inline(always)]
             fn raw_is_zero(self) -> bool {
                 self == 0
@@ -209,13 +218,11 @@ macro_rules! impl_native_bitmap {
 
             #[inline]
             fn to_bytes(self) -> Self::Bytes {
-                // Delegates to the primitive's inherent `to_le_bytes`.
                 <$ty>::to_le_bytes(self)
             }
 
             #[inline]
             fn from_bytes(bytes: Self::Bytes) -> Self {
-                // Delegates to the primitive's inherent `from_le_bytes`.
                 <$ty>::from_le_bytes(bytes)
             }
         }

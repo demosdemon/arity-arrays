@@ -2,7 +2,7 @@
 
 Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by [`arity-index`] niche integers, with a double-ended iterator over the set bits.
 
-The [`Bitmap`] trait is implemented for `u8`, `u16`, `u32`, `u64`, `u128` (indexed by `U3`–`U7`) and the 256-bit `U256` type (indexed by `u8`). The crate contains no `unsafe` code: every bit position is reconstructed through the statically-bounded niche index.
+The [`Bitmap`] trait is implemented for `u8`, `u16`, `u32`, `u64`, `u128` (indexed by `U3`–`U7`) and the 256-bit `U256` type (indexed by `u8`). The crate performs no `unsafe` operations: every bit position is reconstructed through the statically-bounded niche index.
 
 ## Usage
 
@@ -25,12 +25,23 @@ assert_eq!(set, vec![1, 4, 9]);
 
 ### Safety-critical query methods
 
-`Bitmap::nearest_clear_at_or_below` and `Bitmap::nearest_clear_in` locate the
-nearest **clear** bit at or below, or within, a range in `O(1)` per limb.
-`arity-arrays` uses their result for unchecked pointer arithmetic, so their
-contract — a returned position always names a clear bit `< WIDTH` — is
-safety-load-bearing for that crate even though this one is
-`#![forbid(unsafe_code)]`.
+Two methods locate a **clear** bit in `O(1)` per limb (a *limb* is one 64-bit
+word of the bitmap's backing integer):
+
+- `Bitmap::nearest_clear_at_or_below(self, from: usize)` returns the greatest
+  clear index at or below `from`, searching toward index `0`; `None` if every
+  bit in `0..=from` is set.
+- `Bitmap::nearest_clear_in(self, from: usize, limit: usize)` returns the
+  least clear index in the half-open range `[from, limit)`, searching toward
+  `limit`; `None` if that range is fully set.
+
+`arity-arrays` (a downstream crate in this workspace that consumes `Bitmap`
+for unchecked array indexing) uses their result for unchecked pointer
+arithmetic, so their contract — a returned position always names a clear bit
+`< WIDTH` — is
+safety-load-bearing for that crate. This crate performs no unsafe operations
+of its own; its only `unsafe` is the private `unsafe impl Raw` contract marker
+(`#![deny(unsafe_code)]`).
 
 ## Cargo features
 
@@ -51,7 +62,11 @@ guarantee. `ethnum` is a public dependency, pulled in by the `256` feature.
 
 ## `no_std`
 
-This crate is `#![no_std]`. It depends only on [`arity-index`] and `core`.
+This crate is `#![no_std]`. With default features it also depends on `ethnum`
+for the 256-bit backing (pulled in by the `256` feature); with only the
+`≤128` arities enabled (`default-features = false`, opting back into `8`
+through `128` as needed), its only dependencies are [`arity-index`] and
+`core`.
 
 ## MSRV
 
@@ -60,3 +75,6 @@ Minimum Supported Rust Version: **1.92**.
 ## License
 
 MIT — see [LICENSE](../../LICENSE) or <https://opensource.org/licenses/MIT>.
+
+[`Bitmap`]: https://docs.rs/arity-bitmap/latest/arity_bitmap/trait.Bitmap.html
+[`arity-index`]: https://crates.io/crates/arity-index

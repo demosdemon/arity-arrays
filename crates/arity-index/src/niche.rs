@@ -32,6 +32,11 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
     const COUNT: usize;
 
     /// Returns the value as a `usize`, always `< COUNT`.
+    ///
+    /// # Safety-critical
+    /// `arity-arrays` uses the result (`< COUNT`) for `get_unchecked`. A value
+    /// `>= COUNT` would be undefined behavior there; treat edits to this
+    /// contract as safety-load-bearing.
     fn as_usize(self) -> usize;
 
     /// Constructs from a `usize`, or `None` if `i >= COUNT`.
@@ -60,7 +65,7 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
 /// check. The largest type (`U7`) needs 128 variants — too many to hand-write —
 /// so [`seq_macro`](https://docs.rs/seq-macro) generates the variants and match
 /// arms. Compile-time expansion keeps a single source of truth (no committed
-/// generated `.rs` to drift) at the cost of one build dependency.
+/// generated `.rs` to drift) at the cost of one proc-macro dependency.
 #[cfg(any(
     feature = "8",
     feature = "16",

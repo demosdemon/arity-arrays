@@ -11,6 +11,16 @@ use core::alloc::Layout;
 /// Returns the layout of a heap block: the header `H`, extended by an `[T; n]`
 /// element array, padded to alignment. Generic over the header so both
 /// representations share one definition; `H` is never inspected, only sized.
+///
+/// # Panics
+///
+/// Panics with `"element layout overflow"` or `"block layout overflow"` if the
+/// total layout would exceed `isize::MAX` bytes — i.e. when
+/// `size_of::<T>() * n` (with `n` bounded, in every caller, by an
+/// `Arity::LEN` of at most 256) crosses the allocator's `isize::MAX` limit
+/// (the header `H` adds a negligible further constraint). This mirrors
+/// `Vec::with_capacity`'s capacity-overflow panic and is unreachable for any
+/// practical `T`.
 pub fn alloc_layout<H, T>(n: usize) -> Layout {
     let (layout, _) = Layout::new::<H>()
         .extend(Layout::array::<T>(n).expect("element layout overflow"))

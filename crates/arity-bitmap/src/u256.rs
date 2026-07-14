@@ -20,34 +20,41 @@ mod ethnum_backed {
     use super::Raw;
     use super::Sealed;
 
-    // ethnum has no ZERO/ONE consts we can rely on; build them from words.
-    const ZERO: U256 = U256::from_words(0, 0);
-    const ONE: U256 = U256::from_words(0, 1);
-
     /// Mask of bits `[0, k)` for the ethnum `U256` (`k <= 256`).
     #[inline]
     fn low_mask(k: usize) -> U256 {
         if k >= 256 {
-            !ZERO
+            !U256::ZERO
         } else {
             let k = u32::try_from(k).expect("k < 256 fits u32");
-            (ONE << k) - ONE
+            (U256::ONE << k) - U256::ONE
         }
     }
 
     impl Sealed for U256 {}
 
-    impl Raw for U256 {
+    #[expect(
+        unsafe_code,
+        reason = "unsafe impl asserts the Raw bit-position contract; the impl \
+                  body performs no unsafe operations"
+    )]
+    // SAFETY: raw_popcount returns a count <= 256; raw_select/raw_lowest_pos/
+    // raw_highest_pos return positions `< 256 == WIDTH`; raw_clear_lowest/
+    // raw_clear_highest clear exactly the named bit. The Raw contract holds
+    // for the 256-bit backing.
+    unsafe impl Raw for U256 {
         #[inline]
         fn raw_is_zero(self) -> bool {
-            self == ZERO
+            self == Self::ZERO
         }
         #[inline]
         fn raw_popcount(self) -> u32 {
-            // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
-            // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
-            // or the trait path here would recurse.
-            Self::count_ones(self)
+            // Method resolution prefers the inherent `U256::count_ones` over
+            // the `Bitmap::count_ones` being implemented here, so this binds
+            // to ethnum's inherent method and does not recurse; only the
+            // fully-qualified `<Self as Bitmap>::count_ones(self)` would call
+            // back into this method.
+            self.count_ones()
         }
         #[inline]
         fn raw_lowest_pos(self) -> usize {
@@ -59,24 +66,24 @@ mod ethnum_backed {
         }
         #[inline]
         fn raw_clear_lowest(self) -> Self {
-            if self == ZERO {
+            if self == Self::ZERO {
                 self
             } else {
-                self & (self - ONE)
+                self & (self - Self::ONE)
             }
         }
         #[inline]
         fn raw_clear_highest(self) -> Self {
-            if self == ZERO {
+            if self == Self::ZERO {
                 self
             } else {
-                self & !(ONE << (255 - self.leading_zeros()))
+                self & !(Self::ONE << (255 - self.leading_zeros()))
             }
         }
         #[inline]
         fn raw_select(self, n: u32) -> Option<usize> {
-            // `Self::count_ones` binds to ethnum's inherent method.
-            if n >= Self::count_ones(self) {
+            // Binds to ethnum's inherent `count_ones` (see `raw_popcount`).
+            if n >= self.count_ones() {
                 return None;
             }
             // Popcount-guided binary search over the full 256-bit value; `size`
@@ -86,8 +93,8 @@ mod ethnum_backed {
             let mut pos = 0usize;
             let mut size: u32 = 128;
             loop {
-                let lo_mask = (ONE << size) - ONE;
-                let lo_count = Self::count_ones(x & lo_mask);
+                let lo_mask = (Self::ONE << size) - Self::ONE;
+                let lo_count = (x & lo_mask).count_ones();
                 if n >= lo_count {
                     n -= lo_count;
                     x >>= size;
@@ -104,7 +111,7 @@ mod ethnum_backed {
             debug_assert!(from < 256);
             // Bits [0, from] inclusive == low_mask(from + 1).
             let holes = !self & low_mask(from + 1);
-            if holes == ZERO {
+            if holes == Self::ZERO {
                 None
             } else {
                 // 255 - leading_zeros = highest set bit = greatest clear <= from.
@@ -116,7 +123,7 @@ mod ethnum_backed {
         fn raw_nearest_clear_in(self, from: usize, limit: usize) -> Option<usize> {
             debug_assert!(from <= limit && limit <= 256);
             let holes = !self & low_mask(limit) & !low_mask(from);
-            if holes == ZERO {
+            if holes == Self::ZERO {
                 None
             } else {
                 Some(holes.trailing_zeros() as usize)
@@ -127,41 +134,45 @@ mod ethnum_backed {
     impl Bitmap for U256 {
         type Index = u8;
         const WIDTH: usize = 256;
-        const ZERO: Self = ZERO;
+        // Binds to ethnum's inherent `U256::ZERO`, not this associated
+        // constant itself: inherent items win over trait items during path
+        // resolution, so this is not a recursive definition.
+        const ZERO: Self = Self::ZERO;
 
         #[inline]
         fn is_zero(self) -> bool {
-            self == ZERO
+            self == Self::ZERO
         }
         #[inline]
         fn count_ones(self) -> u32 {
-            // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
-            // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
-            // or the trait path here would recurse.
-            Self::count_ones(self)
+            // Method resolution prefers the inherent `U256::count_ones` over
+            // this `Bitmap::count_ones` impl, so this binds to ethnum's
+            // inherent method and does not recurse; only the fully-qualified
+            // `<Self as Bitmap>::count_ones(self)` would call back into this
+            // method.
+            self.count_ones()
         }
         #[inline]
         fn test(self, i: u8) -> bool {
-            (self >> u32::from(i)) & ONE != ZERO
+            (self >> u32::from(i)) & Self::ONE != Self::ZERO
         }
         #[inline]
         fn with_bit(self, i: u8) -> Self {
-            self | (ONE << u32::from(i))
+            self | (Self::ONE << u32::from(i))
         }
         #[inline]
         fn rank(self, i: u8) -> u32 {
             if i == 0 {
                 0
             } else {
-                // `Self::count_ones` binds to ethnum's inherent method (inherent wins over the
-                // `Bitmap::count_ones` being implemented); writing the bare `self.count_ones()`
-                // or the trait path here would recurse.
-                Self::count_ones(self & ((ONE << u32::from(i)) - ONE))
+                // Binds to ethnum's inherent `count_ones` (see the note on
+                // `count_ones` above).
+                (self & ((Self::ONE << u32::from(i)) - Self::ONE)).count_ones()
             }
         }
         #[inline]
         fn without_bit(self, i: u8) -> Self {
-            self & !(ONE << u32::from(i))
+            self & !(Self::ONE << u32::from(i))
         }
         type Bytes = [u8; 32];
         #[inline]

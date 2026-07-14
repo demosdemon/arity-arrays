@@ -2,7 +2,7 @@
 
 Fixed, pointer-sized heap-packed, and gapped arrays over a generic arity, indexed without bounds checks.
 
-`FixedArray<T, A>` is a full-width inline array (one slot per index); `PackedArray<T, A>` is a pointer-sized, heap-packed representation that stores only the present elements; `GappedArray<T, A>` is a pointer-sized, heap-backed representation with spare capacity and gaps that minimizes mutation cost. All three are generic over the `Arity` trait, which pairs an index type with a bitmap backing and a `hybrid-array` size. Six concrete arities are provided: `Arity8`, `Arity16`, `Arity32`, `Arity64`, `Arity128`, and `Arity256`.
+`FixedArray<T, A>` is a full-width inline array (one slot per index); `PackedArray<T, A>` is a pointer-sized, heap-packed representation that stores only the present elements; `GappedArray<T, A>` is a pointer-sized, heap-backed representation with spare capacity and gaps that minimize mutation cost. All three are generic over the `Arity` trait, which pairs an index type with a bitmap backing and a `hybrid-array` size. Six concrete arities are provided: `Arity8`, `Arity16`, `Arity32`, `Arity64`, `Arity128`, and `Arity256`.
 
 ## Usage
 
@@ -29,12 +29,18 @@ assert_eq!(present, vec![(1, 10), (9, 90)]);
 A 16-slot `FixedArray<Option<[u8; 32]>>` occupies a constant **528 bytes**
 regardless of how many slots are filled, while `PackedArray` costs one pointer
 when empty and `bitmap + occupancy × size_of::<T>` (plus header padding) when
-populated. Exact figures (handle + heap), computed by `cargo test --test
+populated. `GappedArray` follows the same formula but sizes its heap block to a
+**capacity** rounded up to the next power of two (bounded by `A::LEN`) rather
+than to the exact occupancy, and its header carries a second bitmap plus a
+one-byte capacity exponent — so even at the power-of-two occupancies in the
+table below (where the rounding is a no-op) it costs a few bytes more than
+`PackedArray`, and a non-power-of-two occupancy pays the rounding difference on
+top. Exact figures (handle + heap), computed by `cargo test --test
 memory_report`:
 
 ### Cell A — Arity16 + [u8; 32]
 
-| occupancy | PackedArray | GappedArray | FixedArray | Box<[Option<T>]> |
+| occupancy | `PackedArray` | `GappedArray` | `FixedArray` | `Box<[Option<T>]>` |
 |----------:|------------:|------------:|-----------:|-----------------:|
 | 0 | 8 | 8 | 528 | 544 |
 | 1 | 42 | 46 | 528 | 544 |
@@ -42,11 +48,23 @@ memory_report`:
 | 8 | 266 | 270 | 528 | 544 |
 | 16 | 522 | 526 | 528 | 544 |
 
+## Capacity overflow
+
+Every allocating operation on `PackedArray` or `GappedArray` requires
+`size_of::<T>() * A::LEN <= isize::MAX`: `insert`, `Clone`, the `From`
+conversions that build either type, and `GappedArray`'s
+`with_capacity`/`reserve`. A `T` large enough to cross that bound (tens of
+petabytes per element on 64-bit for `A::LEN == 256`) makes those operations
+panic on the overflowing layout computation, mirroring `Vec::with_capacity`'s
+overflow behavior — though the panic message text (`element layout overflow`
+or `block layout overflow`) differs from `Vec`'s. This is unreachable for any
+practical element type.
+
 ## Cargo features
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `8`, `16`, `32`, `64`, `128`, `256` | ✓ | Per-arity gating — compile only the `Arity{N}` markers you use. Forwards to the matching `arity-index`/`arity-bitmap` features. The hexary (firewood) shape is `default-features = false, features = ["16"]`. |
+| `8`, `16`, `32`, `64`, `128`, `256` | ✓ | Per-arity gating — compile only the `Arity{N}` markers you use. Forwards to the matching `arity-index`/`arity-bitmap` features. The hexary/16-ary shape — the trie child-storage layout used by the [Firewood](https://github.com/ava-labs/firewood) database — is `default-features = false, features = ["16"]`. |
 | `serde` | | `Serialize`/`Deserialize` for `FixedArray` (a sequence of `LEN` elements) and for `PackedArray` and `GappedArray` (each a sequence of ascending `(index, value)` pairs, validated on decode). |
 | `serde_with` | | Adds the [`Compact`] adapter (`#[serde_as(as = "Compact")]`) — a compact encoding for `PackedArray` and `GappedArray` (fixed little-endian bitmap + dense values). Implies `serde`. |
 | `std` | | Forwards `std` to the optional std-capable dependencies; the crate is `no_std` + `alloc`. |
@@ -74,7 +92,7 @@ Minimum Supported Rust Version: **1.92**.
 
 ## Performance
 
-Throughput measured with [`criterion`](https://crates.io/crates/criterion)
+Throughput is measured with [`criterion`](https://crates.io/crates/criterion)
 (run via [`cargo-criterion`](https://crates.io/crates/cargo-criterion)) over the
 two representative cells (Arity16 + 32-byte hash; Arity256 + 8-byte pointer
 stand-in), comparing `PackedArray` against `GappedArray`, `FixedArray`,
@@ -89,8 +107,9 @@ full-precision comparison against the previous commit. Compare two local capture
 same way with `just bench-compare <run> <baseline>`.
 
 The `trie` bench (`cargo bench -p arity-arrays --bench trie`) additionally times
-recursive `Clone`/`Drop` of a trie fixture with non-POD node contents (`Edge`
-children owning a `Box`/`Arc` subtree) across all four representations,
+recursive `Clone`/`Drop` of a trie fixture with non-plain-old-data (non-POD)
+node contents (`Edge` children owning a `Box`/`Arc` subtree) across all four
+representations,
 contrasting `FixedArray`'s full-width (`A::LEN`) per-node cost with `PackedArray`
 (per live child) and `GappedArray` (per power-of-two capacity ≥ live count).
 

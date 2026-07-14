@@ -5,6 +5,46 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
+## [arity-index Unreleased]
+
+### Documentation
+
+- Document `Niche::as_usize`'s `< COUNT` contract as safety-critical:
+  `arity-arrays` relies on it for its internal `slice::get_unchecked` calls.
+
+## [arity-bitmap Unreleased]
+
+### Changed
+
+- Make the crate-internal `Raw` supertrait an `unsafe trait`, so a bitmap
+  backing must assert its bit-position contract through an explicit
+  `unsafe impl`. The crate's `unsafe_code` lint moves from
+  `#![forbid(unsafe_code)]` to `#![deny(unsafe_code)]`; the crate still
+  performs no unsafe operations (the only `unsafe` is the audited contract
+  marker).
+
+### Documentation
+
+- Mark the safety-critical `Bitmap`/`Raw` methods (`select`, `rank`,
+  `count_ones`, `bits`, and the raw scan primitives) whose results feed
+  `arity-arrays`'s unchecked pointer arithmetic.
+
+## [arity-arrays Unreleased]
+
+### Fixed
+
+- Bound `A::Bitmap: Send`/`Sync` on the `PackedArray`/`GappedArray` and
+  present-only iterator `Send`/`Sync` impls. The heap block and iterators hold
+  an `A::Bitmap` by value, so a future non-`Send` backing is now a compile
+  error rather than silent unsoundness. Every current backing satisfies the
+  bound, so no type loses a `Send`/`Sync` it currently has.
+
+### Documentation
+
+- Document the capacity-overflow panic precondition
+  (`size_of::<T>() * A::LEN <= isize::MAX`) on `PackedArray`/`GappedArray` and
+  their allocating operations, mirroring `Vec::with_capacity`.
+
 ## [arity-index 0.1.1] - 2026-07-14
 
 ### Changed
@@ -115,6 +155,9 @@ to power-of-two arities 8–256.
 - Per-arity cargo features; optional `serde` (logical form) and a
   `serde_with::Compact` adapter; an `ethnum` backing passthrough; `std`.
 
+[arity-index Unreleased]: https://github.com/demosdemon/arity-arrays/compare/arity-index-v0.1.1...HEAD
+[arity-bitmap Unreleased]: https://github.com/demosdemon/arity-arrays/compare/arity-bitmap-v0.2.0-alpha.1...HEAD
+[arity-arrays Unreleased]: https://github.com/demosdemon/arity-arrays/compare/arity-arrays-v0.2.0-alpha.1...HEAD
 [arity-index 0.1.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.1
 [arity-bitmap 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.1
 [arity-arrays 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0-alpha.1

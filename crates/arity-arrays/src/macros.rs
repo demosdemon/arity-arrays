@@ -60,12 +60,13 @@ macro_rules! impl_size_witness {
 
 /// Emits the gap-agnostic value impls (`PartialEq`/`Eq`/`Hash`/`Debug`) and the
 /// thread-safety impls (`Send`/`Sync`/`UnwindSafe`/`RefUnwindSafe` for the
-/// array, `Send`/`Sync` for its present-iterator `$Iter`). The iterator's
-/// hand-written `Send` impl carries a scoped
-/// `#[expect(clippy::non_send_fields_in_send_ty)]`, since its `BitIter`
-/// bit-cursor fields are not `Copy` and clippy cannot prove the impl sound on
-/// its own. Depends on `Arity` being in scope and on the inherent
-/// `bitmap()`, `count()`, and `iter_present()` methods of `$Ty`.
+/// array, `Send`/`Sync` for its present-iterator `$Iter`). The array and
+/// present-iterator `Send`/`Sync` impls require `A::Bitmap: Send`/`Sync` (the
+/// heap block and the iterator's `BitIter` bit-cursor each hold an
+/// `A::Bitmap` by value), and that bound lets clippy prove the hand-written
+/// iterator impls sound, so no `#[expect(clippy::non_send_fields_in_send_ty)]`
+/// suppression is needed. Depends on `Arity` being in scope and on the
+/// inherent `bitmap()`, `count()`, and `iter_present()` methods of `$Ty`.
 macro_rules! impl_dense_common {
     ($Ty:ident, $Iter:ident) => {
         impl<T: PartialEq, A: Arity> PartialEq for $Ty<T, A> {
@@ -98,14 +99,23 @@ macro_rules! impl_dense_common {
             }
         }
 
-        // SAFETY: the array exclusively owns its allocation; sending it across
-        // threads is sound when `T: Send`.
-        unsafe impl<T: Send, A: Arity> Send for $Ty<T, A> {}
-        // SAFETY: a shared reference yields only `&T`; no interior mutability.
-        unsafe impl<T: Sync, A: Arity> Sync for $Ty<T, A> {}
+        // SAFETY: the array exclusively owns its allocation (`T`) and stores an
+        // `A::Bitmap` by value; sending it across threads is sound when both
+        // are `Send`.
+        unsafe impl<T: Send, A: Arity> Send for $Ty<T, A> where A::Bitmap: Send {}
+        // SAFETY: a shared reference yields only `&T` and `&A::Bitmap`; no
+        // interior mutability, so this holds when both are `Sync`.
+        unsafe impl<T: Sync, A: Arity> Sync for $Ty<T, A> where A::Bitmap: Sync {}
 
-        // `NonNull` is `!UnwindSafe`; the array owns its data with no
-        // shared/cyclic state, so these hold whenever `T` does.
+        // The array's representation — `Option<NonNull<Inner<A, T>>>` plus a
+        // zero-sized `PhantomData<Box<T>>` marker, pointer-sized per
+        // `impl_size_witness!` — means the compiler's auto-derived
+        // `UnwindSafe`/`RefUnwindSafe` impls would require the heap-allocated
+        // `Inner<A, T>` to be `RefUnwindSafe`, i.e. both `T` and `A::Bitmap`.
+        // These hand-written impls bound only `T`, deliberately dropping the
+        // implicit `A::Bitmap: RefUnwindSafe` requirement (which `Arity` does
+        // not guarantee): the array owns its data with no shared or cyclic
+        // state, so unwind-safety follows from `T` alone.
         impl<T: ::core::panic::UnwindSafe, A: Arity> ::core::panic::UnwindSafe for $Ty<T, A> {}
         impl<T: ::core::panic::RefUnwindSafe, A: Arity> ::core::panic::RefUnwindSafe
             for $Ty<T, A>
@@ -113,20 +123,19 @@ macro_rules! impl_dense_common {
         }
 
         // The present-iterator holds a `*const T` (which suppresses the
-        // auto-impls) but only ever yields `&T` (slice-like), so it is
-        // `Send`/`Sync` exactly when `T: Sync`. The all-slots iterator borrows
-        // `&$Ty`, so it derives `Send`/`Sync` automatically once the array is
-        // `Sync`.
-        #[expect(
-            clippy::non_send_fields_in_send_ty,
-            reason = "the present-iterator holds a raw `*const T` read-only for its borrow; \
-                      clippy cannot prove the hand-written Send sound"
-        )]
+        // auto-impls) plus an `A::Bitmap`/`BitIter<A::Bitmap>` cursor. It only
+        // ever yields `&T` (slice-like), so it is `Send`/`Sync` exactly when
+        // `T: Sync` and the bitmap is `Send`/`Sync`.
+        //
         // SAFETY: the raw pointer is used only for shared reads for the lifetime
-        // the iterator borrows its source array; it never aliases a mutable reference.
-        unsafe impl<T: Sync, A: Arity> Send for $Iter<'_, T, A> {}
+        // the iterator borrows its source array; it never aliases a mutable
+        // reference. The `A::Bitmap: Send` bound covers the owned bitmap
+        // cursor field, so no `#[expect(clippy::non_send_fields_in_send_ty)]`
+        // is needed here (clippy can now prove that field sound; it does not
+        // flag the raw pointer itself).
+        unsafe impl<T: Sync, A: Arity> Send for $Iter<'_, T, A> where A::Bitmap: Send {}
         // SAFETY: shared, read-only access; no interior mutability.
-        unsafe impl<T: Sync, A: Arity> Sync for $Iter<'_, T, A> {}
+        unsafe impl<T: Sync, A: Arity> Sync for $Iter<'_, T, A> where A::Bitmap: Sync {}
     };
 }
 
