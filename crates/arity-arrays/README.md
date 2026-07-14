@@ -48,8 +48,7 @@ memory_report`:
 | :--- | :---: | :--- |
 | `8`, `16`, `32`, `64`, `128`, `256` | ✓ | Per-arity gating — compile only the `Arity{N}` markers you use. Forwards to the matching `arity-index`/`arity-bitmap` features. The hexary (firewood) shape is `default-features = false, features = ["16"]`. |
 | `serde` | | `Serialize`/`Deserialize` for `FixedArray` (a sequence of `LEN` elements) and for `PackedArray` and `GappedArray` (each a sequence of ascending `(index, value)` pairs, validated on decode). |
-| `serde_with` | | Adds the [`Compact`] adapter (`#[serde_as(as = "Compact")]`) — a compact, backing-independent encoding for `PackedArray` and `GappedArray` (fixed little-endian bitmap + dense values). Implies `serde`. |
-| `ethnum` | | Forwards to `arity-bitmap/ethnum` (the arity-256 backing swap). |
+| `serde_with` | | Adds the [`Compact`] adapter (`#[serde_as(as = "Compact")]`) — a compact encoding for `PackedArray` and `GappedArray` (fixed little-endian bitmap + dense values). Implies `serde`. |
 | `std` | | Forwards `std` to the optional std-capable dependencies; the crate is `no_std` + `alloc`. |
 
 The arity features are **additive**. The test suite runs only under the default
@@ -60,8 +59,8 @@ The arity features are **additive**. The test suite runs only under the default
 The serde wire formats (the logical `(index, value)` form and the `Compact`
 form) are locked by snapshot tests so any drift is a reviewable diff, but they
 are **not yet guaranteed stable**: they may change before `1.0` if a production
-consumer's encoding needs differ. The `Compact` form is backing-independent — it
-is identical whether the arity-256 backing is the custom `U256` or `ethnum::U256`.
+consumer's encoding needs differ. The `Compact` form is a canonical
+little-endian encoding, independent of the in-memory representation.
 
 [`Compact`]: https://docs.rs/arity-arrays/latest/arity_arrays/struct.Compact.html
 

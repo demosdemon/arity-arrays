@@ -205,20 +205,18 @@ macro_rules! impl_native_bitmap {
                 self & !(1 << i.as_usize())
             }
 
+            type Bytes = [u8; $width / 8];
+
             #[inline]
-            fn to_le_bytes(self, buf: &mut [u8]) {
-                assert_eq!(buf.len(), Self::BYTES, "{}", $crate::BYTE_LEN_PANIC_MSG);
-                // Inherent primitive method (1 arg) — unambiguous with the trait's.
-                buf.copy_from_slice(&<$ty>::to_le_bytes(self));
+            fn to_bytes(self) -> Self::Bytes {
+                // Delegates to the primitive's inherent `to_le_bytes`.
+                <$ty>::to_le_bytes(self)
             }
 
             #[inline]
-            fn from_le_bytes(buf: &[u8]) -> Self {
-                assert_eq!(buf.len(), Self::BYTES, "{}", $crate::BYTE_LEN_PANIC_MSG);
-                let mut arr = [0u8; $width / 8];
-                arr.copy_from_slice(buf);
-                // Inherent primitive method (owned array arg) — unambiguous.
-                <$ty>::from_le_bytes(arr)
+            fn from_bytes(bytes: Self::Bytes) -> Self {
+                // Delegates to the primitive's inherent `from_le_bytes`.
+                <$ty>::from_le_bytes(bytes)
             }
         }
     };
@@ -406,24 +404,18 @@ mod tests {
         assert_eq!(<u128 as Bitmap>::BYTES, 16);
 
         let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(9));
-        let mut buf = [0u8; 2];
-        <u16 as Bitmap>::to_le_bytes(bm, &mut buf);
-        assert_eq!(buf, 0b0000_0010_0000_0010u16.to_le_bytes());
-        assert_eq!(<u16 as Bitmap>::from_le_bytes(&buf), bm);
+        let bytes = <u16 as Bitmap>::to_bytes(bm);
+        assert_eq!(bytes, 0b0000_0010_0000_0010u16.to_le_bytes());
+        assert_eq!(<u16 as Bitmap>::from_bytes(bytes), bm);
     }
 
     #[test]
-    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
-    fn from_le_bytes_wrong_length_native_panics() {
-        // u16 wants BYTES == 2; a 3-byte buffer violates the documented contract.
-        let _ = <u16 as crate::Bitmap>::from_le_bytes(&[0u8; 3]);
-    }
-
-    #[test]
-    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
-    fn to_le_bytes_wrong_length_native_panics() {
-        let mut out = [0u8; 1]; // too small for u16 (BYTES == 2)
-        crate::Bitmap::to_le_bytes(<u16 as crate::Bitmap>::ZERO, &mut out);
+    fn try_from_bytes_checks_length_native() {
+        let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(9));
+        // Exact length round-trips; every other length is rejected (u16 wants 2).
+        assert_eq!(<u16 as Bitmap>::try_from_bytes(&bm.to_bytes()), Some(bm));
+        assert_eq!(<u16 as Bitmap>::try_from_bytes(&[0u8; 1]), None);
+        assert_eq!(<u16 as Bitmap>::try_from_bytes(&[0u8; 3]), None);
     }
 
     extern crate alloc;

@@ -121,7 +121,7 @@ jobs:
           cp target/release/xtask "$RUNNER_TEMP/xtask"
 
       # No --all-features here (unlike ci.yml's `bench` smoke-test job): none of the
-      # optional features (serde, serde_with, ethnum, std) gate any bench code (no
+      # optional features (serde, serde_with, std) gate any bench code (no
       # `#[cfg(feature = ...)]` in benches/), so --all-features would only add compile
       # time, not comparison coverage. Matches the existing local `bench-export` recipe.
       #

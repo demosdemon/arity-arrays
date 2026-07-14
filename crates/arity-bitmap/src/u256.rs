@@ -1,9 +1,8 @@
 //! The 256-bit bitmap backing (`Bitmap::Index == u8`).
 //!
-//! Two interchangeable backings select on the `ethnum` feature: the
-//! self-contained two-limb `U256` (default), or a re-export of `ethnum::U256`
-//! (feature `ethnum`). Both implement the same [`Bitmap`] surface; the type is
-//! `#[doc(hidden)]` and named only via `<Arity256 as Arity>::Bitmap`.
+//! [`U256`] is re-exported from [`ethnum`]; the crate implements the [`Bitmap`]
+//! surface on it. It is nameable as `<Arity256 as Arity>::Bitmap` and, from
+//! `arity-arrays`, as `arity_arrays::bitmap::U256`.
 
 use arity_index::Niche;
 
@@ -14,271 +13,6 @@ use crate::Sealed;
 // Wire-up invariant: the u8 index domain (256) must equal the bit width.
 const _: () = assert!(<u8 as Niche>::COUNT == 256);
 
-// ---- Default backing: a self-contained two-limb integer (pure safe code).
-// ----
-#[cfg(not(feature = "ethnum"))]
-mod custom {
-    use super::Bitmap;
-    use super::Raw;
-    use super::Sealed;
-
-    /// A 256-bit bitmap: bit `i` lives in `lo` for `i < 128`, else in `hi` at
-    /// `i - 128`.
-    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-    pub struct U256 {
-        lo: u128,
-        hi: u128,
-    }
-
-    impl U256 {
-        /// Splits a bit index `i` (`< 256`) into `(limb_is_hi,
-        /// bit_within_limb)`.
-        #[inline]
-        const fn split(i: u8) -> (bool, u32) {
-            if i < 128 {
-                (false, i as u32)
-            } else {
-                (true, (i - 128) as u32)
-            }
-        }
-
-        /// Builds a `U256` from its two little-endian 128-bit limbs. Internal
-        /// helper for the byte surface; not part of the public API.
-        #[inline]
-        pub(crate) const fn from_limbs(lo: u128, hi: u128) -> Self {
-            Self { lo, hi }
-        }
-    }
-
-    /// Position (`< 128`) of the `n`-th set bit of a `u128` limb. Precondition:
-    /// `n < limb.count_ones()`. Popcount-guided binary search, `O(log 128)`.
-    #[inline]
-    const fn select_in_u128(limb: u128, n: u32) -> usize {
-        let mut n = n;
-        let mut x = limb;
-        let mut pos = 0usize;
-        let mut size: u32 = 64;
-        loop {
-            let lo_count = (x & ((1u128 << size) - 1)).count_ones();
-            if n >= lo_count {
-                n -= lo_count;
-                x >>= size;
-                pos += size as usize;
-            }
-            if size == 1 {
-                return pos;
-            }
-            size /= 2;
-        }
-    }
-
-    /// Two-limb little-endian mask of bits `[0, k)` for the custom `U256`
-    /// (`k <= 256`): `(lo_mask, hi_mask)`.
-    #[inline]
-    const fn low_mask(k: usize) -> (u128, u128) {
-        if k == 0 {
-            (0, 0)
-        } else if k < 128 {
-            ((1u128 << k) - 1, 0)
-        } else if k == 128 {
-            (!0, 0)
-        } else if k < 256 {
-            (!0, (1u128 << (k - 128)) - 1)
-        } else {
-            (!0, !0)
-        }
-    }
-
-    impl Sealed for U256 {}
-
-    impl Raw for U256 {
-        #[inline]
-        fn raw_is_zero(self) -> bool {
-            self.lo == 0 && self.hi == 0
-        }
-        #[inline]
-        fn raw_popcount(self) -> u32 {
-            self.lo.count_ones() + self.hi.count_ones()
-        }
-        #[inline]
-        fn raw_lowest_pos(self) -> usize {
-            if self.lo != 0 {
-                self.lo.trailing_zeros() as usize
-            } else {
-                128 + self.hi.trailing_zeros() as usize
-            }
-        }
-        #[inline]
-        fn raw_highest_pos(self) -> usize {
-            if self.hi != 0 {
-                128 + self.hi.ilog2() as usize
-            } else {
-                self.lo.ilog2() as usize
-            }
-        }
-        #[inline]
-        fn raw_clear_lowest(self) -> Self {
-            if self.lo != 0 {
-                Self {
-                    lo: self.lo & self.lo.wrapping_sub(1),
-                    hi: self.hi,
-                }
-            } else {
-                Self {
-                    lo: 0,
-                    hi: self.hi & self.hi.wrapping_sub(1),
-                }
-            }
-        }
-        #[inline]
-        fn raw_clear_highest(self) -> Self {
-            if self.hi != 0 {
-                Self {
-                    lo: self.lo,
-                    hi: self.hi & !(1u128 << self.hi.ilog2()),
-                }
-            } else if self.lo != 0 {
-                Self {
-                    lo: self.lo & !(1u128 << self.lo.ilog2()),
-                    hi: 0,
-                }
-            } else {
-                self
-            }
-        }
-        #[inline]
-        fn raw_select(self, n: u32) -> Option<usize> {
-            let lo_pop = self.lo.count_ones();
-            if n < lo_pop {
-                Some(select_in_u128(self.lo, n))
-            } else {
-                let n_hi = n - lo_pop;
-                if n_hi < self.hi.count_ones() {
-                    Some(128 + select_in_u128(self.hi, n_hi))
-                } else {
-                    None
-                }
-            }
-        }
-        #[inline]
-        fn raw_nearest_clear_at_or_below(self, from: usize) -> Option<usize> {
-            debug_assert!(from < 256);
-            // Bits [0, from] inclusive == low_mask(from + 1).
-            let (lo_mask, hi_mask) = low_mask(from + 1);
-            let holes_lo = !self.lo & lo_mask;
-            let holes_hi = !self.hi & hi_mask;
-            if holes_hi != 0 {
-                Some(128 + holes_hi.ilog2() as usize)
-            } else if holes_lo != 0 {
-                Some(holes_lo.ilog2() as usize)
-            } else {
-                None
-            }
-        }
-
-        #[inline]
-        fn raw_nearest_clear_in(self, from: usize, limit: usize) -> Option<usize> {
-            debug_assert!(from <= limit && limit <= 256);
-            let (l_lo, l_hi) = low_mask(limit);
-            let (f_lo, f_hi) = low_mask(from);
-            let holes_lo = !self.lo & l_lo & !f_lo;
-            let holes_hi = !self.hi & l_hi & !f_hi;
-            if holes_lo != 0 {
-                Some(holes_lo.trailing_zeros() as usize)
-            } else if holes_hi != 0 {
-                Some(128 + holes_hi.trailing_zeros() as usize)
-            } else {
-                None
-            }
-        }
-    }
-
-    impl Bitmap for U256 {
-        type Index = u8;
-        const WIDTH: usize = 256;
-        const ZERO: Self = Self { lo: 0, hi: 0 };
-
-        #[inline]
-        fn is_zero(self) -> bool {
-            self.lo == 0 && self.hi == 0
-        }
-        #[inline]
-        fn count_ones(self) -> u32 {
-            self.lo.count_ones() + self.hi.count_ones()
-        }
-        #[inline]
-        fn test(self, i: u8) -> bool {
-            let (is_hi, bit) = Self::split(i);
-            let limb = if is_hi { self.hi } else { self.lo };
-            limb & (1u128 << bit) != 0
-        }
-        #[inline]
-        fn with_bit(self, i: u8) -> Self {
-            let (is_hi, bit) = Self::split(i);
-            if is_hi {
-                Self {
-                    lo: self.lo,
-                    hi: self.hi | (1u128 << bit),
-                }
-            } else {
-                Self {
-                    lo: self.lo | (1u128 << bit),
-                    hi: self.hi,
-                }
-            }
-        }
-        #[inline]
-        fn rank(self, i: u8) -> u32 {
-            let (is_hi, bit) = Self::split(i);
-            if is_hi {
-                let hi_mask = (1u128 << bit) - 1;
-                self.lo.count_ones() + (self.hi & hi_mask).count_ones()
-            } else {
-                let lo_mask = (1u128 << bit) - 1;
-                (self.lo & lo_mask).count_ones()
-            }
-        }
-        #[inline]
-        fn without_bit(self, i: u8) -> Self {
-            let (is_hi, bit) = Self::split(i);
-            if is_hi {
-                Self {
-                    lo: self.lo,
-                    hi: self.hi & !(1u128 << bit),
-                }
-            } else {
-                Self {
-                    lo: self.lo & !(1u128 << bit),
-                    hi: self.hi,
-                }
-            }
-        }
-        #[inline]
-        fn to_le_bytes(self, buf: &mut [u8]) {
-            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
-            buf[..16].copy_from_slice(&self.lo.to_le_bytes());
-            buf[16..].copy_from_slice(&self.hi.to_le_bytes());
-        }
-        #[inline]
-        fn from_le_bytes(buf: &[u8]) -> Self {
-            // Guard the length before the `buf[..16]`/`buf[16..]` slicing below,
-            // which would otherwise panic with a slice-range message for a buffer
-            // shorter than one limb.
-            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
-            let mut lo = [0u8; 16];
-            let mut hi = [0u8; 16];
-            lo.copy_from_slice(&buf[..16]);
-            hi.copy_from_slice(&buf[16..]);
-            Self::from_limbs(u128::from_le_bytes(lo), u128::from_le_bytes(hi))
-        }
-    }
-}
-#[cfg(not(feature = "ethnum"))]
-pub use custom::U256;
-
-// ---- Optional backing: re-export `ethnum::U256` (a real 256-bit integer).
-// ----
-#[cfg(feature = "ethnum")]
 mod ethnum_backed {
     pub use ethnum::U256;
 
@@ -429,21 +163,18 @@ mod ethnum_backed {
         fn without_bit(self, i: u8) -> Self {
             self & !(ONE << u32::from(i))
         }
+        type Bytes = [u8; 32];
         #[inline]
-        fn to_le_bytes(self, buf: &mut [u8]) {
-            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
-            buf.copy_from_slice(&Self::to_le_bytes(self));
+        fn to_bytes(self) -> Self::Bytes {
+            // ethnum's inherent method returns [u8; 32].
+            Self::to_le_bytes(self)
         }
         #[inline]
-        fn from_le_bytes(buf: &[u8]) -> Self {
-            assert_eq!(buf.len(), Self::BYTES, "{}", crate::BYTE_LEN_PANIC_MSG);
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(buf);
-            Self::from_le_bytes(arr)
+        fn from_bytes(bytes: Self::Bytes) -> Self {
+            Self::from_le_bytes(bytes)
         }
     }
 }
-#[cfg(feature = "ethnum")]
 pub use ethnum_backed::U256;
 
 #[cfg(test)]
@@ -543,26 +274,22 @@ mod tests {
             .with_bit(127)
             .with_bit(128)
             .with_bit(254);
-        let mut buf = [0u8; 32];
-        <U256 as Bitmap>::to_le_bytes(bm, &mut buf);
+        let bytes = <U256 as Bitmap>::to_bytes(bm);
         // bit 128 is the lowest bit of the high limb -> first byte of the second half.
-        assert_eq!(buf[16], 0b0000_0001);
-        assert_eq!(<U256 as Bitmap>::from_le_bytes(&buf), bm);
+        assert_eq!(bytes[16], 0b0000_0001);
+        assert_eq!(<U256 as Bitmap>::from_bytes(bytes), bm);
     }
 
     #[test]
-    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
-    fn from_le_bytes_wrong_length_u256_panics() {
-        // U256 wants BYTES == 32; an 8-byte buffer (shorter than one 16-byte limb)
-        // is the case the length precondition must catch before the limb slicing.
-        let _ = <crate::U256 as crate::Bitmap>::from_le_bytes(&[0u8; 8]);
-    }
-
-    #[test]
-    #[should_panic(expected = "byte buffer length must equal Bitmap::BYTES")]
-    fn to_le_bytes_wrong_length_u256_panics() {
-        let mut out = [0u8; 31]; // too small for U256 (BYTES == 32)
-        crate::Bitmap::to_le_bytes(<crate::U256 as crate::Bitmap>::ZERO, &mut out);
+    fn try_from_bytes_checks_length_u256() {
+        let bm = U256::ZERO.with_bit(3).with_bit(128).with_bit(254);
+        // Exact length round-trips; every other length is rejected (U256 wants 32).
+        assert_eq!(
+            <U256 as Bitmap>::try_from_bytes(bm.to_bytes().as_ref()),
+            Some(bm)
+        );
+        assert_eq!(<U256 as Bitmap>::try_from_bytes(&[0u8; 8]), None);
+        assert_eq!(<U256 as Bitmap>::try_from_bytes(&[0u8; 31]), None);
     }
 
     #[test]

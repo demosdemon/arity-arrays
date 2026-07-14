@@ -37,22 +37,17 @@ safety-load-bearing for that crate even though this one is
 | Feature | Default | Description |
 | :--- | :---: | :--- |
 | `8`, `16`, `32`, `64`, `128`, `256` | ✓ | Per-arity gating — compile only the bitmap backings you use (`8` → `u8`, …, `128` → `u128`, `256` → the 256-bit backing). Forwards to the matching `arity-index` feature. |
-| `ethnum` | | Swaps the arity-256 backing from the self-contained two-limb `U256` to [`ethnum::U256`](https://docs.rs/ethnum). Takes effect only when `256` is also enabled. |
 | `std` | | Forwards `std`; the crate is `no_std`-first. |
 
 The arity features are **additive**. The test suite runs only under the default
 (all-arity) feature set — run `cargo test`, not a per-arity `cargo test`.
 
-### The 256-bit backing is opaque
+### The 256-bit backing
 
-By default, arity-256 uses a self-contained two-limb `U256`; the `ethnum` feature
-swaps it for `ethnum::U256`. **The concrete 256-bit type is `#[doc(hidden)]` and
-is not a stable API name.** Access the arity-256 bitmap only through the trait —
-`<Arity256 as Arity>::Bitmap`, or generically as `B: Bitmap` — never by naming
-`U256` directly. Because no supported code path names the concrete type, the
-`ethnum` swap is a non-observable implementation detail (it does not change any
-stable type identity). Naming `arity_bitmap::U256` directly is unsupported and may
-break between releases.
+Arity-256 is backed by [`ethnum::U256`](https://docs.rs/ethnum), re-exported as
+`arity_bitmap::U256`. The supported surface is the [`Bitmap`] trait; `ethnum`'s
+inherent integer operations are reachable but not part of the stability
+guarantee. `ethnum` is a public dependency, pulled in by the `256` feature.
 
 ## `no_std`
 

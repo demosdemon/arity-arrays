@@ -274,8 +274,8 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Returns the logical-membership bitmap (`A::Bitmap::ZERO` when empty).
     ///
     /// `A::Bitmap` is the arity's backing integer; for
-    /// [`Arity256`](crate::Arity256) it is the `#[doc(hidden)]` `U256`,
-    /// which can be named as `<Arity256 as Arity>::Bitmap`.
+    /// [`Arity256`](crate::Arity256) it is `U256`, re-exported from `ethnum`
+    /// and nameable as `<Arity256 as Arity>::Bitmap`.
     #[must_use]
     pub fn bitmap(&self) -> A::Bitmap {
         self.0.map_or(A::Bitmap::ZERO, |ptr| {
@@ -1183,6 +1183,25 @@ pub struct GappedPresentIter<'a, T, A: Arity> {
     _marker: PhantomData<&'a T>,
 }
 
+impl<T, A: Arity> Clone for GappedPresentIter<'_, T, A> {
+    fn clone(&self) -> Self {
+        Self {
+            occ_bits: self.occ_bits.clone(),
+            live_bits: self.live_bits.clone(),
+            data: self.data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T, A: Arity> core::fmt::Debug for GappedPresentIter<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GappedPresentIter")
+            .field("remaining", &self.occ_bits.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a, T, A: Arity> Iterator for GappedPresentIter<'a, T, A> {
     type Item = (A::Index, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
@@ -1232,6 +1251,24 @@ pub struct GappedAllIter<'a, T, A: Arity> {
     present: GappedPresentIter<'a, T, A>,
     bitmap: A::Bitmap,
     slots: arity_index::NicheRangeInclusive<A::Index>,
+}
+
+impl<T, A: Arity> Clone for GappedAllIter<'_, T, A> {
+    fn clone(&self) -> Self {
+        Self {
+            present: self.present.clone(),
+            bitmap: self.bitmap,
+            slots: self.slots.clone(),
+        }
+    }
+}
+
+impl<T, A: Arity> core::fmt::Debug for GappedAllIter<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GappedAllIter")
+            .field("remaining", &self.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a, T, A: Arity> Iterator for GappedAllIter<'a, T, A> {
@@ -1284,11 +1321,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
     }
 }
 
-impl_dense_common!(
-    GappedArray,
-    GappedPresentIter,
-    "bit cursors iterate primitive bitmaps; clippy cannot see the assoc-type bound"
-);
+impl_dense_common!(GappedArray, GappedPresentIter);
 
 impl_logical_serde!(GappedArray, "GappedArray");
 
@@ -1833,5 +1866,22 @@ mod tests {
         let dbg = std::format!("{a:?}");
         assert!(dbg.contains("90"));
         assert_send_sync::<GappedArray<u16, Arity16>>();
+    }
+
+    #[test]
+    fn gapped_iterators_are_clone_and_debug() {
+        let mut g = GappedArray::<u32, Arity16>::new();
+        g.insert(U4::new_masked(1), 10);
+        g.insert(U4::new_masked(4), 40);
+
+        let present = g.iter_present();
+        let present_clone = present.clone();
+        assert!(std::format!("{present:?}").contains("GappedPresentIter"));
+        assert_eq!(present.count(), present_clone.count());
+
+        let all = g.iter();
+        let all_clone = all.clone();
+        assert!(std::format!("{all:?}").contains("GappedAllIter"));
+        assert_eq!(all.count(), all_clone.count());
     }
 }

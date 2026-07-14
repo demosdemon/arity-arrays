@@ -11,6 +11,7 @@ use crate::Bitmap;
 /// Holds a `Copy` snapshot of the bitmap and drains it from both ends.
 ///
 /// [`Niche`]: arity_index::Niche
+#[derive(Clone, Debug)]
 pub struct BitIter<B: Bitmap> {
     remaining: B,
 }
@@ -63,3 +64,23 @@ impl<B: Bitmap> ExactSizeIterator for BitIter<B> {
 }
 
 impl<B: Bitmap> FusedIterator for BitIter<B> {}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use arity_index::U4;
+
+    use crate::Bitmap;
+
+    #[test]
+    fn bit_iter_is_clone_and_debug() {
+        let it = u16::ZERO
+            .with_bit(U4::new_masked(1))
+            .with_bit(U4::new_masked(4))
+            .bits();
+        let cloned = it.clone();
+        assert!(alloc::format!("{it:?}").contains("BitIter"));
+        assert_eq!(it.count(), cloned.count());
+    }
+}

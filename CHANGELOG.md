@@ -21,6 +21,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `Drop`, `Eq`/`Hash`/`Debug` and thread-safety impls, conversions to and from
   `FixedArray` and `PackedArray`, and optional `serde` (logical form) plus the
   `serde_with::Compact` adapter.
+- `arity-arrays`, `arity-bitmap`: `Debug` and `Clone` on the public iterator
+  types (`BitIter` and the packed/gapped present-only and all-slots iterators).
 
 ### Changed
 
@@ -44,6 +46,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   spare-capacity occupancy point per cell, so it measures `GappedArray`'s common
   hole-fill/shift insert path instead of only the grow path. Developer tooling
   only — no library API change.
+- `arity-bitmap` (**breaking**): replace `Bitmap::to_le_bytes`/`from_le_bytes`
+  (a `&[u8]` API that panicked on a length mismatch) with an associated
+  `type Bytes = [u8; N]` plus `to_bytes`/`from_bytes`, making a wrong-length
+  buffer a compile error. A `try_from_bytes(&[u8]) -> Option<Self>` helper covers
+  the runtime-length case (e.g. decoding a wire buffer) without panicking. The
+  `Compact` serialization wire form is unchanged.
+- `arity-bitmap` (**breaking**): make `ethnum::U256` the sole 256-bit backing,
+  re-exported as the documented `arity_bitmap::U256`, and remove the custom
+  two-limb backing. The `256` feature now enables `ethnum` (a public dependency)
+  and the standalone `ethnum` feature is removed.
+- `arity-arrays`: narrow the `bitmap`/`index` facade modules to a fixed, named
+  set of re-exports from each sibling crate instead of whole-crate re-exports.
+  Every path that resolves today (e.g. `arity_arrays::index::U4`) still resolves;
+  new sibling items no longer propagate automatically.
 
 ### Fixed
 

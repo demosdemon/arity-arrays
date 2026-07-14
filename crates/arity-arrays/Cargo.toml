@@ -30,7 +30,6 @@ default = ["8", "16", "32", "64", "128", "256"]
 "256" = ["arity-index/256", "arity-bitmap/256"]
 serde = ["dep:serde", "arity-index/serde", "hybrid-array/serde"]
 serde_with = ["dep:serde_with", "serde"]
-ethnum = ["arity-bitmap/ethnum"]
 std = ["serde?/std", "serde_with?/std", "arity-index/std", "arity-bitmap/std"]
 
 [lints]

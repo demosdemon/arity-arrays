@@ -60,12 +60,14 @@ macro_rules! impl_size_witness {
 
 /// Emits the gap-agnostic value impls (`PartialEq`/`Eq`/`Hash`/`Debug`) and the
 /// thread-safety impls (`Send`/`Sync`/`UnwindSafe`/`RefUnwindSafe` for the
-/// array, `Send`/`Sync` for its present-iterator `$Iter`). `$reason` is the
-/// `#[expect]` justification for the iterator's raw pointer. Depends on `Arity`
-/// being in scope and on the inherent `bitmap()`, `count()`, and
-/// `iter_present()` methods of `$Ty`.
+/// array, `Send`/`Sync` for its present-iterator `$Iter`). The iterator's
+/// hand-written `Send` impl carries a scoped
+/// `#[expect(clippy::non_send_fields_in_send_ty)]`, since its `BitIter`
+/// bit-cursor fields are not `Copy` and clippy cannot prove the impl sound on
+/// its own. Depends on `Arity` being in scope and on the inherent
+/// `bitmap()`, `count()`, and `iter_present()` methods of `$Ty`.
 macro_rules! impl_dense_common {
-    ($Ty:ident, $Iter:ident, $reason:literal) => {
+    ($Ty:ident, $Iter:ident) => {
         impl<T: PartialEq, A: Arity> PartialEq for $Ty<T, A> {
             fn eq(&self, other: &Self) -> bool {
                 self.bitmap() == other.bitmap()
@@ -115,7 +117,11 @@ macro_rules! impl_dense_common {
         // `Send`/`Sync` exactly when `T: Sync`. The all-slots iterator borrows
         // `&$Ty`, so it derives `Send`/`Sync` automatically once the array is
         // `Sync`.
-        #[expect(clippy::non_send_fields_in_send_ty, reason = $reason)]
+        #[expect(
+            clippy::non_send_fields_in_send_ty,
+            reason = "the present-iterator holds a raw `*const T` read-only for its borrow; \
+                      clippy cannot prove the hand-written Send sound"
+        )]
         // SAFETY: the raw pointer is used only for shared reads for the lifetime
         // the iterator borrows its source array; it never aliases a mutable reference.
         unsafe impl<T: Sync, A: Arity> Send for $Iter<'_, T, A> {}
@@ -139,9 +145,11 @@ macro_rules! impl_compact_adapter {
                 source: &$Ty<T, A>,
                 serializer: S,
             ) -> ::core::result::Result<S::Ok, S::Error> {
-                let mut buf = alloc::vec![0u8; <A::Bitmap as Bitmap>::BYTES];
-                source.bitmap().to_le_bytes(&mut buf);
-                (buf, PresentValues(|| source.iter_present().map(|(_, v)| v)))
+                let bytes = source.bitmap().to_bytes();
+                (
+                    bytes.as_ref(),
+                    PresentValues(|| source.iter_present().map(|(_, v)| v)),
+                )
                     .serialize(serializer)
             }
         }
@@ -151,10 +159,9 @@ macro_rules! impl_compact_adapter {
                 deserializer: D,
             ) -> ::core::result::Result<$Ty<T, A>, D::Error> {
                 let (buf, values): (Vec<u8>, Vec<T>) = Deserialize::deserialize(deserializer)?;
-                if buf.len() != <A::Bitmap as Bitmap>::BYTES {
-                    return Err(::serde::de::Error::invalid_length(buf.len(), &COMPACT_LEN_ERR));
-                }
-                let bitmap = <A::Bitmap as Bitmap>::from_le_bytes(&buf);
+                let bitmap = <A::Bitmap as Bitmap>::try_from_bytes(&buf).ok_or_else(|| {
+                    ::serde::de::Error::invalid_length(buf.len(), &COMPACT_LEN_ERR)
+                })?;
                 if bitmap.count_ones() as usize != values.len() {
                     return Err(::serde::de::Error::custom(COMPACT_POPCOUNT_ERR));
                 }

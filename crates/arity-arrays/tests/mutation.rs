@@ -156,7 +156,7 @@ proptest! {
         ops in proptest::collection::vec(op256_strategy(), 0..200),
     ) {
         // Arity-256 uses `u8` directly as the index, so every byte is a valid
-        // slot — no masking. Exercises the U256 two-limb rank/with_bit/without_bit.
+        // slot — no masking. Exercises the full-width U256 rank/with_bit/without_bit.
         let mut packed: PackedArray<u32, Arity256> = PackedArray::new();
         let mut oracle: BTreeMap<u8, u32> = BTreeMap::new();
         for op in ops {

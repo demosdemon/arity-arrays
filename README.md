@@ -228,8 +228,8 @@ All three crates expose per-arity features `8`, `16`, `32`, `64`, `128`, `256`
 (all default-on) so a consumer can compile only the widths it uses — e.g. the
 hexary (firewood) shape is `default-features = false, features = ["16"]`. The
 features are **additive** and safe to combine. The arrays crate additionally
-offers `serde`, `serde_with` (the `Compact` adapter), an `ethnum` arity-256
-backing passthrough, and `std`. See each crate's README for the full table.
+offers `serde`, `serde_with` (the `Compact` adapter), and `std`. See each
+crate's README for the full table.
 
 > [!NOTE]
 > The test suite runs only under the default (all-arity) feature set — run
@@ -245,11 +245,11 @@ Under Cargo semver, `0.1.x` signals that a breaking change bumps the minor
 version.
 
 - The arity features are additive and safe to combine.
-- `ethnum` is **additive within the stability guarantee**: it changes the concrete
-  type of the 256-bit bitmap backing, but that type is `#[doc(hidden)]` and is not
-  a stable API name (access it only through `<Arity256 as Arity>::Bitmap` or
-  generically as `B: Bitmap`), so the swap has no supported type-identity
-  consequence. See the `arity-bitmap` README.
+- `ethnum` is a **public dependency**, pulled in by the `256` feature: its `U256`
+  is re-exported as the documented `arity_bitmap::U256`, the sole 256-bit backing.
+  The supported surface is the `Bitmap` trait; `ethnum`'s inherent integer
+  operations are reachable but not part of the stability guarantee. See the
+  `arity-bitmap` README.
 - The serde wire formats (the logical form and `Compact`) are snapshot-locked but
   **not yet guaranteed stable**: they may change before `1.0` if a production
   consumer's encoding needs differ.

@@ -1,5 +1,6 @@
 //! Snapshot the wire formats (so drift is a reviewable diff) and assert the
-//! Compact bitmap encoding is backing-independent.
+//! Compact bitmap encoding is a canonical little-endian form, independent of
+//! the in-memory representation.
 #![cfg(feature = "serde_with")]
 
 use arity_arrays::Arity16;

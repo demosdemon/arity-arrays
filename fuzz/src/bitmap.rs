@@ -1,5 +1,5 @@
 //! Shared harness for the `bitmap_roundtrip` fuzz target: byte<->bitmap
-//! totality plus accessor self-consistency for `U256` (the two-limb backing).
+//! totality plus accessor self-consistency for `U256`.
 //!
 //! `#[path]`-included by `fuzz_targets/bitmap_roundtrip.rs`.
 
@@ -10,19 +10,15 @@ pub fn bitmap_roundtrip_run<B: Bitmap>(bytes: &[u8])
 where
     <B as Bitmap>::Index: std::fmt::Debug,
 {
-    // Unreachable from the thin wrapper (always 32 bytes); guards generic-fn
-    // misuse so from_le_bytes never sees a wrong-length buffer (its panic
-    // precondition).
-    if bytes.len() != B::BYTES {
+    // `try_from_bytes` rejects any length != BYTES; the thin wrapper always
+    // passes 32 bytes, so this guards only against generic-fn misuse.
+    let Some(b) = B::try_from_bytes(bytes) else {
         return;
-    }
-
-    let b = B::from_le_bytes(bytes);
+    };
 
     // Byte round-trip is total: every pattern is a valid width-WIDTH bitmap.
-    let mut out = vec![0u8; B::BYTES];
-    b.to_le_bytes(&mut out);
-    assert_eq!(out.as_slice(), bytes);
+    let out = b.to_bytes();
+    assert_eq!(out.as_ref(), bytes);
 
     // bits() enumerates exactly the set positions.
     assert_eq!(b.bits().count() as u32, b.count_ones());

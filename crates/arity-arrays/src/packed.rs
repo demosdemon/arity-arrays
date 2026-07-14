@@ -158,8 +158,8 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// Returns the bitmap of present slots (`A::Bitmap::ZERO` when empty).
     ///
     /// `A::Bitmap` is the arity's backing integer; for
-    /// [`Arity256`](crate::Arity256) it is the `#[doc(hidden)]` `U256`,
-    /// which can be named as `<Arity256 as Arity>::Bitmap`.
+    /// [`Arity256`](crate::Arity256) it is `U256`, re-exported from `ethnum`
+    /// and nameable as `<Arity256 as Arity>::Bitmap`.
     #[must_use]
     pub const fn bitmap(&self) -> A::Bitmap {
         match self.0 {
@@ -553,6 +553,25 @@ impl<'a, T, A: Arity> PackedPresentIter<'a, T, A> {
     }
 }
 
+impl<T, A: Arity> Clone for PackedPresentIter<'_, T, A> {
+    fn clone(&self) -> Self {
+        Self {
+            bits: self.bits.clone(),
+            bitmap: self.bitmap,
+            data: self.data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T, A: Arity> core::fmt::Debug for PackedPresentIter<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PackedPresentIter")
+            .field("remaining", &self.bits.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a, T, A: Arity> Iterator for PackedPresentIter<'a, T, A> {
     type Item = (A::Index, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
@@ -602,6 +621,27 @@ pub struct PackedAllIter<'a, T, A: Arity> {
     slots: arity_index::NicheRangeInclusive<A::Index>,
     front_rank: usize,
     back_consumed: usize,
+}
+
+impl<T, A: Arity> Clone for PackedAllIter<'_, T, A> {
+    fn clone(&self) -> Self {
+        Self {
+            array: self.array,
+            bitmap: self.bitmap,
+            count: self.count,
+            slots: self.slots.clone(),
+            front_rank: self.front_rank,
+            back_consumed: self.back_consumed,
+        }
+    }
+}
+
+impl<T, A: Arity> core::fmt::Debug for PackedAllIter<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PackedAllIter")
+            .field("remaining", &self.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a, T, A: Arity> Iterator for PackedAllIter<'a, T, A> {
@@ -723,12 +763,7 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
     }
 }
 
-impl_dense_common!(
-    PackedArray,
-    PackedPresentIter,
-    "`bits` iterates over `A::Bitmap`, a primitive type that is always Send; \
-     clippy cannot verify the associated-type bound statically"
-);
+impl_dense_common!(PackedArray, PackedPresentIter);
 
 impl_logical_serde!(PackedArray, "PackedArray");
 
@@ -1191,5 +1226,22 @@ mod tests {
         p.insert(U4::new_masked(0), ());
         p.insert(U4::new_masked(5), ());
         assert_eq!(p.allocated_size(), core::mem::size_of::<u16>());
+    }
+
+    #[test]
+    fn packed_iterators_are_clone_and_debug() {
+        let mut p = PackedArray::<u32, Arity16>::new();
+        p.insert(U4::new_masked(1), 10);
+        p.insert(U4::new_masked(4), 40);
+
+        let present = p.iter_present();
+        let present_clone = present.clone();
+        assert!(std::format!("{present:?}").contains("PackedPresentIter"));
+        assert_eq!(present.count(), present_clone.count());
+
+        let all = p.iter();
+        let all_clone = all.clone();
+        assert!(std::format!("{all:?}").contains("PackedAllIter"));
+        assert_eq!(all.count(), all_clone.count());
     }
 }

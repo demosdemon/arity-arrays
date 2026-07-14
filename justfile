@@ -68,7 +68,7 @@ setup:
 
 # Arities are mutually exclusive in the powerset, so each is linted alone
 # (8/16/32/64/128/256) rather than in redundant multi-arity subsets; the orthogonal
-# serde/serde_with/ethnum/std features are powerset on top, capped at 4 simultaneous
+# serde/serde_with/std features are powerset on top, capped at 4 simultaneous
 # flags. --exclude-features default drops the synthetic all-arity `default` member
 # (the all-arity build is already covered by `lint` and the test job); without it
 # cargo-hack would re-introduce multi-arity combos that slip past

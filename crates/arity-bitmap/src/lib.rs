@@ -34,29 +34,14 @@ mod u256;
 
 use arity_index::Niche;
 pub use iter::BitIter;
-#[cfg(feature = "256")]
-#[doc(hidden)]
-pub use u256::U256;
-
-/// Panic message shared by every `Bitmap::{from,to}_le_bytes` implementation
-/// when the byte buffer length does not equal [`Bitmap::BYTES`]. Owning the
-/// message — rather than leaning on `copy_from_slice`'s internal wording —
-/// keeps it uniform across backings (the two-limb `U256` would otherwise report
-/// a slice-range panic for a buffer shorter than one limb) and stable for the
-/// byte-length contract tests.
+/// The 256-bit bitmap backing, re-exported from [`ethnum`].
 ///
-/// Gated to the same set of width features as the `Bitmap` impls that reference
-/// it: with no width feature selected the crate implements `Bitmap` for
-/// nothing, so the constant would otherwise be dead code.
-#[cfg(any(
-    feature = "8",
-    feature = "16",
-    feature = "32",
-    feature = "64",
-    feature = "128",
-    feature = "256"
-))]
-pub(crate) const BYTE_LEN_PANIC_MSG: &str = "byte buffer length must equal Bitmap::BYTES";
+/// The supported, semver-guaranteed surface is the [`Bitmap`] trait. `ethnum`'s
+/// inherent arithmetic/`Ord` surface is reachable through this type but is not
+/// part of the stability guarantee; `ethnum` is a public dependency (pulled in
+/// by the `256` feature).
+#[cfg(feature = "256")]
+pub use u256::U256;
 
 /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
 trait Sealed {}
@@ -127,6 +112,11 @@ trait Raw: Sealed + Copy + Eq {
 pub trait Bitmap: Copy + Eq + Raw {
     /// The niche index type; `Index::COUNT == WIDTH`.
     type Index: Niche;
+    /// The little-endian byte form (`[u8; BYTES]`). Carrying the length in the
+    /// type makes a wrong-sized buffer a compile error rather than a runtime
+    /// panic. The encoding is canonical: it does not depend on any
+    /// implementor's in-memory representation.
+    type Bytes: AsRef<[u8]> + AsMut<[u8]> + Default;
     /// The number of bits (`8`, `16`, `32`, `64`, `128`, or `256`).
     const WIDTH: usize;
     /// The number of bytes in the little-endian byte form (`WIDTH / 8`).
@@ -197,16 +187,27 @@ pub trait Bitmap: Copy + Eq + Raw {
                 .expect("clear-bit position < WIDTH == Index::COUNT"),
         )
     }
-    /// Writes the bitmap as `BYTES` little-endian bytes into `buf`.
+    /// Returns the bitmap's little-endian byte encoding.
+    fn to_bytes(self) -> Self::Bytes;
+    /// Reconstructs a bitmap from its little-endian byte encoding.
+    fn from_bytes(bytes: Self::Bytes) -> Self;
+    /// Reconstructs a bitmap from a little-endian byte slice, returning `None`
+    /// unless `buf.len()` equals [`BYTES`](Bitmap::BYTES).
     ///
-    /// `buf.len()` must equal [`BYTES`](Bitmap::BYTES); a wrong length panics.
-    /// The byte form is backing-independent — it does not depend on the limb
-    /// layout of any particular backing.
-    fn to_le_bytes(self, buf: &mut [u8]);
-    /// Reads a bitmap from `BYTES` little-endian bytes.
-    ///
-    /// `buf.len()` must equal [`BYTES`](Bitmap::BYTES); a wrong length panics.
-    fn from_le_bytes(buf: &[u8]) -> Self;
+    /// The fallible counterpart to [`from_bytes`](Bitmap::from_bytes) for a
+    /// runtime-length buffer (e.g. a decoded wire form): it validates the
+    /// length and copies into [`Bytes`](Bitmap::Bytes), so callers do not
+    /// open-code the check-and-copy dance around the statically-sized
+    /// `from_bytes`.
+    #[must_use]
+    fn try_from_bytes(buf: &[u8]) -> Option<Self> {
+        if buf.len() != Self::BYTES {
+            return None;
+        }
+        let mut bytes = Self::Bytes::default();
+        bytes.as_mut().copy_from_slice(buf);
+        Some(Self::from_bytes(bytes))
+    }
     /// Iterates over the set bits, ascending, as a double-ended iterator.
     fn bits(self) -> BitIter<Self> {
         BitIter::new(self)
