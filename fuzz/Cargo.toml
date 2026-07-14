@@ -20,7 +20,7 @@ arbitrary = { version = "1", features = ["derive"] }
 # format and can invalidate accumulated corpus (corpus is not committed).
 postcard = { version = "1.1.3", features = ["use-std"] }
 serde_with = "3.21.0"
-arity-arrays= { version = "0.1.0", path = "../crates/arity-arrays", features = ["serde_with"] }
+arity-arrays= { version = "0.2.0-alpha.1", path = "../crates/arity-arrays", features = ["serde_with"] }
 
 [[bin]]
 name = "mutation_16"
