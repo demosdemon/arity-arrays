@@ -80,31 +80,89 @@ workflow's `workflow_dispatch` inputs trigger an ad-hoc comparison between any t
 None of these commit anything — see `.github/workflows/bench-compare.yml`. Compare two
 local captures the same way with `just bench-compare <run> <baseline>`.
 
-Current state, medians on an Apple M3 Max (MacBook Pro), the array layouts vs
-the standard maps (`usize` keys) at Arity256, full occupancy:
+Current state, medians on an AWS Graviton5 CPU (EC2 `c9g.4xlarge`), the array
+layouts vs the standard maps (`usize` keys) at Arity256, full occupancy:
 
 <!-- bench:start -->
-**Cell A (Arity16) single-op (median, max occupancy)**
+**Cell A (Arity16) single-op (median ns)**
+
+| op | occ | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `get_hit` | 16 | 2.64 | 0.87 | 0.86 | 16.25 | 10.08 | 0.91 |
+| `get_miss` | 12 | 4.70 | 0.87 | 0.86 | 0.49 | 8.69 | 0.50 |
+| `insert_new` | 12 | 14.49 | 4.73 | 3.79 | 15.17 | 17.53 | 37.20 |
+| `insert_replace` | 16 | 13.17 | 4.23 | 3.76 | 8.84 | 22.59 | 7.81 |
+| `iter_present` | 16 | 21.29 | 11.49 | 9.41 | 16.77 | 16.94 | 22.93 |
+| `remove` | 16 | 24.77 | 4.24 | 3.40 | 7.25 | 24.33 | 31.26 |
+
+**Cell A (Arity16) workload (median ns)**
 
 | op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `get_hit` | 3.46 ns | 0.60 ns | 0.81 ns | 4.68 ns | 7.19 ns | 1.07 ns |
-| `get_miss` | 3.48 ns | 0.61 ns | 0.80 ns | 1.61 ns | 6.03 ns | 0.81 ns |
-| `insert_new` | 28.09 ns | 23.97 ns | 11.13 ns | 59.99 ns | 37.97 ns | 37.86 ns |
-| `insert_replace` | 59.80 ns | 22.89 ns | 11.63 ns | 24.54 ns | 41.99 ns | 18.07 ns |
-| `iter_present` | 16.89 ns | 7.06 ns | 9.10 ns | 22.77 ns | 9.48 ns | 18.82 ns |
-| `remove` | 72.28 ns | 25.59 ns | 11.22 ns | 23.80 ns | 45.86 ns | 45.96 ns |
+| `build` | 176.60 | 27.39 | 41.90 | 306.02 | 739.32 | 232.16 |
+| `churn` | 3450.89 | 695.04 | 719.96 | 4188.77 | 4401.46 | 3631.78 |
 
-**Cell B (Arity256) single-op (median, max occupancy)**
+**Cell B (Arity256) single-op (median ns)**
+
+| op | occ | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `get_hit` | 256 | 7.65 | 0.79 | 0.78 | 44.81 | 9.63 | 2.36 |
+| `get_miss` | 192 | 11.37 | 0.79 | 0.78 | 0.93 | 8.66 | 0.93 |
+| `insert_new` | 192 | 26.36 | 2.44 | 4.61 | 58.62 | 24.63 | 58.79 |
+| `insert_replace` | 256 | 16.86 | 3.08 | 4.68 | 24.06 | 21.94 | 4.65 |
+| `iter_present` | 256 | 241.90 | 75.07 | 104.03 | 648.99 | 202.97 | 978.63 |
+| `remove` | 256 | 22.13 | 2.36 | 4.77 | 26.73 | 25.44 | 51.14 |
+
+**Cell B (Arity256) workload (median ns)**
 
 | op | BTreeMap | BoxArr | FixedArray | GappedArray | HashMap | PackedArray |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `get_hit` | 5.49 ns | 0.54 ns | 0.52 ns | 13.37 ns | 7.58 ns | 1.53 ns |
-| `get_miss` | 9.68 ns | 0.49 ns | 0.48 ns | 0.78 ns | 5.99 ns | 0.81 ns |
-| `insert_new` | 331.03 ns | 26.40 ns | 80.85 ns | 513.13 ns | 31.33 ns | 44.72 ns |
-| `insert_replace` | 638.64 ns | 25.01 ns | 79.34 ns | 33.20 ns | 29.81 ns | 14.12 ns |
-| `iter_present` | 183.61 ns | 51.74 ns | 81.38 ns | 542.46 ns | 135.68 ns | 659.03 ns |
-| `remove` | 643.57 ns | 24.38 ns | 78.91 ns | 34.18 ns | 34.44 ns | 66.69 ns |
+| `build` | 4140.60 | 252.94 | 269.08 | 14789.31 | 10512.02 | 9705.73 |
+| `churn` | 32435.15 | 1299.63 | 1768.70 | 109084.58 | 41733.95 | 82408.86 |
+
+**Conversion (median ns, max occupancy)**
+
+| op | cell_a | cell_b |
+| :--- | ---: | ---: |
+| `pack` | 33.28 | 563.14 |
+| `unpack` | 56.93 | 1144.67 |
+
+**Trie arity16 clone (median ns)**
+
+| store | Bushy | Chain | Realistic |
+| :--- | ---: | ---: | ---: |
+| `BTreeStore` | 342483.78 | 14833.18 | 644597.76 |
+| `FixedStore` | 888195.35 | 10039.49 | 1152781.04 |
+| `GappedStore` | 308310.12 | 6956.91 | 472110.58 |
+| `PackedStore` | 300149.33 | 7285.31 | 466877.12 |
+
+**Trie arity16 drop (median ns)**
+
+| store | Bushy | Chain | Realistic |
+| :--- | ---: | ---: | ---: |
+| `BTreeStore` | 345463.32 | 9171.95 | 633331.14 |
+| `FixedStore` | 293533.40 | 6070.14 | 459756.21 |
+| `GappedStore` | 317851.80 | 8425.65 | 570922.04 |
+| `PackedStore` | 328232.93 | 8301.13 | 565936.58 |
+
+**Trie arity256 clone (median ns)**
+
+| store | Bushy | Chain | Realistic |
+| :--- | ---: | ---: | ---: |
+| `BTreeStore` | 342743.94 | 6923.96 | 606964.38 |
+| `FixedStore` | 16407849.00 | 69793.24 | 18446429.00 |
+| `GappedStore` | 386163.41 | 3320.39 | 511109.81 |
+| `PackedStore` | 332862.64 | 3530.19 | 493300.63 |
+
+**Trie arity256 drop (median ns)**
+
+| store | Bushy | Chain | Realistic |
+| :--- | ---: | ---: | ---: |
+| `BTreeStore` | 347580.21 | 4006.17 | 633991.25 |
+| `FixedStore` | 4686250.00 | 9447.57 | 5529837.00 |
+| `GappedStore` | 320097.02 | 3652.08 | 579639.72 |
+| `PackedStore` | 328474.25 | 3517.00 | 566534.33 |
+
 
 <!-- bench:end -->
 
