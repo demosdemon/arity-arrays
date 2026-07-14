@@ -5,72 +5,77 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
-## [Unreleased]
+## [arity-index 0.1.1] - 2026-07-14
+
+### Changed
+
+- Mark the trivial niche index accessors and conversions `#[inline]` so they
+  inline across crate boundaries.
+
+## [arity-bitmap 0.2.0-alpha.1] - 2026-07-14
 
 ### Added
 
-- `arity-arrays`: `GappedArray<T, A>` — a pointer-sized, heap-backed array that
-  keeps spare capacity and allows gaps, so deletes never move elements and
-  inserts move only to reach a nearby hole. It trades memory for mutation
-  throughput (geometric power-of-two growth bounded by `A::LEN`), complementing
-  `PackedArray`'s occupancy-proportional layout. The surface mirrors the other
-  containers: `get`/`get_mut`, move-free `remove` with capacity retention,
-  `insert` with shift-or-respread placement, capacity management
+- `Debug` and `Clone` on the public `BitIter`.
+- `Bitmap::nearest_clear_at_or_below` and `Bitmap::nearest_clear_in`,
+  O(1)-per-limb queries for the nearest clear bit at or below, or within, a
+  range. Their result is safety-load-bearing for `arity-arrays`'s unchecked
+  pointer arithmetic (documented at the source).
+
+### Changed
+
+- **Breaking:** replace `Bitmap::to_le_bytes`/`from_le_bytes` (a `&[u8]` API that
+  panicked on a length mismatch) with an associated `type Bytes = [u8; N]` plus
+  `to_bytes`/`from_bytes`, making a wrong-length buffer a compile error. A
+  `try_from_bytes(&[u8]) -> Option<Self>` helper covers the runtime-length case
+  (e.g. decoding a wire buffer) without panicking. The `Compact` serialization
+  wire form is unchanged.
+- **Breaking:** make `ethnum::U256` the sole 256-bit backing, re-exported as the
+  documented `arity_bitmap::U256`, and remove the custom two-limb backing. The
+  `256` feature now enables `ethnum` (a public dependency) and the standalone
+  `ethnum` feature is removed.
+- `Bitmap::select` is now O(log WIDTH) for both the native integer backings and
+  the 256-bit backing, replacing the previous linear scan.
+
+## [arity-arrays 0.2.0-alpha.1] - 2026-07-14
+
+### Added
+
+- `GappedArray<T, A>` — a pointer-sized, heap-backed array that keeps spare
+  capacity and allows gaps, so deletes never move elements and inserts move only
+  to reach a nearby hole. It trades memory for mutation throughput (geometric
+  power-of-two growth bounded by `A::LEN`), complementing `PackedArray`'s
+  occupancy-proportional layout. The surface mirrors the other containers:
+  `get`/`get_mut`, move-free `remove` with capacity retention, `insert` with
+  shift-or-respread placement, capacity management
   (`with_capacity`/`reserve`/`shrink_to_fit`/`clear`), present-only and
   all-slots double-ended iterators plus `IntoIterator`, panic-safe `Clone` and
   `Drop`, `Eq`/`Hash`/`Debug` and thread-safety impls, conversions to and from
   `FixedArray` and `PackedArray`, and optional `serde` (logical form) plus the
   `serde_with::Compact` adapter.
-- `arity-arrays`, `arity-bitmap`: `Debug` and `Clone` on the public iterator
-  types (`BitIter` and the packed/gapped present-only and all-slots iterators).
+- `Debug` and `Clone` on the public packed and gapped iterator types
+  (present-only and all-slots).
 
 ### Changed
 
-- `arity-bitmap`: `Bitmap::select` is now O(log WIDTH) for both the native
-  integer backings and the 256-bit backing, replacing the previous linear scan.
-- `arity-index`: mark the trivial niche index accessors and conversions
-  `#[inline]` so they inline across crate boundaries.
-- Migrate the benchmark harness from `divan` to `criterion`, run via
-  `cargo-criterion`. Benchmark results now export to JSON and feed an
-  in-workspace `xtask` that regenerates the README comparison tables and SVG
-  charts under `docs/bench/`. Developer tooling only — no library API change.
-- Add an automated CI A/B benchmark comparison: pull requests get an automatic quick
-  comparison posted as a PR comment, `@exec-complete-benchmark-comparison` triggers an
-  on-demand full-precision re-run, and every push to `main` compares against the
-  previous commit. Developer tooling only — no library API change.
-- `arity-bitmap`: add `Bitmap::nearest_clear_at_or_below` and
-  `Bitmap::nearest_clear_in`, O(1)-per-limb queries for the nearest clear bit at
-  or below, or within, a range. Their result is safety-load-bearing for
-  `arity-arrays`'s unchecked pointer arithmetic (documented at the source).
-- `arity-arrays`: the `insert_new` throughput benchmark now sweeps a
-  spare-capacity occupancy point per cell, so it measures `GappedArray`'s common
-  hole-fill/shift insert path instead of only the grow path. Developer tooling
-  only — no library API change.
-- `arity-bitmap` (**breaking**): replace `Bitmap::to_le_bytes`/`from_le_bytes`
-  (a `&[u8]` API that panicked on a length mismatch) with an associated
-  `type Bytes = [u8; N]` plus `to_bytes`/`from_bytes`, making a wrong-length
-  buffer a compile error. A `try_from_bytes(&[u8]) -> Option<Self>` helper covers
-  the runtime-length case (e.g. decoding a wire buffer) without panicking. The
-  `Compact` serialization wire form is unchanged.
-- `arity-bitmap` (**breaking**): make `ethnum::U256` the sole 256-bit backing,
-  re-exported as the documented `arity_bitmap::U256`, and remove the custom
-  two-limb backing. The `256` feature now enables `ethnum` (a public dependency)
-  and the standalone `ethnum` feature is removed.
-- `arity-arrays`: narrow the `bitmap`/`index` facade modules to a fixed, named
-  set of re-exports from each sibling crate instead of whole-crate re-exports.
-  Every path that resolves today (e.g. `arity_arrays::index::U4`) still resolves;
-  new sibling items no longer propagate automatically.
+- **Breaking:** remove the forwarding `ethnum` cargo feature. It re-exported
+  `arity-bitmap`'s standalone `ethnum` feature, which no longer exists; `ethnum`
+  is now pulled in unconditionally by the `256` feature.
+- Narrow the `bitmap`/`index` facade modules to a fixed, named set of re-exports
+  from each sibling crate instead of whole-crate re-exports. Every path that
+  resolves today (e.g. `arity_arrays::index::U4`) still resolves; new sibling
+  items no longer propagate automatically.
 
 ### Fixed
 
-- `arity-arrays`: `PackedArray::drop` no longer leaks its heap block when an
-  element's destructor panics. The deallocation is now armed in a drop guard
-  before the elements are dropped, so it still runs as the stack unwinds —
-  matching `GappedArray` and `std::Vec`. A Miri-checked regression test covers
-  the panicking-destructor path.
-- `arity-arrays`: `GappedArray` insert now locates the nearest hole with an
-  O(log WIDTH) bitmap query instead of an O(distance) bit-by-bit scan, restoring
-  its mutation-throughput advantage on the near-full / sequential workload it is
+- `PackedArray::drop` no longer leaks its heap block when an element's destructor
+  panics. The deallocation is now armed in a drop guard before the elements are
+  dropped, so it still runs as the stack unwinds — matching `GappedArray` and
+  `std::Vec`. A Miri-checked regression test covers the panicking-destructor
+  path.
+- `GappedArray` insert now locates the nearest hole with an O(log WIDTH) bitmap
+  query instead of an O(distance) bit-by-bit scan, restoring its
+  mutation-throughput advantage on the near-full / sequential workload it is
   designed for (previously ~3.8× slower `build` and ~2.3× slower `churn` than
   `PackedArray` for small payloads at wide arity).
 
@@ -110,4 +115,7 @@ to power-of-two arities 8–256.
 - Per-arity cargo features; optional `serde` (logical form) and a
   `serde_with::Compact` adapter; an `ethnum` backing passthrough; `std`.
 
+[arity-index 0.1.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.1
+[arity-bitmap 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.1
+[arity-arrays 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0-alpha.1
 [0.1.0]: https://github.com/demosdemon/arity-arrays/releases/tag/v0.1.0
