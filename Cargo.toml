@@ -13,8 +13,8 @@ license = "MIT"
 rust-version = "1.92"
 
 [workspace.dependencies]
-arity-arrays = { path = "crates/arity-arrays", version = "0.2.0-alpha.1" }
-arity-bitmap = { path = "crates/arity-bitmap", version = "0.2.0-alpha.1", default-features = false }
+arity-arrays = { path = "crates/arity-arrays", version = "0.2.0-alpha.2" }
+arity-bitmap = { path = "crates/arity-bitmap", version = "0.2.0-alpha.2", default-features = false }
 arity-index = { path = "crates/arity-index", version = "0.1.2", default-features = false }
 
 [workspace.lints.rust]

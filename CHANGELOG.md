@@ -34,7 +34,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 - Document `Niche::as_usize`'s `< COUNT` contract as safety-critical:
   `arity-arrays` relies on it for its internal `slice::get_unchecked` calls.
 
-## [arity-bitmap Unreleased]
+## [arity-bitmap 0.2.0-alpha.2] - 2026-07-15
 
 ### Changed
 
@@ -51,7 +51,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `count_ones`, `bits`, and the raw scan primitives) whose results feed
   `arity-arrays`'s unchecked pointer arithmetic.
 
-## [arity-arrays Unreleased]
+## [arity-arrays 0.2.0-alpha.2] - 2026-07-15
 
 ### Added
 
@@ -204,9 +204,9 @@ to power-of-two arities 8–256.
 - Per-arity cargo features; optional `serde` (logical form) and a
   `serde_with::Compact` adapter; an `ethnum` backing passthrough; `std`.
 
-[arity-index Unreleased]: https://github.com/demosdemon/arity-arrays/compare/arity-index-v0.1.1...HEAD
-[arity-bitmap Unreleased]: https://github.com/demosdemon/arity-arrays/compare/arity-bitmap-v0.2.0-alpha.1...HEAD
-[arity-arrays Unreleased]: https://github.com/demosdemon/arity-arrays/compare/arity-arrays-v0.2.0-alpha.1...HEAD
+[arity-arrays 0.2.0-alpha.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0-alpha.2
+[arity-bitmap 0.2.0-alpha.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.2
+[arity-index 0.1.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.2
 [arity-index 0.1.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.1
 [arity-bitmap 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.1
 [arity-arrays 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0-alpha.1
