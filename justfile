@@ -151,10 +151,12 @@ bench-export label:
     cargo criterion -p arity-arrays --message-format=json > bench-data/{{ label }}.json
 
 # With a second <baseline> label, also writes per-cell delta charts (run vs baseline),
-# e.g. `just bench-charts branch main`.
+# e.g. `just bench-charts branch main`. This recipe passes one capture per side;
+# for a capture set with replicates, call `xtask charts --head a.json b.json`
+# directly — it averages each side the way `xtask compare` does.
 # Regenerate docs/bench/ SVGs and the README comparison tables from a capture.
 bench-charts run baseline='':
-    cargo run -p xtask -- charts bench-data/{{ run }}.json {{ if baseline == '' { '' } else { 'bench-data/' + baseline + '.json' } }}
+    cargo run -p xtask -- charts --head bench-data/{{ run }}.json {{ if baseline == '' { '' } else { '--base bench-data/' + baseline + '.json' } }}
 
 # Unlike `bench-charts`, both labels are required: `xtask compare` always needs two
 # captures (there is no useful single-run mode). Prints the markdown table CI posts to

@@ -19,7 +19,7 @@ use std::process::ExitCode;
 use anyhow::Context;
 use anyhow::bail;
 
-const USAGE: &str = "usage: xtask charts <run.json> [<baseline.json>]\n       xtask compare --head <run.json>... --base <baseline.json>...";
+const USAGE: &str = "usage: xtask charts --head <run.json>... [--base <baseline.json>...]\n       xtask compare --head <run.json>... --base <baseline.json>...";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -42,20 +42,28 @@ fn main() -> ExitCode {
     }
 }
 
+/// `xtask charts --head <run.json>... [--base <baseline.json>...]`: regenerate
+/// the README tables and `docs/bench` SVGs from the run, plus run-vs-baseline
+/// delta charts when a baseline is given.
+///
+/// Both sides take multiple captures, averaged the same way [`run_compare`]
+/// averages them (point = mean, interval = envelope). That keeps a documented
+/// table and the delta table that accompanies it derived from the same
+/// replicates: publishing the mean of an interleaved run while comparing
+/// against its average would otherwise disagree by exactly the noise the
+/// replicates exist to cancel.
 fn run_charts(args: &[String]) -> anyhow::Result<()> {
-    let Some(run_path) = args.first() else {
-        bail!("missing <run.json> path");
-    };
-    let jsonl = std::fs::read_to_string(run_path).with_context(|| format!("read {run_path}"))?;
+    let (head_paths, base_paths) = parse_sides(args)?;
+    if head_paths.is_empty() {
+        bail!("charts needs --head <file...>");
+    }
     // Parse EVERYTHING (run, and baseline if given) before touching any file,
     // so a malformed input aborts without writing partial artifacts.
-    let measurements = ingest::parse_run(&jsonl).with_context(|| format!("parse {run_path}"))?;
-    let baseline = match args.get(1) {
-        Some(p) => {
-            let j = std::fs::read_to_string(p).with_context(|| format!("read {p}"))?;
-            Some(ingest::parse_run(&j).with_context(|| format!("parse {p}"))?)
-        }
-        None => None,
+    let measurements = ingest::average_runs(&read_runs(&head_paths)?);
+    let baseline = if base_paths.is_empty() {
+        None
+    } else {
+        Some(ingest::average_runs(&read_runs(&base_paths)?))
     };
 
     let table = tables::comparison_table(&measurements);
@@ -96,7 +104,10 @@ fn run_charts(args: &[String]) -> anyhow::Result<()> {
 /// captures on each side (interleaved A/B/B/A replicates) and print the
 /// markdown A/B delta table to stdout.
 fn run_compare(args: &[String]) -> anyhow::Result<()> {
-    let (head_paths, base_paths) = parse_compare_args(args)?;
+    let (head_paths, base_paths) = parse_sides(args)?;
+    if head_paths.is_empty() || base_paths.is_empty() {
+        bail!("compare needs --head <file...> and --base <file...>");
+    }
     let head = ingest::average_runs(&read_runs(&head_paths)?);
     let base = ingest::average_runs(&read_runs(&base_paths)?);
     print!("{}", compare::render_compare(&base, &head));
@@ -104,8 +115,10 @@ fn run_compare(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Split `--head <f>... --base <f>...` (either flag order) into two file
-/// groups. Each flag must precede at least one path.
-fn parse_compare_args(args: &[String]) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+/// groups. Neither side is required here — each subcommand states its own
+/// requirement, since `compare` needs both sides but `charts` needs only
+/// `--head`. A path before any flag is still an error.
+fn parse_sides(args: &[String]) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     enum Side {
         None,
         Head,
@@ -125,9 +138,6 @@ fn parse_compare_args(args: &[String]) -> anyhow::Result<(Vec<String>, Vec<Strin
             },
         }
     }
-    if head.is_empty() || base.is_empty() {
-        bail!("compare needs --head <file...> and --base <file...>");
-    }
     Ok((head, base))
 }
 
@@ -142,11 +152,11 @@ fn read_runs(paths: &[String]) -> anyhow::Result<Vec<Vec<ingest::Measurement>>> 
 
 #[cfg(test)]
 mod tests {
-    use super::parse_compare_args;
+    use super::parse_sides;
 
     #[test]
     fn splits_head_and_base_either_order() {
-        let (h, b) = parse_compare_args(&[
+        let (h, b) = parse_sides(&[
             "--head".into(),
             "h1.json".into(),
             "h2.json".into(),
@@ -158,7 +168,7 @@ mod tests {
         assert_eq!(b, ["b1.json"]);
 
         // Flag order does not matter.
-        let (h, b) = parse_compare_args(&[
+        let (h, b) = parse_sides(&[
             "--base".into(),
             "b1.json".into(),
             "b2.json".into(),
@@ -171,17 +181,22 @@ mod tests {
     }
 
     #[test]
-    fn errors_on_missing_side_or_leading_arg() {
+    fn a_missing_side_parses_empty_for_the_subcommand_to_reject() {
+        // `charts` accepts a bare `--head`, so the split itself must not
+        // reject one. `run_charts`/`run_compare` enforce their own arity.
+        let (h, b) = parse_sides(&["--head".into(), "h.json".into()]).unwrap();
+        assert_eq!(h, ["h.json"]);
+        assert!(b.is_empty(), "absent --base yields an empty base side");
+
+        let (h, b) = parse_sides(&["--base".into(), "b.json".into()]).unwrap();
+        assert!(h.is_empty(), "absent --head yields an empty head side");
+        assert_eq!(b, ["b.json"]);
+    }
+
+    #[test]
+    fn errors_on_leading_arg_before_any_flag() {
         assert!(
-            parse_compare_args(&["--head".into(), "h.json".into()]).is_err(),
-            "no --base"
-        );
-        assert!(
-            parse_compare_args(&["--base".into(), "b.json".into()]).is_err(),
-            "no --head"
-        );
-        assert!(
-            parse_compare_args(&[
+            parse_sides(&[
                 "stray.json".into(),
                 "--head".into(),
                 "h.json".into(),
