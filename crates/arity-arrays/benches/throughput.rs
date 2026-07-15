@@ -28,7 +28,9 @@ use support::BenchContainer;
 use support::BoxArr;
 use support::ChurnOp;
 use support::Payload;
+use support::RAND_SEQ_LEN;
 use support::churn_ops;
+use support::rand_slots;
 
 // Cell A: Arity16 + 32-byte hash. Cell B: Arity256 + 8-byte pointer stand-in.
 const OCC_A: &[usize] = &[1, 4, 8, 16];
@@ -149,6 +151,67 @@ macro_rules! single_op_benches {
     };
 }
 
+/// Registers the two randomized-index get benches for one cell under
+/// `throughput/<cell>/<op>`. Separate from `single_op_benches!` so neither
+/// generated function trips `clippy::too_many_lines`. `$arity` bounds the
+/// absent-slot range; the remaining parameters mirror `single_op_benches!`.
+///
+/// Unlike `get_hit`/`get_miss`, which probe one fixed slot every iteration,
+/// these advance a cursor through a precomputed pseudo-random slot sequence, so
+/// the branch predictor and cache cannot learn the access pattern.
+macro_rules! single_op_rand_benches {
+    ($fn:ident, $cell:literal, $ty:ty, $arity:ty, $occ:expr, $occ_partial:expr, [$($ctype:ty),+ $(,)?]) => {
+        fn $fn(c: &mut Criterion) {
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/get_hit_rand"));
+                $( for &occ in $occ {
+                    let cont = <$ctype as BenchContainer<$ty>>::fill(occ);
+                    // Present slots are 0..occ; probe an unpredictable one each
+                    // iteration instead of a fixed target, so the numbers reflect
+                    // realistic (branch/cache-unfavorable) access.
+                    let slots = rand_slots(0, occ);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| {
+                            let mut cursor = 0usize;
+                            b.iter(|| {
+                                let target = slots[cursor & (RAND_SEQ_LEN - 1)];
+                                cursor = cursor.wrapping_add(1);
+                                black_box(cont.lookup(black_box(target)))
+                            })
+                        },
+                    );
+                } )+
+                g.finish();
+            }
+            {
+                let mut g = c.benchmark_group(concat!("throughput/", $cell, "/get_miss_rand"));
+                let cap = <$arity as Arity>::LEN;
+                $( for &occ in $occ_partial {
+                    let cont = <$ctype as BenchContainer<$ty>>::fill(occ);
+                    // Absent slots are [occ, cap); probe an unpredictable one each
+                    // iteration.
+                    let slots = rand_slots(occ, cap);
+                    g.bench_with_input(
+                        BenchmarkId::new(<$ctype as BenchContainer<$ty>>::NAME, occ),
+                        &occ,
+                        |b, _| {
+                            let mut cursor = 0usize;
+                            b.iter(|| {
+                                let target = slots[cursor & (RAND_SEQ_LEN - 1)];
+                                cursor = cursor.wrapping_add(1);
+                                black_box(cont.lookup(black_box(target)))
+                            })
+                        },
+                    );
+                } )+
+                g.finish();
+            }
+        }
+    };
+}
+
 single_op_benches!(
     single_cell_a, "cell_a", [u8; 32], OCC_A, OCC_A_PARTIAL,
     [
@@ -163,6 +226,30 @@ single_op_benches!(
 
 single_op_benches!(
     single_cell_b, "cell_b", u64, OCC_B, OCC_B_PARTIAL,
+    [
+        PackedArray<u64, Arity256>,
+        GappedArray<u64, Arity256>,
+        FixedArray<Option<u64>, Arity256>,
+        BoxArr<u64, Arity256>,
+        BTreeMap<usize, u64>,
+        HashMap<usize, u64>,
+    ]
+);
+
+single_op_rand_benches!(
+    rand_cell_a, "cell_a", [u8; 32], Arity16, OCC_A, OCC_A_PARTIAL,
+    [
+        PackedArray<[u8; 32], Arity16>,
+        GappedArray<[u8; 32], Arity16>,
+        FixedArray<Option<[u8; 32]>, Arity16>,
+        BoxArr<[u8; 32], Arity16>,
+        BTreeMap<usize, [u8; 32]>,
+        HashMap<usize, [u8; 32]>,
+    ]
+);
+
+single_op_rand_benches!(
+    rand_cell_b, "cell_b", u64, Arity256, OCC_B, OCC_B_PARTIAL,
     [
         PackedArray<u64, Arity256>,
         GappedArray<u64, Arity256>,
@@ -295,6 +382,7 @@ fn convert(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = quick_criterion();
-    targets = single_cell_a, single_cell_b, workload_cell_a, workload_cell_b, convert
+    targets = single_cell_a, single_cell_b, rand_cell_a, rand_cell_b,
+              workload_cell_a, workload_cell_b, convert
 );
 criterion_main!(benches);

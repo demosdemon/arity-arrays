@@ -31,3 +31,23 @@ negative_feature_names = "warn"
 redundant_feature_names = "warn"
 unwrap_used = "warn"
 undocumented_unsafe_blocks = "deny"
+
+# Opt-in profile for measuring link-time optimization's *ceiling* on the hot
+# path. NOT a default: downstream consumers pick their own profile, so the
+# crates are tuned to be fast without LTO (see the concrete Bitmap/Raw
+# `#[inline]` annotations). `lto = "fat"` is deliberate, not `"thin"`: this
+# profile only exists to answer whether LTO inlines anything our `#[inline]`
+# annotations miss, and fat LTO is the strictly stronger test — if fat finds
+# nothing extra, thin certainly won't either. Thin's usual advantage is faster
+# compile time, which matters for a profile you ship; this one is a one-off
+# analysis vehicle, so that advantage doesn't apply. Named `lto-probe`, not
+# `release-lto`, so the manifest is authoritative on every machine: Cargo
+# config-file profiles override manifest profiles, and a machine-local
+# `~/.cargo/config.toml` happening to declare a same-named profile would
+# silently win over this one. Selected via `cargo build --profile lto-probe`
+# / `just bench-lto`; it never affects a plain `cargo build --release`, `cargo
+# bench`, or any downstream build.
+[profile.lto-probe]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

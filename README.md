@@ -70,7 +70,10 @@ The wiring is a compile-time guarantee: for every arity,
 -p arity-arrays`; pass criterion args after `--`, e.g. `just bench --
 --sample-size 50`). Export a run with `just bench-export <label>` and regenerate
 the comparison tables below plus the SVG charts in `docs/bench/` with `just
-bench-charts <label>`.
+bench-charts <label>`. `just bench-lto <args>` (e.g. `just bench-lto --save-baseline lto`) builds and
+runs the throughput bench under the opt-in `lto-probe` profile (fat LTO) to
+measure link-time optimization's effect; see `crates/arity-arrays/README.md`'s
+Performance section for the finding on the hot `get` path.
 
 Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
 as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`
@@ -87,6 +90,28 @@ against `usize`-keyed `BTreeMap`/`HashMap` — is the durable signal:
 In the tables, `BoxArr` is a naive `Box<[Option<T>]>` baseline; the `*Store` rows
 pair each representation (and a `BTreeMap` baseline) with a trie fixture; and the
 trie shapes are Chain (deep), Bushy (broad), and Realistic (tapered).
+
+> [!NOTE]
+> Sub-10 ns single points sit near criterion's measurement floor, and the fast
+> `BENCH_QUICK` configuration used for quick CI comparisons (`sample_size = 10`)
+> widens their confidence intervals further. Do not gate a regression or make a
+> fine-grained ranking claim on a single-digit-nanosecond delta without first
+> re-running that specific group at criterion defaults. The coarse multi-×
+> differences between representations sit well above this noise floor and are the
+> durable signal.
+
+> [!NOTE]
+> `get_hit`/`get_miss` probe a fixed slot every iteration, so their numbers
+> reflect a fully branch-predicted, L1-resident load — best case. The
+> `get_hit_rand`/`get_miss_rand` variants (in the bench harness; they populate
+> the tables at the next capture refresh) probe a pseudo-random slot each
+> iteration; the accessed working set is small enough to stay L1-resident
+> regardless of access order, so their higher latency isolates the realistic
+> branch-unfavorable cost — a mispredicted branch and a serialized dependent
+> load on the index before the payload access — rather than a cache effect.
+> Relative ranking between representations holds in both — every container
+> gets the same treatment — but the fixed-slot absolutes understate real-world
+> latency.
 
 <!-- bench:start -->
 **Cell A (Arity16) single-op (median ns)**

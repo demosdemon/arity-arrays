@@ -24,6 +24,7 @@ use support::Payload;
 use support::churn_len;
 use support::churn_ops;
 use support::masked_index;
+use support::rand_slots;
 
 #[test]
 fn masked_index_wraps_into_range() {
@@ -115,6 +116,28 @@ fn churn_ops_hold_half_occupancy() {
             "occupancy stays near half"
         );
     }
+}
+
+#[test]
+fn rand_slots_are_deterministic_and_in_range() {
+    let first = rand_slots(4, 16);
+    let second = rand_slots(4, 16);
+    assert_eq!(
+        first, second,
+        "same range must yield the same deterministic sequence"
+    );
+    // The length needs no assertion: `rand_slots` returns
+    // `[usize; RAND_SEQ_LEN]`, so the type carries it.
+    assert!(
+        first.iter().all(|&s| (4..16).contains(&s)),
+        "every drawn slot must lie in [4, 16)"
+    );
+    // A non-trivial range must actually vary, not collapse to a constant.
+    let distinct: std::collections::BTreeSet<usize> = first.iter().copied().collect();
+    assert!(
+        distinct.len() > 1,
+        "sequence must vary across a 12-wide range"
+    );
 }
 
 #[test]

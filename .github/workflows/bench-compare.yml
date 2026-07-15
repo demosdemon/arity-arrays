@@ -60,11 +60,15 @@ on:
         description: >-
           Per-run guardrail, in minutes. Default (90) covers quick mode:
           quick runs stay single-pass (base once, head once) at this
-          default; measured at ~5.6s/point x 390 points x 2 captures (base,
+          default; measured at ~5.6s/point x ~498 points x 2 captures (base,
           head) with criterion's default nresamples (100_000, pre-dating the
           BENCH_QUICK/nresamples fix below); nresamples(1000) cuts CPU-time
           ~61% but wall-clock savings depend on the runner's core count,
           which the 60-minute prior default didn't leave enough margin for.
+          Point count is up from ~390 (+108, roughly +28%) since the
+          BENCH-03 get_hit_rand/get_miss_rand benches were added (4x6+4x6 for
+          cell_a, 5x6+5x6 for cell_b); re-check this estimate the next time
+          bench point count grows materially.
           Full-precision callers (bench-compare-push.yml,
           bench-compare-comment.yml, bench-compare-dispatch.yml with
           quick=false) override this to 330 for the interleaved
@@ -72,7 +76,10 @@ on:
           (~2x the two-capture budget), capped 30 min under GitHub's
           360-minute hosted-runner ceiling (full precision is also ~9x
           slower per point: 100 samples/3s warm-up/5s measurement vs
-          quick's 10/100ms/500ms).
+          quick's 10/100ms/500ms). The same point-count growth applies to the
+          full-precision run, so the margin under the ceiling is now
+          materially thinner than when 330 was set — and 330 was already the
+          last raise available under the 360-minute ceiling.
         type: number
         required: false
         default: 90

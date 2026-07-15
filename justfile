@@ -127,6 +127,20 @@ ci-bench *args:
     cargo build --release -p arity-arrays --all-features --bench throughput --bench trie
     cargo bench -p arity-arrays --all-features --bench throughput --bench trie -- {{ args }}
 
+# Build+run the throughput bench under the opt-in `lto-probe` profile (fat
+# LTO, codegen-units=1) to measure LTO's marginal effect. Baseline against
+# another `cargo bench -p arity-arrays --all-features --bench throughput` run
+# at the default profile — NOT against `just bench`, which drives
+# cargo-criterion, and cargo-criterion cannot switch profiles; the comparison
+# is only meaningful between two runs of the same harness (`cargo bench`), so
+# baseline with that harness directly rather than via `ci-bench` (which always
+# benches `throughput` and `trie` together, never `throughput` alone). Extra
+# args pass through to criterion, e.g. `just bench-lto --save-baseline lto`.
+# Run the throughput bench under the opt-in lto-probe profile.
+bench-lto *args:
+    cargo build --profile lto-probe -p arity-arrays --all-features --bench throughput
+    cargo bench --profile lto-probe -p arity-arrays --all-features --bench throughput -- {{ args }}
+
 # <label> names the capture under the gitignored bench-data/ dir; suffix it with a
 # git SHA to keep before/after runs distinct (reusing a label overwrites the earlier
 # capture).

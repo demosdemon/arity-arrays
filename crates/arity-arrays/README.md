@@ -100,6 +100,22 @@ stand-in), comparing `PackedArray` against `GappedArray`, `FixedArray`,
 `just bench`; refresh the tables below and the charts in `docs/bench/` with
 `just bench-export <label>` then `just bench-charts <label>`.
 
+The published numbers use the default `release`/`bench` profiles, without
+link-time optimization. Downstream builds choose their own profile, so the hot
+`get`/`insert`/`remove` path is tuned to be fast *without* LTO: every concrete
+`arity-bitmap` `Bitmap`/`Raw` method it crosses into carries `#[inline]`, making
+it cross-crate-inlinable without a whole-program pass. An opt-in `lto-probe`
+profile (`cargo build --profile lto-probe`, or `just bench-lto`) runs fat
+LTO — the strongest link-time pass available — purely to measure its ceiling
+on that path: if fat LTO finds nothing to inline, no weaker LTO setting will
+either. The committed codegen probe
+([`examples/inline_probe.rs`](examples/inline_probe.rs), reproduce with `cargo
+asm --profile lto-probe -p arity-arrays --all-features --example inline_probe
+probe_packed_get`) confirms that on the hot `get` path, the `release` and
+`lto-probe` builds both emit call-free code, so LTO adds no cross-crate
+inlining there. Consumers who enable LTO in their own builds may still see
+whole-program gains this narrow probe does not capture.
+
 Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
 as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`
 on a PR for a full-precision on-demand re-run. Every push to `main` runs the same
@@ -115,7 +131,31 @@ contrasting `FixedArray`'s full-width (`A::LEN`) per-node cost with `PackedArray
 
 Absolute nanoseconds are machine-specific (these were captured on an AWS
 Graviton5 CPU — EC2 `c9g.4xlarge`); the comparison *between* representations is
-the durable signal. Highlights (median latency):
+the durable signal.
+
+> [!NOTE]
+> Sub-10 ns single points sit near criterion's measurement floor, and the fast
+> `BENCH_QUICK` configuration used for quick CI comparisons (`sample_size = 10`)
+> widens their confidence intervals further. Do not gate a regression or make a
+> fine-grained ranking claim on a single-digit-nanosecond delta without first
+> re-running that specific group at criterion defaults. The coarse multi-×
+> differences between representations sit well above this noise floor and are the
+> durable signal.
+
+> [!NOTE]
+> `get_hit`/`get_miss` probe a fixed slot every iteration, so their numbers
+> reflect a fully branch-predicted, L1-resident load — best case. The
+> `get_hit_rand`/`get_miss_rand` variants (in the bench harness; they populate
+> the tables at the next capture refresh) probe a pseudo-random slot each
+> iteration; the accessed working set is small enough to stay L1-resident
+> regardless of access order, so their higher latency isolates the realistic
+> branch-unfavorable cost — a mispredicted branch and a serialized dependent
+> load on the index before the payload access — rather than a cache effect.
+> Relative ranking between representations holds in both — every container
+> gets the same treatment — but the fixed-slot absolutes understate real-world
+> latency.
+
+Highlights (median latency):
 
 <!-- bench:start -->
 **Cell A (Arity16) single-op (median ns)**

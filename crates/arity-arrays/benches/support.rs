@@ -248,6 +248,46 @@ pub const fn churn_len(n: usize) -> usize {
     if scaled > 256 { scaled } else { 256 }
 }
 
+/// Deterministic seed for the randomized-index get benches. Distinct from
+/// `CHURN_SEED` so the two access patterns do not correlate. Fixed so the
+/// sequence — and any committed baseline — is reproducible across runs.
+const RAND_SEED: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// Number of slots in a randomized-access index sequence. Fixed so the access
+/// pattern (and the committed baseline) is reproducible; a power of two so the
+/// bench's `cursor & (RAND_SEQ_LEN - 1)` wrap is a cheap mask.
+pub const RAND_SEQ_LEN: usize = 256;
+
+/// A reproducible sequence of [`RAND_SEQ_LEN`] pseudo-random slots drawn from
+/// the half-open range `[lo, hi)`, used by the randomized-index get benches so
+/// each iteration reads an unpredictable slot (defeating the branch-predictor
+/// and L1-cache bias of a fixed target). Seeded from a fixed constant, so the
+/// draw — and the committed baseline — is reproducible.
+///
+/// Returns an array rather than a `Vec` so the length is a compile-time
+/// constant. Paired with the bench's `cursor & (RAND_SEQ_LEN - 1)` index, that
+/// lets the compiler prove every access in bounds and drop the check — and,
+/// because the elements are inline rather than behind a `Vec`'s pointer, it
+/// also removes a dependent load from the timed region. Both would otherwise
+/// be charged to every iteration of a benchmark that exists to measure exactly
+/// that class of cost.
+///
+/// # Panics
+///
+/// Panics if `hi <= lo` (the range must be non-empty).
+pub fn rand_slots(lo: usize, hi: usize) -> [usize; RAND_SEQ_LEN] {
+    assert!(hi > lo, "rand_slots needs a non-empty [lo, hi) range");
+    let span = u64::try_from(hi - lo).expect("range width < usize::MAX fits u64");
+    let mut state = RAND_SEED;
+    let mut slots = [0usize; RAND_SEQ_LEN];
+    for slot in &mut slots {
+        let draw = usize::try_from(xorshift64(&mut state) % span)
+            .expect("draw < span <= usize::MAX fits usize");
+        *slot = lo + draw;
+    }
+    slots
+}
+
 /// Build the churn sequence for arity `A`: start from slots `0..N/2` present,
 /// then alternate Remove(present)/Insert(absent) so occupancy oscillates ±1
 /// around `N/2` and never reaches a boundary where a step would no-op. Length
