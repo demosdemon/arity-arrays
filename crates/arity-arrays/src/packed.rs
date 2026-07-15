@@ -5,6 +5,8 @@ use alloc::alloc::alloc;
 use alloc::alloc::dealloc;
 use alloc::alloc::handle_alloc_error;
 use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
+use core::ops::Index;
 use core::ptr::NonNull;
 
 use arity_bitmap::Bitmap;
@@ -208,6 +210,14 @@ impl<T, A: Arity> PackedArray<T, A> {
     }
 
     /// Returns a reference to the element at `index`, or `None` if absent.
+    ///
+    /// Fallible, unlike the sibling
+    /// [`FixedArray::get`](crate::FixedArray::get), which is total and returns
+    /// `&T` because every slot of a `FixedArray<T, A>` holds a `T`. The sparse
+    /// counterpart this type converts to and from is
+    /// `FixedArray<Option<T>, A>`, whose `get` returns `&Option<T>` rather
+    /// than the `Option<&T>` returned here; [`Option::as_ref`] bridges the
+    /// two.
     #[must_use]
     pub fn get(&self, index: A::Index) -> Option<&T> {
         let ptr = self.0?;
@@ -279,6 +289,10 @@ impl<T, A: Arity> PackedArray<T, A> {
 
     /// Returns a mutable reference to the element at `index`, or `None` if
     /// absent. Does not change which slots are present (no reallocation).
+    ///
+    /// Fallible, unlike the sibling
+    /// [`FixedArray::get_mut`](crate::FixedArray::get_mut) — see
+    /// [`get`](Self::get) for why the two differ.
     pub fn get_mut(&mut self, index: A::Index) -> Option<&mut T> {
         let ptr = self.0?;
         // SAFETY: `ptr` is valid per the type invariant.
@@ -426,9 +440,73 @@ impl<T, A: Arity> PackedArray<T, A> {
     }
 }
 
+/// Indexes a present element, panicking if the slot is absent.
+///
+/// Mirrors [`BTreeMap`](alloc::collections::BTreeMap) and `std`'s `HashMap`,
+/// which pair a panicking `Index` with a fallible `get`. Like them, this type
+/// deliberately does **not** implement [`IndexMut`](core::ops::IndexMut):
+/// `index_mut` receives no value to insert, so it could only panic on an
+/// absent slot — which would make `array[i] = v` a runtime panic on the very
+/// line that *inserts* on a `FixedArray<Option<T>, A>`. Use
+/// [`get_mut`](PackedArray::get_mut) to mutate a present element, or
+/// [`insert`](PackedArray::insert) to add one.
+impl<T, A: Arity> Index<A::Index> for PackedArray<T, A> {
+    type Output = T;
+
+    /// Returns a reference to the element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no element is present at `index`. Use
+    /// [`get`](PackedArray::get) when absence is expected.
+    fn index(&self, index: A::Index) -> &T {
+        self.get(index).expect("no entry found for index")
+    }
+}
+
 impl<T, A: Arity> Default for PackedArray<T, A> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Collects `(index, value)` pairs into an exactly-sized packed block.
+impl<T, A: Arity> FromIterator<(A::Index, T)> for PackedArray<T, A> {
+    /// If the iterator yields the same index more than once, the last value
+    /// wins and the earlier ones are dropped — as with
+    /// [`BTreeMap`](alloc::collections::BTreeMap) and `std`'s `HashMap`.
+    ///
+    /// The pairs are staged in a `FixedArray<Option<T>, A>` and converted
+    /// through [`From`], so this allocates **at most once** regardless of the
+    /// pair count. Building the same array with repeated
+    /// [`insert`](PackedArray::insert) would instead reallocate for every new
+    /// element. The trade is a full-width `FixedArray<Option<T>, A>` temporary
+    /// — the same one `From<GappedArray<T, A>>` already materializes.
+    fn from_iter<I: IntoIterator<Item = (A::Index, T)>>(iter: I) -> Self {
+        let mut staged = FixedArray::<Option<T>, A>::new();
+        for (index, value) in iter {
+            staged[index] = Some(value);
+        }
+        staged.into()
+    }
+}
+
+/// Inserts each `(index, value)` pair into an existing array.
+impl<T, A: Arity> Extend<(A::Index, T)> for PackedArray<T, A> {
+    /// The last value wins for a repeated index, and any displaced value is
+    /// dropped.
+    ///
+    /// Each *new* index reallocates (`O(count)` per insertion — see
+    /// [`insert`](PackedArray::insert)). Unlike
+    /// [`from_iter`](PackedArray::from_iter) this cannot stage through a
+    /// `FixedArray<Option<T>, A>`, because staging would have to move the
+    /// existing elements out first, and an iterator that panicked partway
+    /// would take them down with it. Collect with
+    /// [`FromIterator`](PackedArray::from_iter) when building from scratch.
+    fn extend<I: IntoIterator<Item = (A::Index, T)>>(&mut self, iter: I) {
+        for (index, value) in iter {
+            self.insert(index, value);
+        }
     }
 }
 
@@ -708,6 +786,161 @@ impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
     type IntoIter = PackedAllIter<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+/// Owned, consuming iterator over the present `(index, value)` pairs of a
+/// [`PackedArray`], ascending by index. Created by
+/// `<PackedArray as IntoIterator>::into_iter`.
+///
+/// Yields owned `(A::Index, T)`, present slots only — the same shape as
+/// [`iter_present`](PackedArray::iter_present) but by value, and the inverse of
+/// the `FromIterator` impl. This is deliberately **not** the shape of
+/// `for _ in &array`, which walks every slot as `(A::Index, Option<&T>)`;
+/// consuming a sparse array drains its present pairs, the way
+/// [`BTreeMap`](alloc::collections::BTreeMap) and `std`'s `HashMap` do.
+///
+/// Storage is dense (rank order), so the not-yet-yielded elements are always
+/// the contiguous rank range `[front, back)`; `Drop` drops exactly that range
+/// and frees the block.
+pub struct PackedIntoIter<T, A: Arity> {
+    /// `Some` while a block is owned; `None` for a drained-empty source. The
+    /// block is freed by this iterator's `Drop`, never by `PackedArray::drop`
+    /// (the source was consumed via `ManuallyDrop`).
+    ptr: Option<NonNull<Inner<A, T>>>,
+    /// Logical indices not yet yielded, ascending == storage order. Drives the
+    /// index half of each item and stays in lockstep with `front`/`back`.
+    bits: arity_bitmap::BitIter<A::Bitmap>,
+    /// Dense rank of the next front element; also the count already taken from
+    /// the front.
+    front: usize,
+    /// One past the dense rank of the next back element.
+    back: usize,
+    /// Original element count — the allocation size, needed so `Drop`
+    /// deallocates with the same layout `alloc_block` used.
+    count: usize,
+}
+
+impl<T, A: Arity> Iterator for PackedIntoIter<T, A> {
+    type Item = (A::Index, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.bits.next()?;
+        // The k-th smallest set bit is stored at dense rank k; `front` counts
+        // how many fronts were taken, so it is exactly this element's rank.
+        let rank = self.front;
+        self.front += 1;
+        let ptr = self.ptr.expect("a set bit implies an allocated block");
+        // SAFETY: `rank < back <= count`; `data_ptr(ptr).add(rank)` is an
+        // initialised element not yet moved out (front advances past it, so no
+        // later `next`/`Drop` reads it again); `read` moves it without dropping.
+        let v = unsafe { data_ptr(ptr).add(rank).read() };
+        Some((i, v))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.bits.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for PackedIntoIter<T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.bits.next_back()?;
+        // The largest remaining set bit is stored at dense rank `back - 1`.
+        self.back -= 1;
+        let rank = self.back;
+        let ptr = self.ptr.expect("a set bit implies an allocated block");
+        // SAFETY: `front <= rank < count`; `data_ptr(ptr).add(rank)` is an
+        // initialised element not yet moved out (back retreats past it, so no
+        // later `next_back`/`Drop` reads it again); `read` moves it without
+        // dropping.
+        let v = unsafe { data_ptr(ptr).add(rank).read() };
+        Some((i, v))
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for PackedIntoIter<T, A> {
+    fn len(&self) -> usize {
+        self.bits.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for PackedIntoIter<T, A> {}
+
+impl<T, A: Arity> Drop for PackedIntoIter<T, A> {
+    fn drop(&mut self) {
+        // Free the block no matter what — armed before `drop_in_place` so it
+        // runs even if an element destructor unwinds through the slice drop
+        // glue (which drops the remaining elements but would skip a bare
+        // `dealloc`). Declared before any statement, mirroring
+        // `PackedArray::drop` (clippy::items_after_statements otherwise).
+        struct FreeOnDrop<A: Arity, T> {
+            ptr: NonNull<Inner<A, T>>,
+            count: usize,
+        }
+        impl<A: Arity, T> Drop for FreeOnDrop<A, T> {
+            fn drop(&mut self) {
+                // SAFETY: block from `alloc_block::<A, T>(_, self.count)`; sole
+                // deallocation, matching layout.
+                unsafe {
+                    dealloc(
+                        self.ptr.as_ptr().cast(),
+                        alloc_layout::<Inner<A, T>, T>(self.count),
+                    );
+                };
+            }
+        }
+        let Some(ptr) = self.ptr else { return };
+        // SAFETY: `ptr` is a live block owned by this iterator.
+        let dp = unsafe { data_ptr(ptr) };
+        let _free = FreeOnDrop::<A, T> {
+            ptr,
+            count: self.count,
+        };
+        let remaining = self.back - self.front;
+        // SAFETY: the not-yet-yielded elements are the contiguous dense range
+        // `[front, back)`; each is initialised and unread; `drop_in_place` over
+        // the slice drops each exactly once (and drops the rest if one panics).
+        unsafe {
+            core::ptr::drop_in_place(core::ptr::slice_from_raw_parts_mut(
+                dp.add(self.front),
+                remaining,
+            ));
+        };
+    }
+}
+
+impl<T, A: Arity> IntoIterator for PackedArray<T, A> {
+    type Item = (A::Index, T);
+    type IntoIter = PackedIntoIter<T, A>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        // Suppress `PackedArray::drop`: the new iterator now owns the block and
+        // frees it (after draining), exactly as `From<PackedArray>` does.
+        // `map_or_else`, not `match` — clippy::option_if_let_else flags the
+        // value-producing two-arm match.
+        let this = ManuallyDrop::new(self);
+        this.0.map_or_else(
+            || PackedIntoIter {
+                ptr: None,
+                bits: A::Bitmap::ZERO.bits(),
+                front: 0,
+                back: 0,
+                count: 0,
+            },
+            |ptr| {
+                // SAFETY: `ptr` valid per the type invariant.
+                let bitmap = unsafe { ptr.as_ref().bitmap };
+                let count = bitmap.count_ones() as usize;
+                PackedIntoIter {
+                    ptr: Some(ptr),
+                    bits: bitmap.bits(),
+                    front: 0,
+                    back: count,
+                    count,
+                }
+            },
+        )
     }
 }
 
@@ -1277,5 +1510,158 @@ mod tests {
             assert_send_sync::<PackedPresentIter<'static, u16, Arity256>>();
             assert_send_sync::<PackedAllIter<'static, u16, Arity256>>();
         }
+    }
+
+    #[test]
+    fn index_returns_the_present_element() {
+        let mut p = PackedArray::<u32, Arity16>::new();
+        p.insert(U4::new_masked(3), 30);
+        p.insert(U4::new_masked(9), 90);
+        assert_eq!(p[U4::new_masked(3)], 30);
+        assert_eq!(p[U4::new_masked(9)], 90);
+    }
+
+    #[test]
+    #[should_panic(expected = "no entry found for index")]
+    fn index_panics_on_an_absent_slot() {
+        let mut p = PackedArray::<u32, Arity16>::new();
+        p.insert(U4::new_masked(3), 30);
+        let _ = p[U4::new_masked(4)];
+    }
+
+    #[test]
+    #[should_panic(expected = "no entry found for index")]
+    fn index_panics_on_an_empty_array() {
+        let p = PackedArray::<u32, Arity16>::new();
+        let _ = p[U4::new_masked(0)];
+    }
+
+    #[test]
+    fn from_iter_collects_pairs() {
+        let p: PackedArray<u32, Arity16> = [(U4::new_masked(3), 30), (U4::new_masked(9), 90)]
+            .into_iter()
+            .collect();
+        assert_eq!(p.count(), 2);
+        assert_eq!(p.get(U4::new_masked(3)), Some(&30));
+        assert_eq!(p.get(U4::new_masked(9)), Some(&90));
+        assert_eq!(p.get(U4::new_masked(4)), None);
+    }
+
+    #[test]
+    fn from_iter_of_nothing_is_empty_and_unallocated() {
+        let p: PackedArray<u32, Arity16> = core::iter::empty().collect();
+        assert!(p.is_empty());
+        assert_eq!(p.allocated_size(), 0);
+    }
+
+    #[test]
+    fn from_iter_takes_the_last_value_for_a_duplicate_index() {
+        let p: PackedArray<u32, Arity16> = [(U4::new_masked(3), 1), (U4::new_masked(3), 2)]
+            .into_iter()
+            .collect();
+        assert_eq!(p.count(), 1);
+        assert_eq!(p.get(U4::new_masked(3)), Some(&2));
+    }
+
+    #[test]
+    fn extend_merges_into_existing_elements() {
+        let mut p: PackedArray<u32, Arity16> = core::iter::once((U4::new_masked(3), 30)).collect();
+        p.extend([(U4::new_masked(9), 90), (U4::new_masked(3), 31)]);
+        assert_eq!(p.count(), 2);
+        assert_eq!(p.get(U4::new_masked(3)), Some(&31));
+        assert_eq!(p.get(U4::new_masked(9)), Some(&90));
+    }
+
+    #[test]
+    fn into_iter_yields_present_pairs_ascending() {
+        let mut p = PackedArray::<u32, Arity16>::new();
+        p.insert(U4::new_masked(9), 90);
+        p.insert(U4::new_masked(3), 30);
+        p.insert(U4::new_masked(12), 120);
+        let got: std::vec::Vec<(u8, u32)> = p.into_iter().map(|(i, v)| (i.as_u8(), v)).collect();
+        assert_eq!(got, std::vec![(3, 30), (9, 90), (12, 120)]);
+    }
+
+    #[test]
+    fn into_iter_round_trips_through_collect() {
+        let mut p = PackedArray::<u32, Arity256>::new();
+        for s in [0u8, 7, 200, 255] {
+            p.insert(s, u32::from(s) * 3);
+        }
+        let clone = p.clone();
+        let rebuilt: PackedArray<u32, Arity256> = p.into_iter().collect();
+        assert_eq!(rebuilt, clone);
+    }
+
+    #[test]
+    fn into_iter_is_double_ended() {
+        let mut p = PackedArray::<u32, Arity16>::new();
+        for s in [1u8, 4, 8, 15] {
+            p.insert(U4::new_masked(s), u32::from(s));
+        }
+        let mut it = p.into_iter();
+        assert_eq!(it.len(), 4);
+        assert_eq!(it.next().map(|(i, v)| (i.as_u8(), v)), Some((1, 1)));
+        assert_eq!(it.next_back().map(|(i, v)| (i.as_u8(), v)), Some((15, 15)));
+        assert_eq!(it.len(), 2);
+        assert_eq!(it.next_back().map(|(i, v)| (i.as_u8(), v)), Some((8, 8)));
+        assert_eq!(it.next().map(|(i, v)| (i.as_u8(), v)), Some((4, 4)));
+        assert_eq!(it.next(), None);
+        assert_eq!(it.next_back(), None);
+        assert_eq!(it.len(), 0);
+    }
+
+    #[test]
+    fn into_iter_of_empty_is_empty() {
+        let p = PackedArray::<u32, Arity16>::new();
+        assert_eq!(p.into_iter().count(), 0);
+    }
+
+    #[test]
+    fn into_iter_drops_each_element_exactly_once() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering::Relaxed;
+
+        struct DropCount(Arc<AtomicUsize>);
+        impl Drop for DropCount {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Relaxed);
+            }
+        }
+
+        // Fully consumed: the caller's yielded values account for every drop.
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut p = PackedArray::<DropCount, Arity16>::new();
+        for s in [1u8, 4, 8, 15] {
+            p.insert(U4::new_masked(s), DropCount(Arc::clone(&drops)));
+        }
+        let collected: std::vec::Vec<_> = p.into_iter().map(|(_, v)| v).collect();
+        assert_eq!(
+            drops.load(Relaxed),
+            0,
+            "nothing dropped while held by caller"
+        );
+        drop(collected);
+        assert_eq!(drops.load(Relaxed), 4, "each element dropped once");
+
+        // Abandoned partway: iterator's Drop must drop the untaken remainder,
+        // and only that (the two taken values drop when `taken` drops).
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut p = PackedArray::<DropCount, Arity16>::new();
+        for s in [1u8, 4, 8, 15] {
+            p.insert(U4::new_masked(s), DropCount(Arc::clone(&drops)));
+        }
+        let mut it = p.into_iter();
+        let taken = (it.next(), it.next_back()); // one from each end
+        assert_eq!(drops.load(Relaxed), 0);
+        drop(it); // drops the two untaken middle elements
+        assert_eq!(
+            drops.load(Relaxed),
+            2,
+            "untaken remainder dropped once each"
+        );
+        drop(taken); // drops the two the caller took
+        assert_eq!(drops.load(Relaxed), 4, "no double drop, no leak");
     }
 }

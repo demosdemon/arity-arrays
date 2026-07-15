@@ -41,6 +41,16 @@ impl<T, A: Arity> FixedArray<T, A> {
     ///
     /// Infallible (unlike [`slice::get`]): `A::Index` is a total index type,
     /// so every value of it is in bounds and there is no `None` case.
+    ///
+    /// It is also infallible unlike the sparse siblings
+    /// [`PackedArray::get`](crate::PackedArray::get) and
+    /// [`GappedArray::get`](crate::GappedArray::get), which return
+    /// `Option<&T>`. That is a difference in the types, not just the
+    /// signatures: `FixedArray<T, A>` is *total* — every slot holds a `T` —
+    /// whereas the siblings are sparse. The sparse form of this type is
+    /// `FixedArray<Option<T>, A>`, which is what the [`From`] conversions
+    /// wire to the siblings; its `get` returns `&Option<T>`, so
+    /// [`Option::as_ref`] bridges it to the `Option<&T>` they return.
     #[must_use]
     pub fn get(&self, index: A::Index) -> &T {
         // SAFETY: `A::Index::as_usize()` is always `< Index::COUNT == A::LEN`,
@@ -64,7 +74,10 @@ impl<T, A: Arity> FixedArray<T, A> {
     /// Returns a mutable reference to the element at `index`.
     ///
     /// Infallible for the same reason as [`get`](Self::get): `A::Index` is a
-    /// total index type, so every value is in bounds.
+    /// total index type, so every value is in bounds. See [`get`](Self::get)
+    /// for how this differs from the sparse siblings' fallible
+    /// [`PackedArray::get_mut`](crate::PackedArray::get_mut) and
+    /// [`GappedArray::get_mut`](crate::GappedArray::get_mut).
     #[must_use]
     pub fn get_mut(&mut self, index: A::Index) -> &mut T {
         // SAFETY: as in `get` — `index.as_usize() < A::LEN == array length`.

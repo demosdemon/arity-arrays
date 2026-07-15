@@ -29,9 +29,10 @@ fmt-check:
 lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+# Trailing args go to cargo, e.g. `just test arity-arrays --test roundtrip`.
 # Run tests (default: whole workspace; pass a package to scope, e.g. `just test arity-bitmap`).
-test pkg='':
-    cargo test {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }} --all-features
+test pkg='' *args:
+    cargo test {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }} --all-features {{ args }}
 
 # nextest runs unit + integration + (in test mode) bench targets via --all-targets;
 # doctests run separately via `cargo test --doc` because nextest cannot execute

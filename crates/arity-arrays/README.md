@@ -22,6 +22,18 @@ assert_eq!(packed.get(U4::new_masked(9)), Some(&90));
 let present: Vec<(u8, u32)> =
     packed.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
 assert_eq!(present, vec![(1, 10), (9, 90)]);
+
+// Build straight from (index, value) pairs — no `full` array to populate by hand.
+let collected: PackedArray<u32, Arity16> =
+    [(U4::new_masked(1), 10), (U4::new_masked(9), 90)].into_iter().collect();
+
+// Index a present slot (panics on an absent one, like a map).
+assert_eq!(collected[U4::new_masked(9)], 90);
+
+// Consume it back into (index, value) pairs, ascending.
+let pairs: Vec<(u8, u32)> =
+    collected.into_iter().map(|(i, v)| (i.as_u8(), v)).collect();
+assert_eq!(pairs, vec![(1, 10), (9, 90)]);
 ```
 
 ## Memory layout

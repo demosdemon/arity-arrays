@@ -5,6 +5,8 @@ use alloc::alloc::alloc;
 use alloc::alloc::dealloc;
 use alloc::alloc::handle_alloc_error;
 use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
+use core::ops::Index;
 use core::ptr::NonNull;
 
 use arity_bitmap::Bitmap;
@@ -312,6 +314,14 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Returns a reference to the element at `index`, or `None` if absent.
     ///
+    /// Fallible, unlike the sibling
+    /// [`FixedArray::get`](crate::FixedArray::get), which is total and returns
+    /// `&T` because every slot of a `FixedArray<T, A>` holds a `T`. The sparse
+    /// counterpart this type converts to and from is
+    /// `FixedArray<Option<T>, A>`, whose `get` returns `&Option<T>` rather
+    /// than the `Option<&T>` returned here; [`Option::as_ref`] bridges the
+    /// two.
+    ///
     /// # Panics
     ///
     /// Panics if the internal bitmap invariant is violated (i.e., `occupancy`
@@ -339,6 +349,10 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Returns a mutable reference to the element at `index`, or `None` if
     /// absent. Does not change which slots are present.
+    ///
+    /// Fallible, unlike the sibling
+    /// [`FixedArray::get_mut`](crate::FixedArray::get_mut) — see
+    /// [`get`](Self::get) for why the two differ.
     ///
     /// # Panics
     ///
@@ -883,9 +897,67 @@ impl<T, A: Arity> GappedArray<T, A> {
     }
 }
 
+/// Indexes a present element, panicking if the slot is absent.
+///
+/// Mirrors [`BTreeMap`](alloc::collections::BTreeMap) and `std`'s `HashMap`,
+/// which pair a panicking `Index` with a fallible `get`. Like them, this type
+/// deliberately does **not** implement [`IndexMut`](core::ops::IndexMut):
+/// `index_mut` receives no value to insert, so it could only panic on an
+/// absent slot — which would make `array[i] = v` a runtime panic on the very
+/// line that *inserts* on a `FixedArray<Option<T>, A>`. Use
+/// [`get_mut`](GappedArray::get_mut) to mutate a present element, or
+/// [`insert`](GappedArray::insert) to add one.
+impl<T, A: Arity> Index<A::Index> for GappedArray<T, A> {
+    type Output = T;
+
+    /// Returns a reference to the element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no element is present at `index`. Use
+    /// [`get`](GappedArray::get) when absence is expected.
+    fn index(&self, index: A::Index) -> &T {
+        self.get(index).expect("no entry found for index")
+    }
+}
+
 impl<T, A: Arity> Default for GappedArray<T, A> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Collects `(index, value)` pairs into a gapped block.
+impl<T, A: Arity> FromIterator<(A::Index, T)> for GappedArray<T, A> {
+    /// If the iterator yields the same index more than once, the last value
+    /// wins and the earlier ones are dropped — as with
+    /// [`BTreeMap`](alloc::collections::BTreeMap) and `std`'s `HashMap`.
+    ///
+    /// The pairs are staged in a `FixedArray<Option<T>, A>` and converted
+    /// through [`From`], so this allocates **at most once** and never pays a
+    /// mid-build respread, regardless of the order the indices arrive in.
+    fn from_iter<I: IntoIterator<Item = (A::Index, T)>>(iter: I) -> Self {
+        let mut staged = FixedArray::<Option<T>, A>::new();
+        for (index, value) in iter {
+            staged[index] = Some(value);
+        }
+        staged.into()
+    }
+}
+
+/// Inserts each `(index, value)` pair into an existing array.
+impl<T, A: Arity> Extend<(A::Index, T)> for GappedArray<T, A> {
+    /// The last value wins for a repeated index, and any displaced value is
+    /// dropped.
+    ///
+    /// Each pair goes through [`insert`](GappedArray::insert), so capacity
+    /// grows by doubling rather than per element. Collect with
+    /// [`FromIterator`](GappedArray::from_iter) when building from scratch —
+    /// that path allocates at most once.
+    fn extend<I: IntoIterator<Item = (A::Index, T)>>(&mut self, iter: I) {
+        for (index, value) in iter {
+            self.insert(index, value);
+        }
     }
 }
 
@@ -1340,6 +1412,156 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
     type IntoIter = GappedAllIter<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+/// Owned, consuming iterator over the present `(index, value)` pairs of a
+/// [`GappedArray`], ascending by index. Created by
+/// `<GappedArray as IntoIterator>::into_iter`.
+///
+/// Yields owned `(A::Index, T)`, present slots only — the same shape as
+/// [`iter_present`](GappedArray::iter_present) but by value, and the inverse of
+/// the `FromIterator` impl. Deliberately **not** the shape of
+/// `for _ in &array`, which walks every slot as `(A::Index, Option<&T>)`;
+/// consuming a sparse array drains its present pairs, the way
+/// [`BTreeMap`](alloc::collections::BTreeMap) and `std`'s `HashMap` do.
+///
+/// The r-th occupancy (logical) index pairs with the r-th live (physical)
+/// slot. Storage has gaps, so `Drop` drops the still-live physical slots
+/// tracked in `remaining_live` and frees the block.
+pub struct GappedIntoIter<T, A: Arity> {
+    /// `Some` while a block is owned; `None` for a drained-empty source.
+    ptr: Option<NonNull<Inner<A, T>>>,
+    /// Logical indices not yet yielded, ascending. Drives the index half.
+    occ_bits: arity_bitmap::BitIter<A::Bitmap>,
+    /// Physical live slots not yet yielded, ascending — advanced in lockstep
+    /// with `occ_bits` (r-th of one pairs with r-th of the other).
+    live_bits: arity_bitmap::BitIter<A::Bitmap>,
+    /// Physical slots still holding an initialised element (the un-yielded
+    /// ones). `Drop` drops exactly these.
+    remaining_live: A::Bitmap,
+    /// Capacity — the allocation size, needed so `Drop` deallocates with the
+    /// same layout `alloc_block` used.
+    cap: usize,
+}
+
+impl<T, A: Arity> Iterator for GappedIntoIter<T, A> {
+    type Item = (A::Index, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.occ_bits.next()?;
+        let p = self
+            .live_bits
+            .next()
+            .expect("occupancy and live have equal popcount");
+        self.remaining_live = self.remaining_live.without_bit(p);
+        let ptr = self.ptr.expect("a set bit implies an allocated block");
+        // SAFETY: `p` is a live physical slot holding an initialised element,
+        // cleared from `remaining_live` above so neither a later
+        // `next`/`next_back` nor `Drop` reads it again; `read` moves it without
+        // dropping.
+        let v = unsafe { data_ptr(ptr).add(p.as_usize()).read() };
+        Some((i, v))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.occ_bits.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for GappedIntoIter<T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.occ_bits.next_back()?;
+        let p = self
+            .live_bits
+            .next_back()
+            .expect("occupancy and live have equal popcount");
+        self.remaining_live = self.remaining_live.without_bit(p);
+        let ptr = self.ptr.expect("a set bit implies an allocated block");
+        // SAFETY: `p` is a live physical slot holding an initialised element,
+        // cleared from `remaining_live` above so neither a later
+        // `next`/`next_back` nor `Drop` reads it again; `read` moves it without
+        // dropping.
+        let v = unsafe { data_ptr(ptr).add(p.as_usize()).read() };
+        Some((i, v))
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for GappedIntoIter<T, A> {
+    fn len(&self) -> usize {
+        self.occ_bits.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for GappedIntoIter<T, A> {}
+
+impl<T, A: Arity> Drop for GappedIntoIter<T, A> {
+    fn drop(&mut self) {
+        // Free the block no matter what — armed before dropping elements so it
+        // runs even if a destructor unwinds through `drop_live_elems`. Declared
+        // before any statement, mirroring `GappedArray::drop`
+        // (clippy::items_after_statements otherwise).
+        struct FreeOnDrop<A: Arity, T> {
+            ptr: NonNull<Inner<A, T>>,
+            cap: usize,
+        }
+        impl<A: Arity, T> Drop for FreeOnDrop<A, T> {
+            fn drop(&mut self) {
+                // SAFETY: block from `alloc_block::<A, T>(.., self.cap)`; sole
+                // deallocation, matching layout.
+                unsafe {
+                    dealloc(
+                        self.ptr.as_ptr().cast(),
+                        alloc_layout::<Inner<A, T>, T>(self.cap),
+                    );
+                };
+            }
+        }
+        let Some(ptr) = self.ptr else { return };
+        // SAFETY: `ptr` is a live block owned by this iterator.
+        let dp = unsafe { data_ptr(ptr) };
+        let _free = FreeOnDrop::<A, T> { ptr, cap: self.cap };
+        // SAFETY: `dp` is the element base; every set bit of `remaining_live`
+        // is an initialised, not-yet-moved element; `drop_live_elems` drops
+        // each exactly once and drops the rest if one panics.
+        unsafe { drop_live_elems::<A, T>(dp, self.remaining_live) };
+    }
+}
+
+impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
+    type Item = (A::Index, T);
+    type IntoIter = GappedIntoIter<T, A>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        // Suppress `GappedArray::drop`: the iterator owns the block and frees
+        // it (after draining), exactly as `From<GappedArray>` does.
+        // `map_or_else`, not `match` — clippy::option_if_let_else flags the
+        // value-producing two-arm match.
+        let this = ManuallyDrop::new(self);
+        this.0.map_or_else(
+            || GappedIntoIter {
+                ptr: None,
+                occ_bits: A::Bitmap::ZERO.bits(),
+                live_bits: A::Bitmap::ZERO.bits(),
+                remaining_live: A::Bitmap::ZERO,
+                cap: 0,
+            },
+            |ptr| {
+                // SAFETY: `ptr` valid per the type invariant; header initialised.
+                let occ = unsafe { ptr.as_ref().occupancy };
+                // SAFETY: as above.
+                let live = unsafe { ptr.as_ref().live };
+                // SAFETY: as above.
+                let cap = 1usize << unsafe { ptr.as_ref().cap_exp };
+                GappedIntoIter {
+                    ptr: Some(ptr),
+                    occ_bits: occ.bits(),
+                    live_bits: live.bits(),
+                    remaining_live: live,
+                    cap,
+                }
+            },
+        )
     }
 }
 
@@ -1923,5 +2145,158 @@ mod tests {
             assert_send_sync::<GappedPresentIter<'static, u16, Arity256>>();
             assert_send_sync::<GappedAllIter<'static, u16, Arity256>>();
         }
+    }
+
+    #[test]
+    fn index_returns_the_present_element() {
+        let mut g = GappedArray::<u32, Arity16>::new();
+        g.insert(U4::new_masked(3), 30);
+        g.insert(U4::new_masked(9), 90);
+        assert_eq!(g[U4::new_masked(3)], 30);
+        assert_eq!(g[U4::new_masked(9)], 90);
+    }
+
+    #[test]
+    #[should_panic(expected = "no entry found for index")]
+    fn index_panics_on_an_absent_slot() {
+        let mut g = GappedArray::<u32, Arity16>::new();
+        g.insert(U4::new_masked(3), 30);
+        let _ = g[U4::new_masked(4)];
+    }
+
+    #[test]
+    #[should_panic(expected = "no entry found for index")]
+    fn index_panics_on_an_empty_array() {
+        let g = GappedArray::<u32, Arity16>::new();
+        let _ = g[U4::new_masked(0)];
+    }
+
+    #[test]
+    fn from_iter_collects_pairs() {
+        let g: GappedArray<u32, Arity16> = [(U4::new_masked(3), 30), (U4::new_masked(9), 90)]
+            .into_iter()
+            .collect();
+        assert_eq!(g.count(), 2);
+        assert_eq!(g.get(U4::new_masked(3)), Some(&30));
+        assert_eq!(g.get(U4::new_masked(9)), Some(&90));
+        assert_eq!(g.get(U4::new_masked(4)), None);
+    }
+
+    #[test]
+    fn from_iter_of_nothing_is_empty_and_unallocated() {
+        let g: GappedArray<u32, Arity16> = core::iter::empty().collect();
+        assert!(g.is_empty());
+        assert_eq!(g.allocated_size(), 0);
+    }
+
+    #[test]
+    fn from_iter_takes_the_last_value_for_a_duplicate_index() {
+        let g: GappedArray<u32, Arity16> = [(U4::new_masked(3), 1), (U4::new_masked(3), 2)]
+            .into_iter()
+            .collect();
+        assert_eq!(g.count(), 1);
+        assert_eq!(g.get(U4::new_masked(3)), Some(&2));
+    }
+
+    #[test]
+    fn extend_merges_into_existing_elements() {
+        let mut g: GappedArray<u32, Arity16> = core::iter::once((U4::new_masked(3), 30)).collect();
+        g.extend([(U4::new_masked(9), 90), (U4::new_masked(3), 31)]);
+        assert_eq!(g.count(), 2);
+        assert_eq!(g.get(U4::new_masked(3)), Some(&31));
+        assert_eq!(g.get(U4::new_masked(9)), Some(&90));
+    }
+
+    #[test]
+    fn into_iter_yields_present_pairs_ascending() {
+        let mut g = GappedArray::<u32, Arity16>::new();
+        g.insert(U4::new_masked(9), 90);
+        g.insert(U4::new_masked(3), 30);
+        g.insert(U4::new_masked(12), 120);
+        let got: std::vec::Vec<(u8, u32)> = g.into_iter().map(|(i, v)| (i.as_u8(), v)).collect();
+        assert_eq!(got, std::vec![(3, 30), (9, 90), (12, 120)]);
+    }
+
+    #[test]
+    fn into_iter_round_trips_through_collect() {
+        let mut g = GappedArray::<u32, Arity256>::new();
+        for s in [0u8, 7, 200, 255] {
+            g.insert(s, u32::from(s) * 3);
+        }
+        let clone = g.clone();
+        let rebuilt: GappedArray<u32, Arity256> = g.into_iter().collect();
+        assert_eq!(rebuilt, clone);
+    }
+
+    #[test]
+    fn into_iter_is_double_ended() {
+        let mut g = GappedArray::<u32, Arity16>::new();
+        for s in [1u8, 4, 8, 15] {
+            g.insert(U4::new_masked(s), u32::from(s));
+        }
+        let mut it = g.into_iter();
+        assert_eq!(it.len(), 4);
+        assert_eq!(it.next().map(|(i, v)| (i.as_u8(), v)), Some((1, 1)));
+        assert_eq!(it.next_back().map(|(i, v)| (i.as_u8(), v)), Some((15, 15)));
+        assert_eq!(it.len(), 2);
+        assert_eq!(it.next_back().map(|(i, v)| (i.as_u8(), v)), Some((8, 8)));
+        assert_eq!(it.next().map(|(i, v)| (i.as_u8(), v)), Some((4, 4)));
+        assert_eq!(it.next(), None);
+        assert_eq!(it.next_back(), None);
+        assert_eq!(it.len(), 0);
+    }
+
+    #[test]
+    fn into_iter_of_empty_is_empty() {
+        let g = GappedArray::<u32, Arity16>::new();
+        assert_eq!(g.into_iter().count(), 0);
+    }
+
+    #[test]
+    fn into_iter_drops_each_element_exactly_once() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering::Relaxed;
+
+        struct DropCount(Arc<AtomicUsize>);
+        impl Drop for DropCount {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Relaxed);
+            }
+        }
+
+        // Fully consumed: the caller's yielded values account for every drop.
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut g = GappedArray::<DropCount, Arity16>::new();
+        for s in [1u8, 4, 8, 15] {
+            g.insert(U4::new_masked(s), DropCount(Arc::clone(&drops)));
+        }
+        let collected: std::vec::Vec<_> = g.into_iter().map(|(_, v)| v).collect();
+        assert_eq!(
+            drops.load(Relaxed),
+            0,
+            "nothing dropped while held by caller"
+        );
+        drop(collected);
+        assert_eq!(drops.load(Relaxed), 4, "each element dropped once");
+
+        // Abandoned partway: iterator's Drop must drop the untaken remainder,
+        // and only that (the two taken values drop when `taken` drops).
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut g = GappedArray::<DropCount, Arity16>::new();
+        for s in [1u8, 4, 8, 15] {
+            g.insert(U4::new_masked(s), DropCount(Arc::clone(&drops)));
+        }
+        let mut it = g.into_iter();
+        let taken = (it.next(), it.next_back()); // one from each end
+        assert_eq!(drops.load(Relaxed), 0);
+        drop(it); // drops the two untaken middle elements
+        assert_eq!(
+            drops.load(Relaxed),
+            2,
+            "untaken remainder dropped once each"
+        );
+        drop(taken); // drops the two the caller took
+        assert_eq!(drops.load(Relaxed), 4, "no double drop, no leak");
     }
 }

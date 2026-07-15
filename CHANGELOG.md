@@ -53,6 +53,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
 ## [arity-arrays Unreleased]
 
+### Added
+
+- `impl Index<A::Index>` for `PackedArray` and `GappedArray`, giving both the
+  `array[index]` shorthand that `FixedArray` already had. Panics on an absent
+  slot, alongside the unchanged fallible `get`, exactly as `HashMap`/`BTreeMap`
+  pair the two. `IndexMut` is deliberately not implemented, also matching
+  `HashMap`/`BTreeMap`: it could only panic on an absent slot, which would make
+  `array[i] = v` a runtime panic rather than an insert.
+- `impl FromIterator<(A::Index, T)>` and `impl Extend<(A::Index, T)>` for
+  `PackedArray` and `GappedArray`, so both can be built with `.collect()` and
+  grown from an iterator. A repeated index keeps the last value, matching
+  `HashMap`/`BTreeMap`. `from_iter` stages the pairs in a
+  `FixedArray<Option<T>, A>` and converts through the existing `From`, so it
+  allocates at most once instead of reallocating per element.
+- Owned `IntoIterator` for `PackedArray` and `GappedArray` (`IntoIter` =
+  `PackedIntoIter`/`GappedIntoIter`), yielding `(A::Index, T)` for the present
+  slots — the by-value inverse of the new `FromIterator`, so
+  `arr.into_iter().collect()` round-trips. `for x in &arr` still walks all slots
+  as `(A::Index, Option<&T>)`; `for x in arr` drains the present pairs, matching
+  `HashMap`/`BTreeMap`. Both iterators are double-ended, exact-size, and fused,
+  and stay leak- and double-free-safe when dropped partway.
+
 ### Fixed
 
 - Bound `A::Bitmap: Send`/`Sync` on the `PackedArray`/`GappedArray` and
@@ -66,6 +88,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 - Document the capacity-overflow panic precondition
   (`size_of::<T>() * A::LEN <= isize::MAX`) on `PackedArray`/`GappedArray` and
   their allocating operations, mirroring `Vec::with_capacity`.
+- Cross-link the `get`/`get_mut` doc comments across the three representations.
+  `FixedArray::get` is total (`&T`) while `PackedArray::get`/`GappedArray::get`
+  are fallible (`Option<&T>`); each side now points at the other and names
+  `FixedArray<Option<T>, A>` as the sparse form that the `From` conversions
+  actually wire together.
 
 ## [arity-index 0.1.1] - 2026-07-14
 

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use arity_arrays::Arity;
 use arity_arrays::FixedArray;
+use arity_arrays::GappedArray;
 use arity_arrays::PackedArray;
 use arity_arrays::index::Niche;
 use proptest::prelude::*;
@@ -97,3 +98,63 @@ fn gapped_roundtrips() {
         );
     }
 }
+
+/// Collecting the pairs must equal converting the equivalent `FixedArray`:
+/// `from_iter` stages through that conversion, so this pins the two together
+/// and would catch a staging bug that a self-consistent unit test misses.
+///
+/// Scope limit: `present` is a `BTreeMap`, so the pairs always arrive in
+/// ascending index order and never repeat. Arrival order and duplicates are
+/// covered by the `from_iter_*` unit tests in `packed.rs`/`gapped.rs`, not
+/// here.
+fn check_collect<A: Arity>(present: &BTreeMap<usize, u32>) {
+    let mut src = FixedArray::<Option<u32>, A>::new();
+    for (&i, &v) in present {
+        let idx = A::Index::try_from_usize(i).expect("i < LEN");
+        src[idx] = Some(v);
+    }
+    let pairs: Vec<(A::Index, u32)> = present
+        .iter()
+        .map(|(&i, &v)| (A::Index::try_from_usize(i).expect("i < LEN"), v))
+        .collect();
+
+    // `from_iter` must agree with the `From` path it stages through.
+    let packed: PackedArray<u32, A> = pairs.iter().copied().collect();
+    assert_eq!(packed, PackedArray::from(&src));
+    assert_eq!(packed.count(), present.len());
+
+    // Gapped is checked against the model directly: its `From` path and its
+    // `from_iter` share the same staging, so comparing them to each other
+    // would be circular.
+    let gapped: GappedArray<u32, A> = pairs.iter().copied().collect();
+    assert_eq!(gapped.count(), present.len());
+    for i in 0..A::LEN {
+        let idx = A::Index::try_from_usize(i).expect("i < LEN");
+        assert_eq!(gapped.get(idx), present.get(&i));
+    }
+
+    // `extend` onto an empty array must reach the same place as `from_iter`,
+    // by an independent route (repeated `insert`).
+    let mut extended = PackedArray::<u32, A>::new();
+    extended.extend(pairs.iter().copied());
+    assert_eq!(extended, packed);
+}
+
+macro_rules! collect_for {
+    ($test:ident, $arity:ty, $len:expr) => {
+        proptest! {
+            #[test]
+            fn $test(entries in proptest::collection::vec((0usize..$len, any::<u32>()), 0..=$len)) {
+                let model: BTreeMap<usize, u32> = entries.into_iter().collect();
+                check_collect::<$arity>(&model);
+            }
+        }
+    };
+}
+
+collect_for!(collect_arity8, arity_arrays::Arity8, 8);
+collect_for!(collect_arity16, arity_arrays::Arity16, 16);
+collect_for!(collect_arity32, arity_arrays::Arity32, 32);
+collect_for!(collect_arity64, arity_arrays::Arity64, 64);
+collect_for!(collect_arity128, arity_arrays::Arity128, 128);
+collect_for!(collect_arity256, arity_arrays::Arity256, 256);
