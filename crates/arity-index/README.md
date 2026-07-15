@@ -4,6 +4,8 @@ Bounds-check-free niche integer index types (`U3`–`U7`) with double-ended rang
 
 Each `U{n}` is a newtype over a fieldless enum with `2ⁿ` variants, so `Option<U{n}>` is one byte (niche optimization) and indexing a `2ⁿ`-length array can elide the bounds check. The [`Niche`] trait unifies the index types (including the native `u8` for arity 256); iteration over a type's whole domain is via `NicheRange` / `NicheRangeInclusive`.
 
+Each `U{n}` is also `#[repr(transparent)]` over that enum, so it has the size and alignment of `u8` and a `&[u8]` can be reinterpreted as a `&[U{n}]` in place.
+
 ## Usage
 
 ```rust
@@ -18,6 +20,31 @@ let mut r = NicheRange::new(U4::new_masked(1), U4::new_masked(4));
 assert_eq!(r.next().map(U4::as_u8), Some(1));
 assert_eq!(r.next_back().map(U4::as_u8), Some(3));
 ```
+
+### Zero-copy slice conversions
+
+`try_from_slice` scans the bytes and reinterprets them in place — no copy, no allocation. `as_u8_slice` goes back, and is infallible because every niche value is a valid `u8`.
+
+```rust
+use arity_index::{Niche, U4};
+
+let bytes: &[u8] = &[0, 5, 9, 15];
+let idx: &[U4] = U4::try_from_slice(bytes).expect("every byte is < 16");
+assert_eq!(idx.len(), 4);
+assert_eq!(U4::as_u8_slice(idx), bytes);
+
+// A single out-of-range byte rejects the whole slice.
+assert!(U4::try_from_slice(&[0, 16]).is_none());
+
+// The same operations are available generically through `Niche`, which also
+// covers the arity-256 `u8` index (where no byte is ever out of range).
+fn parse<N: Niche>(bytes: &[u8]) -> Option<&[N]> {
+    N::try_from_slice(bytes)
+}
+assert!(parse::<u8>(&[0, 255]).is_some());
+```
+
+`try_from_slice` is `O(n)` in the scan. When the range is already established and the scan is measurably too costly, the `unsafe` `from_slice_unchecked` skips it; it panics on an out-of-range byte when debug assertions are enabled, and is undefined behavior otherwise. There is deliberately no `&mut [U{n}] -> &mut [u8]` conversion — it would let a caller store an out-of-range byte and leave an invalid value behind.
 
 ## Cargo features
 

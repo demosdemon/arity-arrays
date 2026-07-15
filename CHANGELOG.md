@@ -5,7 +5,29 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
-## [arity-index Unreleased]
+## [arity-index 0.1.2] - 2026-07-15
+
+### Added
+
+- Zero-copy slice conversions between `&[u8]` and `&[U{n}]`, as inherent
+  `const fn`s on `U3`–`U7` and as `Niche` trait methods (which also cover the
+  arity-256 `u8` index, where all three are the identity):
+  - `try_from_slice(&[u8]) -> Option<&[Self]>` scans every byte and returns the
+    reinterpreted slice only if all are `< COUNT`.
+  - `from_slice_unchecked(&[u8]) -> &[Self]` (`unsafe`) skips the scan. It
+    debug-asserts the range and panics on violation when `debug_assertions` are
+    enabled; without them the same call is undefined behavior.
+  - `as_u8_slice(&[Self]) -> &[u8]` is safe and infallible — every niche value
+    is a valid `u8`. There is deliberately no `&mut [Self] -> &mut [u8]`
+    counterpart: it would let a caller store an out-of-range byte and leave an
+    invalid value behind.
+
+### Changed
+
+- Mark `U3`–`U7` `#[repr(transparent)]`, promoting their `u8` size and
+  alignment from an implementation detail to a documented guarantee. This is
+  what makes the slice conversions above sound; the layout is now also asserted
+  at compile time alongside the existing `size_of::<Option<U{n}>>() == 1` check.
 
 ### Documentation
 

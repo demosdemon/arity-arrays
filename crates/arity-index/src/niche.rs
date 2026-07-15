@@ -42,6 +42,56 @@ pub trait Niche: Copy + Ord + Sized + Sealed {
     /// Constructs from a `usize`, or `None` if `i >= COUNT`.
     fn try_from_usize(i: usize) -> Option<Self>;
 
+    /// Reinterprets a byte slice as `&[Self]`, or returns `None` if any byte is
+    /// out of range (`>= COUNT`).
+    ///
+    /// The scan is `O(n)`; the conversion itself is free. The result borrows
+    /// the original bytes in place — nothing is copied.
+    ///
+    /// ```
+    /// use arity_index::{Niche, U4};
+    ///
+    /// fn parse<N: Niche>(bytes: &[u8]) -> Option<&[N]> {
+    ///     N::try_from_slice(bytes)
+    /// }
+    ///
+    /// assert!(parse::<U4>(&[0, 15]).is_some());
+    /// assert!(parse::<U4>(&[0, 16]).is_none());
+    /// // Every byte is a valid arity-256 index, so this never fails.
+    /// assert!(parse::<u8>(&[0, 255]).is_some());
+    /// ```
+    fn try_from_slice(slice: &[u8]) -> Option<&[Self]>;
+
+    /// Reinterprets a byte slice as `&[Self]` without scanning it.
+    ///
+    /// Prefer [`try_from_slice`](Self::try_from_slice) unless the scan is
+    /// measurably too costly and the range is already established.
+    ///
+    /// # Safety
+    ///
+    /// Every byte of `slice` must be `< COUNT`. Otherwise the returned slice
+    /// contains an invalid value, which is undefined behavior even if it is
+    /// never read.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a byte is `>= COUNT` and `debug_assertions` are enabled. This
+    /// is a debugging aid, not a guarantee: in release builds the same call is
+    /// undefined behavior with no diagnostic.
+    #[must_use]
+    unsafe fn from_slice_unchecked(slice: &[u8]) -> &[Self];
+
+    /// Reinterprets a slice of `Self` as the underlying bytes.
+    ///
+    /// Free and infallible — every `Self` is a valid `u8`. The result borrows
+    /// in place; nothing is copied.
+    ///
+    /// There is deliberately no `&mut [Self] -> &mut [u8]` counterpart: it
+    /// would let a caller store an out-of-range byte and leave an invalid
+    /// `Self` behind.
+    #[must_use]
+    fn as_u8_slice(slice: &[Self]) -> &[u8];
+
     /// Iterates over all values ascending (`MIN..=MAX`) as a double-ended,
     /// exact-size iterator. `len() == COUNT`.
     ///
@@ -87,12 +137,26 @@ macro_rules! niche_int {
         ///
         /// Backed by a fieldless enum, so `Option<Self>` is one byte and indexing
         #[doc = concat!("a ", stringify!($count), "-element array can elide the bounds check.")]
+        ///
+        /// `#[repr(transparent)]` over that enum, so this type has the size and
+        /// alignment of `u8` and a slice of it can be reinterpreted as bytes in
+        /// place — see [`try_from_slice`](Self::try_from_slice) and
+        /// [`as_u8_slice`](Self::as_u8_slice).
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[repr(transparent)]
         pub struct $name($repr);
 
         // The whole point of the type: `Option<Self>` must fit in one byte
         // (niche optimization). Enforced at compile time for every profile.
         const _: () = assert!(::core::mem::size_of::<::core::option::Option<$name>>() == 1);
+
+        // The layout premise behind the slice reinterpretations: `repr(transparent)`
+        // over a `repr(u8)` fieldless enum gives `u8`'s size and alignment, so a
+        // `&[u8]` and a `&[Self]` over the same bytes agree on both element count
+        // and address. Asserted rather than assumed — the `unsafe` in
+        // `transmute_slice` / `as_u8_slice` is unsound without it.
+        const _: () = assert!(::core::mem::size_of::<$name>() == ::core::mem::size_of::<u8>());
+        const _: () = assert!(::core::mem::align_of::<$name>() == ::core::mem::align_of::<u8>());
 
         impl $name {
             /// Number of bits in the value's domain.
@@ -164,6 +228,112 @@ macro_rules! niche_int {
             #[inline(always)]
             pub const fn as_usize(self) -> usize {
                 self.0 as usize
+            }
+
+            /// Returns whether every byte is in range (`< COUNT`), i.e. whether
+            /// the slice is a valid `&[Self]`.
+            #[inline]
+            const fn bytes_in_range(slice: &[u8]) -> bool {
+                let mut i = 0;
+                while i < slice.len() {
+                    if slice[i] >= $count {
+                        return false;
+                    }
+                    i += 1;
+                }
+                true
+            }
+
+            /// Reinterprets `slice` as `&[Self]`, checking nothing.
+            ///
+            /// # Safety
+            ///
+            /// Every byte of `slice` must be `< COUNT`.
+            #[inline]
+            const unsafe fn transmute_slice(slice: &[u8]) -> &[Self] {
+                // SAFETY: `Self` is `repr(transparent)` over a `repr(u8)` fieldless
+                // enum, so it shares `u8`'s size and alignment (asserted above) and
+                // the element count carries over unchanged. The caller guarantees
+                // every byte is `< COUNT`, so every element is a valid discriminant.
+                // The output borrows `slice`, so the lifetime and provenance are
+                // inherited rather than invented.
+                unsafe { ::core::slice::from_raw_parts(slice.as_ptr().cast::<Self>(), slice.len()) }
+            }
+
+            /// Reinterprets a byte slice as `&[Self]`, or returns `None` if any
+            /// byte is out of range (`>= COUNT`).
+            ///
+            /// The scan is `O(n)`; the conversion itself is free. The result
+            /// borrows the original bytes in place — nothing is copied.
+            ///
+            /// ```
+            #[doc = concat!("# use arity_index::", stringify!($name), ";")]
+            #[doc = concat!("let bytes = &[0u8, 1, ", stringify!($count), " - 1];")]
+            #[doc = concat!("let idx = ", stringify!($name), "::try_from_slice(bytes).expect(\"all in range\");")]
+            #[doc = concat!("assert_eq!(idx.len(), 3);")]
+            #[doc = concat!("assert_eq!(idx[2].as_u8(), ", stringify!($count), " - 1);")]
+            ///
+            /// // One out-of-range byte rejects the whole slice.
+            #[doc = concat!("assert!(", stringify!($name), "::try_from_slice(&[0, ", stringify!($count), "]).is_none());")]
+            /// ```
+            #[must_use]
+            #[inline]
+            pub const fn try_from_slice(slice: &[u8]) -> Option<&[Self]> {
+                if Self::bytes_in_range(slice) {
+                    // SAFETY: `bytes_in_range` just proved every byte is `< COUNT`.
+                    Some(unsafe { Self::transmute_slice(slice) })
+                } else {
+                    None
+                }
+            }
+
+            /// Reinterprets a byte slice as `&[Self]` without scanning it.
+            ///
+            /// Prefer [`try_from_slice`](Self::try_from_slice) unless the scan is
+            /// measurably too costly and the range is already established.
+            ///
+            /// # Safety
+            ///
+            /// Every byte of `slice` must be `< COUNT`. Otherwise the returned
+            /// slice contains an invalid discriminant, which is undefined
+            /// behavior even if the value is never read.
+            ///
+            /// # Panics
+            ///
+            /// Panics if a byte is `>= COUNT` and `debug_assertions` are enabled.
+            /// This is a debugging aid, not a guarantee: in release builds the
+            /// same call is undefined behavior with no diagnostic.
+            #[must_use]
+            #[inline]
+            pub const unsafe fn from_slice_unchecked(slice: &[u8]) -> &[Self] {
+                debug_assert!(Self::bytes_in_range(slice));
+                // SAFETY: the caller guarantees every byte is `< COUNT`.
+                unsafe { Self::transmute_slice(slice) }
+            }
+
+            /// Reinterprets a slice of `Self` as the underlying bytes.
+            ///
+            /// Free and infallible — every `Self` is a valid `u8`. The result
+            /// borrows in place; nothing is copied.
+            ///
+            /// There is deliberately no `&mut [Self] -> &mut [u8]` counterpart:
+            /// it would let a caller store an out-of-range byte and leave an
+            /// invalid `Self` behind.
+            ///
+            /// ```
+            #[doc = concat!("# use arity_index::", stringify!($name), ";")]
+            #[doc = concat!("let idx = ", stringify!($name), "::try_from_slice(&[1, 2, 3]).expect(\"in range\");")]
+            #[doc = concat!("assert_eq!(", stringify!($name), "::as_u8_slice(idx), &[1, 2, 3]);")]
+            /// ```
+            #[must_use]
+            #[inline]
+            pub const fn as_u8_slice(slice: &[Self]) -> &[u8] {
+                // SAFETY: `Self` is `repr(transparent)` over a `repr(u8)` fieldless
+                // enum, so it shares `u8`'s size and alignment (asserted above) and
+                // the element count carries over unchanged. Every discriminant is a
+                // valid `u8`, so no validity check is needed in this direction. The
+                // output borrows `slice`, inheriting its lifetime and provenance.
+                unsafe { ::core::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), slice.len()) }
             }
         }
 
@@ -265,6 +435,26 @@ macro_rules! niche_int {
                     Err(_) => None,
                 }
             }
+
+            // These forward to the inherent associated functions of the same name:
+            // an inherent item takes precedence over a trait one, so `Self::` here
+            // resolves to the inherent version, not back into this impl.
+            #[inline]
+            fn try_from_slice(slice: &[u8]) -> Option<&[Self]> {
+                Self::try_from_slice(slice)
+            }
+
+            #[inline]
+            unsafe fn from_slice_unchecked(slice: &[u8]) -> &[Self] {
+                // SAFETY: the caller of this trait method guarantees every byte is
+                // `< COUNT`, which is exactly the inherent function's precondition.
+                unsafe { Self::from_slice_unchecked(slice) }
+            }
+
+            #[inline]
+            fn as_u8_slice(slice: &[Self]) -> &[u8] {
+                Self::as_u8_slice(slice)
+            }
         }
     };
 }
@@ -303,10 +493,30 @@ impl Niche for u8 {
         // `Self::try_from` succeeds iff `i <= 255`, i.e. `i < COUNT`. No cast.
         Self::try_from(i).ok()
     }
+
+    // `Self` is `u8`, so all three conversions are the identity: every byte is
+    // already a valid arity-256 index. No scan, no transmute, and `try_from_slice`
+    // cannot fail.
+    #[inline]
+    fn try_from_slice(slice: &[u8]) -> Option<&[Self]> {
+        Some(slice)
+    }
+
+    #[inline]
+    unsafe fn from_slice_unchecked(slice: &[u8]) -> &[Self] {
+        slice
+    }
+
+    #[inline]
+    fn as_u8_slice(slice: &[Self]) -> &[u8] {
+        slice
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    extern crate alloc;
+
     use super::*;
 
     #[test]
@@ -442,6 +652,134 @@ mod tests {
 
         // Usable through a generic `Into<usize>` bound.
         assert_eq!(take(U5::new_masked(5)), 5usize);
+    }
+
+    #[test]
+    fn try_from_slice_accepts_in_range_and_rejects_out_of_range() {
+        // Boundary: COUNT - 1 is accepted, COUNT is not.
+        let ok = U4::try_from_slice(&[0, 7, 15]).expect("all bytes < 16");
+        assert_eq!(ok.len(), 3);
+        assert_eq!(ok[0], U4::MIN);
+        assert_eq!(ok[2], U4::MAX);
+        assert!(U4::try_from_slice(&[16]).is_none());
+        assert!(U4::try_from_slice(&[0, 1, 255]).is_none());
+
+        // A single bad byte anywhere rejects the whole slice.
+        assert!(U4::try_from_slice(&[0, 1, 2, 16, 4]).is_none());
+
+        // Empty slices are vacuously valid.
+        assert_eq!(U4::try_from_slice(&[]).expect("empty is valid").len(), 0);
+
+        // Per-type boundaries.
+        assert!(U3::try_from_slice(&[7]).is_some());
+        assert!(U3::try_from_slice(&[8]).is_none());
+        assert!(U7::try_from_slice(&[127]).is_some());
+        assert!(U7::try_from_slice(&[128]).is_none());
+    }
+
+    #[test]
+    fn slice_round_trips_and_borrows_in_place() {
+        let bytes: &[u8] = &[0, 5, 9, 15];
+        let idx = U4::try_from_slice(bytes).expect("in range");
+        assert_eq!(U4::as_u8_slice(idx), bytes);
+
+        // The conversion is a reinterpretation, not a copy: same address, same
+        // length. This is the property the `repr(transparent)` change buys.
+        assert_eq!(U4::as_u8_slice(idx).as_ptr(), bytes.as_ptr());
+        assert_eq!(idx.len(), bytes.len());
+
+        // Load every element, so Miri validates each discriminant (it checks an
+        // enum tag on load, not when the slice reference is formed).
+        for (v, &b) in idx.iter().zip(bytes) {
+            assert_eq!(v.as_u8(), b);
+        }
+
+        // The full domain of each type survives the round trip.
+        let full: alloc::vec::Vec<u8> = (0..=255).collect();
+        assert!(U7::try_from_slice(&full).is_none());
+        let in_range: alloc::vec::Vec<u8> = (0..128).collect();
+        let idx7 = U7::try_from_slice(&in_range).expect("0..128 are all valid U7");
+        for (v, &b) in idx7.iter().zip(&in_range) {
+            assert_eq!(v.as_u8(), b);
+        }
+    }
+
+    #[test]
+    fn from_slice_unchecked_matches_checked() {
+        let bytes: &[u8] = &[0, 5, 9, 15];
+        // SAFETY: every byte is < 16.
+        let unchecked = unsafe { U4::from_slice_unchecked(bytes) };
+        let checked = U4::try_from_slice(bytes).expect("in range");
+        assert_eq!(unchecked, checked);
+    }
+
+    #[test]
+    fn slice_conversions_work_generically() {
+        // Exercises the trait forwarding impls. If `Self::try_from_slice` in the
+        // macro resolved to the trait method rather than the inherent one, these
+        // would recurse until the stack overflowed.
+        fn round_trip<N: Niche + core::fmt::Debug>(bytes: &[u8], expect_ok: bool) {
+            match N::try_from_slice(bytes) {
+                Some(idx) => {
+                    assert!(expect_ok, "expected rejection, got {idx:?}");
+                    assert_eq!(N::as_u8_slice(idx), bytes);
+                    // SAFETY: `try_from_slice` just proved every byte is < COUNT.
+                    let unchecked = unsafe { N::from_slice_unchecked(bytes) };
+                    assert_eq!(N::as_u8_slice(unchecked), bytes);
+                    // Load every element by value. Miri validates an enum tag on
+                    // load, not when the slice reference is formed, so a test that
+                    // only inspects lengths or converts back to bytes would let an
+                    // invalid discriminant slip past it.
+                    for (v, &b) in idx.iter().zip(bytes) {
+                        assert_eq!(v.as_usize(), usize::from(b));
+                    }
+                }
+                None => assert!(!expect_ok, "expected acceptance, got None"),
+            }
+        }
+
+        round_trip::<U3>(&[0, 7], true);
+        round_trip::<U3>(&[8], false);
+        round_trip::<U4>(&[0, 15], true);
+        round_trip::<U4>(&[16], false);
+        round_trip::<U5>(&[31], true);
+        round_trip::<U5>(&[32], false);
+        round_trip::<U6>(&[63], true);
+        round_trip::<U6>(&[64], false);
+        round_trip::<U7>(&[127], true);
+        round_trip::<U7>(&[128], false);
+        // Every byte is a valid arity-256 index, so nothing is rejected.
+        round_trip::<u8>(&[0, 128, 255], true);
+    }
+
+    // Only compiled with debug assertions on. In a release build the call below
+    // is undefined behavior rather than a panic, so the test must not exist there.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "bytes_in_range")]
+    fn from_slice_unchecked_debug_asserts_on_out_of_range() {
+        // SAFETY: none — this deliberately violates the precondition to prove the
+        // debug assertion catches it. It panics before reaching the transmute, so
+        // no invalid `U4` is ever created.
+        let _ = unsafe { U4::from_slice_unchecked(&[0, 1, 16]) };
+    }
+
+    #[test]
+    fn try_from_slice_is_const() {
+        // The inherent form is usable in a const context; this fails to compile
+        // if it ever stops being `const fn`.
+        const BYTES: &[u8] = &[0, 1, 2];
+        const IDX: Option<&[U4]> = U4::try_from_slice(BYTES);
+        assert!(IDX.is_some());
+    }
+
+    #[test]
+    fn niche_types_have_u8_layout() {
+        // The premise behind the slice reinterpretations.
+        assert_eq!(core::mem::size_of::<U3>(), 1);
+        assert_eq!(core::mem::size_of::<U7>(), 1);
+        assert_eq!(core::mem::align_of::<U3>(), 1);
+        assert_eq!(core::mem::align_of::<U7>(), 1);
     }
 
     #[cfg(feature = "serde")]

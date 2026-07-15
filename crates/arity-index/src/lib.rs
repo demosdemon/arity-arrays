@@ -8,6 +8,10 @@
 //! the index types (including the native `u8` for arity 256); iteration over a
 //! type's whole domain is via [`NicheRange`] / [`NicheRangeInclusive`].
 //!
+//! Each `U{n}` is also `#[repr(transparent)]` over that enum, so it has the
+//! size and alignment of `u8` and a `&[u8]` can be reinterpreted as a `&[U{n}]`
+//! in place — see [`Niche::try_from_slice`] and [`Niche::as_u8_slice`].
+//!
 //! ```
 //! # extern crate alloc;
 //! use arity_index::{Niche, U4, NicheRange};
@@ -20,6 +24,11 @@
 //! let mut r = NicheRange::new(U4::new_masked(1), U4::new_masked(4));
 //! assert_eq!(r.next().map(U4::as_u8), Some(1));
 //! assert_eq!(r.next_back().map(U4::as_u8), Some(3));
+//!
+//! // Bytes reinterpreted as indices in place, validated up front:
+//! let idx: &[U4] = U4::try_from_slice(&[0, 5, 15]).expect("every byte is < 16");
+//! assert_eq!(U4::as_u8_slice(idx), &[0, 5, 15]);
+//! assert!(U4::try_from_slice(&[16]).is_none());
 //! ```
 
 mod niche;
