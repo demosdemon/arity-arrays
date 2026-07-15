@@ -71,9 +71,20 @@ The wiring is a compile-time guarantee: for every arity,
 --sample-size 50`). Export a run with `just bench-export <label>` and regenerate
 the comparison tables below plus the SVG charts in `docs/bench/` with `just
 bench-charts <label>`. `just bench-lto <args>` (e.g. `just bench-lto --save-baseline lto`) builds and
-runs the throughput bench under the opt-in `lto-probe` profile (fat LTO) to
-measure link-time optimization's effect; see `crates/arity-arrays/README.md`'s
-Performance section for the finding on the hot `get` path.
+runs the throughput bench under the opt-in `lto-probe` profile; see
+`crates/arity-arrays/README.md`'s Performance section for the codegen finding on
+the hot `get` path.
+
+`just bench-ab` measures what that profile actually buys. `lto-probe` moves two
+knobs at once — `lto = "fat"` *and* `codegen-units = 1` — so comparing it against
+the default profile cannot attribute a delta to link-time optimization;
+`codegen-units = 1` is a sizeable effect on its own. The recipe adds a third arm
+that moves only `codegen-units`, then runs all three interleaved as a palindrome
+(`A B C C B A`) so that every arm shares the run's centroid and slow linear
+thermal drift cancels within each pairwise differential. It reports three
+contrasts — codegen-units alone, LTO's marginal effect, and the two combined —
+and `--update-docs` republishes the tables below and the `docs/bench/` SVGs from
+the default-profile arm. See `scripts/bench-ab.sh` for the full rationale.
 
 Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
 as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`

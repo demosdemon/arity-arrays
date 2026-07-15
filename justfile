@@ -129,14 +129,19 @@ ci-bench *args:
     cargo bench -p arity-arrays --all-features --bench throughput --bench trie -- {{ args }}
 
 # Build+run the throughput bench under the opt-in `lto-probe` profile (fat
-# LTO, codegen-units=1) to measure LTO's marginal effect. Baseline against
-# another `cargo bench -p arity-arrays --all-features --bench throughput` run
-# at the default profile — NOT against `just bench`, which drives
-# cargo-criterion, and cargo-criterion cannot switch profiles; the comparison
-# is only meaningful between two runs of the same harness (`cargo bench`), so
+# LTO, codegen-units=1). This measures the profile as a whole, NOT LTO: the
+# profile moves `lto` and `codegen-units` together, so a delta against the
+# default cannot be attributed to either one. Use `bench-ab` for that question;
+# it splits the two apart. Baseline against another `cargo bench -p
+# arity-arrays --all-features --bench throughput` run at the default profile —
+# NOT against `just bench`, which drives cargo-criterion: the comparison is
+# only meaningful between two runs of the same harness (`cargo bench`), so
 # baseline with that harness directly rather than via `ci-bench` (which always
-# benches `throughput` and `trie` together, never `throughput` alone). Extra
-# args pass through to criterion, e.g. `just bench-lto --save-baseline lto`.
+# benches `throughput` and `trie` together, never `throughput` alone).
+# cargo-criterion rejects `--profile`, which is why this recipe uses `cargo
+# bench`; it does honor `CARGO_PROFILE_BENCH_*` overrides, which is how
+# `bench-ab` switches profiles while keeping cargo-criterion's JSON export.
+# Extra args pass through to criterion, e.g. `just bench-lto --save-baseline lto`.
 # Run the throughput bench under the opt-in lto-probe profile.
 bench-lto *args:
     cargo build --profile lto-probe -p arity-arrays --all-features --bench throughput
@@ -157,6 +162,18 @@ bench-export label:
 # Regenerate docs/bench/ SVGs and the README comparison tables from a capture.
 bench-charts run baseline='':
     cargo run -p xtask -- charts --head bench-data/{{ run }}.json {{ if baseline == '' { '' } else { '--base bench-data/' + baseline + '.json' } }}
+
+# Answers what the `lto-probe` profile actually buys, and whether it is LTO or
+# codegen-units: the profile moves both at once, so a two-way comparison cannot
+# attribute the delta. Runs three arms (default / lto-probe / codegen-units-only)
+# interleaved as a palindrome so every arm shares the run's centroid and linear
+# thermal drift cancels, and reports the noise floor alongside the three
+# contrasts. `--quick` is directional only; `--update-docs` republishes the
+# README tables and SVGs from the default-profile arm. Full precision takes
+# hours — see scripts/bench-ab.sh for the rationale and the arm table.
+# Run the interleaved A/B/C profile comparison (default vs lto-probe vs codegen-units).
+bench-ab *args:
+    scripts/bench-ab.sh {{ args }}
 
 # Unlike `bench-charts`, both labels are required: `xtask compare` always needs two
 # captures (there is no useful single-run mode). Prints the markdown table CI posts to
