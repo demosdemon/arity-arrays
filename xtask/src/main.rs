@@ -16,42 +16,44 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use anyhow::Context;
+use anyhow::bail;
+
 const USAGE: &str = "usage: xtask charts <run.json> [<baseline.json>]\n       xtask compare --head <run.json>... --base <baseline.json>...";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some("charts") => match run_charts(&args[1..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("xtask charts: {e}");
-                ExitCode::from(1)
-            }
-        },
-        Some("compare") => match run_compare(&args[1..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("xtask compare: {e}");
-                ExitCode::from(1)
-            }
-        },
+    let result = match args.first().map(String::as_str) {
+        Some("charts") => run_charts(&args[1..]).context("xtask charts"),
+        Some("compare") => run_compare(&args[1..]).context("xtask compare"),
         _ => {
             eprintln!("{USAGE}");
-            ExitCode::from(2)
+            return ExitCode::from(2);
+        }
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        // Alternate Debug renders the whole context chain, plus a backtrace when
+        // RUST_BACKTRACE is set.
+        Err(e) => {
+            eprintln!("{e:?}");
+            ExitCode::from(1)
         }
     }
 }
 
-fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let run_path = args.first().ok_or("missing <run.json> path")?;
-    let jsonl = std::fs::read_to_string(run_path).map_err(|e| format!("read {run_path}: {e}"))?;
+fn run_charts(args: &[String]) -> anyhow::Result<()> {
+    let Some(run_path) = args.first() else {
+        bail!("missing <run.json> path");
+    };
+    let jsonl = std::fs::read_to_string(run_path).with_context(|| format!("read {run_path}"))?;
     // Parse EVERYTHING (run, and baseline if given) before touching any file,
     // so a malformed input aborts without writing partial artifacts.
-    let measurements = ingest::parse_run(&jsonl)?;
+    let measurements = ingest::parse_run(&jsonl).with_context(|| format!("parse {run_path}"))?;
     let baseline = match args.get(1) {
         Some(p) => {
-            let j = std::fs::read_to_string(p).map_err(|e| format!("read {p}: {e}"))?;
-            Some(ingest::parse_run(&j)?)
+            let j = std::fs::read_to_string(p).with_context(|| format!("read {p}"))?;
+            Some(ingest::parse_run(&j).with_context(|| format!("parse {p}"))?)
         }
         None => None,
     };
@@ -66,10 +68,11 @@ fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut rewritten: Vec<(PathBuf, String)> = Vec::new();
     for path in readmes {
         let existing =
-            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         rewritten.push((
             path.to_path_buf(),
-            tables::render_marked(&existing, &table)?,
+            tables::render_marked(&existing, &table)
+                .with_context(|| format!("rewrite the bench table in {}", path.display()))?,
         ));
     }
 
@@ -79,7 +82,7 @@ fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         charts.extend(charts::write_delta(before, &measurements, bench_dir)?);
     }
     for (path, contents) in rewritten {
-        std::fs::write(&path, contents).map_err(|e| format!("write {}: {e}", path.display()))?;
+        std::fs::write(&path, contents).with_context(|| format!("write {}", path.display()))?;
     }
     eprintln!(
         "regenerated {} README table(s) and {} chart(s)",
@@ -92,7 +95,7 @@ fn run_charts(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 /// `xtask compare --head <run.json>... --base <baseline.json>...`: average the
 /// captures on each side (interleaved A/B/B/A replicates) and print the
 /// markdown A/B delta table to stdout.
-fn run_compare(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn run_compare(args: &[String]) -> anyhow::Result<()> {
     let (head_paths, base_paths) = parse_compare_args(args)?;
     let head = ingest::average_runs(&read_runs(&head_paths)?);
     let base = ingest::average_runs(&read_runs(&base_paths)?);
@@ -102,7 +105,7 @@ fn run_compare(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Split `--head <f>... --base <f>...` (either flag order) into two file
 /// groups. Each flag must precede at least one path.
-fn parse_compare_args(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
+fn parse_compare_args(args: &[String]) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     enum Side {
         None,
         Head,
@@ -118,27 +121,21 @@ fn parse_compare_args(args: &[String]) -> Result<(Vec<String>, Vec<String>), Str
             other => match side {
                 Side::Head => head.push(other.to_owned()),
                 Side::Base => base.push(other.to_owned()),
-                Side::None => {
-                    return Err(format!(
-                        "unexpected argument {other:?} before --head/--base"
-                    ));
-                }
+                Side::None => bail!("unexpected argument {other:?} before --head/--base"),
             },
         }
     }
     if head.is_empty() || base.is_empty() {
-        return Err("compare needs --head <file...> and --base <file...>".to_owned());
+        bail!("compare needs --head <file...> and --base <file...>");
     }
     Ok((head, base))
 }
 
-fn read_runs(
-    paths: &[String],
-) -> Result<Vec<Vec<ingest::Measurement>>, Box<dyn std::error::Error>> {
+fn read_runs(paths: &[String]) -> anyhow::Result<Vec<Vec<ingest::Measurement>>> {
     let mut runs = Vec::new();
     for p in paths {
-        let j = std::fs::read_to_string(p).map_err(|e| format!("read {p}: {e}"))?;
-        runs.push(ingest::parse_run(&j)?);
+        let j = std::fs::read_to_string(p).with_context(|| format!("read {p}"))?;
+        runs.push(ingest::parse_run(&j).with_context(|| format!("parse {p}"))?);
     }
     Ok(runs)
 }

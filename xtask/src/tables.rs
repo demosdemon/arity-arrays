@@ -1,22 +1,13 @@
 //! Regenerate the Markdown comparison tables embedded in the README files,
 //! between `<!-- bench:start -->` / `<!-- bench:end -->` markers.
 
+use anyhow::Context;
+use anyhow::bail;
+
 use crate::ingest::Measurement;
 
 const START: &str = "<!-- bench:start -->";
 const END: &str = "<!-- bench:end -->";
-
-/// Error from rewriting a marked region.
-#[derive(Debug)]
-pub struct TableError(pub String);
-
-impl std::fmt::Display for TableError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for TableError {}
 
 /// Replace the text between the markers with `generated`, keeping the markers
 /// and the surrounding document intact. All-or-nothing: a missing or
@@ -24,18 +15,18 @@ impl std::error::Error for TableError {}
 /// without writing.
 ///
 /// # Errors
-/// Returns [`TableError`] if either marker is absent or the end marker precedes
-/// the start marker.
-pub fn render_marked(existing: &str, generated: &str) -> Result<String, TableError> {
+/// Returns an error if either marker is absent or the end marker precedes the
+/// start marker.
+pub fn render_marked(existing: &str, generated: &str) -> anyhow::Result<String> {
     let start = existing
         .find(START)
-        .ok_or_else(|| TableError(format!("missing {START}")))?;
+        .with_context(|| format!("missing {START}"))?;
     let end = existing
         .find(END)
-        .ok_or_else(|| TableError(format!("missing {END}")))?;
+        .with_context(|| format!("missing {END}"))?;
     let body_start = start + START.len();
     if end < body_start {
-        return Err(TableError("end marker precedes start marker".to_owned()));
+        bail!("end marker precedes start marker");
     }
     let mut out = String::with_capacity(existing.len() + generated.len());
     out.push_str(&existing[..body_start]);

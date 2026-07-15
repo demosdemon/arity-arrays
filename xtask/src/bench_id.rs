@@ -5,6 +5,9 @@
 use core::fmt;
 use core::str::FromStr;
 
+use anyhow::Context;
+use anyhow::bail;
+
 /// Which payload cell a throughput bench belongs to. `Ord` so it can key the
 /// `BTreeMap`s the chart renderer builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,12 +26,12 @@ impl fmt::Display for Cell {
 }
 
 impl FromStr for Cell {
-    type Err = BenchIdParseError;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "cell_a" => Ok(Self::A),
             "cell_b" => Ok(Self::B),
-            other => Err(BenchIdParseError(format!("unknown cell {other:?}"))),
+            other => bail!("unknown cell {other:?}"),
         }
     }
 }
@@ -50,12 +53,12 @@ impl fmt::Display for TrieArity {
 }
 
 impl FromStr for TrieArity {
-    type Err = BenchIdParseError;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "arity16" => Ok(Self::A16),
             "arity256" => Ok(Self::A256),
-            other => Err(BenchIdParseError(format!("unknown arity {other:?}"))),
+            other => bail!("unknown arity {other:?}"),
         }
     }
 }
@@ -94,55 +97,49 @@ pub enum BenchId {
 /// Throughput ops that carry no occupancy segment.
 const WORKLOAD_OPS: &[&str] = &["build", "churn"];
 
-/// Error from parsing a benchmark id path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BenchIdParseError(pub String);
-
-impl fmt::Display for BenchIdParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "malformed benchmark id: {}", self.0)
-    }
-}
-
-impl std::error::Error for BenchIdParseError {}
-
-fn occ(s: &str) -> Result<usize, BenchIdParseError> {
+fn occ(s: &str) -> anyhow::Result<usize> {
     s.parse::<usize>()
-        .map_err(|_| BenchIdParseError(format!("occupancy {s:?} is not a number")))
+        .with_context(|| format!("occupancy {s:?} is not a number"))
 }
 
-impl FromStr for BenchId {
-    type Err = BenchIdParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split('/').collect();
-        match parts.as_slice() {
-            ["trie", arity, op, store, shape] => Ok(Self::Trie {
-                arity: arity.parse()?,
-                op: (*op).to_owned(),
-                store: (*store).to_owned(),
-                shape: (*shape).to_owned(),
-            }),
-            ["throughput", "convert", op, cell, occupancy] => Ok(Self::Convert {
-                op: (*op).to_owned(),
-                cell: cell.parse()?,
-                occupancy: occ(occupancy)?,
-            }),
-            ["throughput", cell, op, subject] if WORKLOAD_OPS.contains(op) => Ok(Self::Workload {
+/// The body of [`BenchId::from_str`], split out so the id under parse is
+/// attached as context exactly once, around every way the parse can fail.
+fn parse_path(s: &str) -> anyhow::Result<BenchId> {
+    let parts: Vec<&str> = s.split('/').collect();
+    match parts.as_slice() {
+        ["trie", arity, op, store, shape] => Ok(BenchId::Trie {
+            arity: arity.parse()?,
+            op: (*op).to_owned(),
+            store: (*store).to_owned(),
+            shape: (*shape).to_owned(),
+        }),
+        ["throughput", "convert", op, cell, occupancy] => Ok(BenchId::Convert {
+            op: (*op).to_owned(),
+            cell: cell.parse()?,
+            occupancy: occ(occupancy)?,
+        }),
+        ["throughput", cell, op, subject] if WORKLOAD_OPS.contains(op) => Ok(BenchId::Workload {
+            cell: cell.parse()?,
+            op: (*op).to_owned(),
+            subject: (*subject).to_owned(),
+        }),
+        ["throughput", cell, op, subject, occupancy] if !WORKLOAD_OPS.contains(op) => {
+            Ok(BenchId::Single {
                 cell: cell.parse()?,
                 op: (*op).to_owned(),
                 subject: (*subject).to_owned(),
-            }),
-            ["throughput", cell, op, subject, occupancy] if !WORKLOAD_OPS.contains(op) => {
-                Ok(Self::Single {
-                    cell: cell.parse()?,
-                    op: (*op).to_owned(),
-                    subject: (*subject).to_owned(),
-                    occupancy: occ(occupancy)?,
-                })
-            }
-            _ => Err(BenchIdParseError(format!("unrecognized id path {s:?}"))),
+                occupancy: occ(occupancy)?,
+            })
         }
+        _ => bail!("unrecognized id path"),
+    }
+}
+
+impl FromStr for BenchId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_path(s).with_context(|| format!("malformed benchmark id {s:?}"))
     }
 }
 
