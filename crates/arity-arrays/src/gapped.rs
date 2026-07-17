@@ -1365,6 +1365,27 @@ impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.occ_bits.size_hint()
     }
+
+    fn fold<Acc, F>(self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        // Drive the logical-index walk with `BitIter::fold`, pulling the matching
+        // physical slot from the live cursor in lockstep — the two cursors hold
+        // the same remaining count, so `next` is always `Some`.
+        let data = self.data;
+        let mut live = self.live_bits;
+        self.occ_bits.fold(init, move |acc, i| {
+            let p = live
+                .next()
+                .expect("live and occupancy have equal count")
+                .as_usize();
+            // SAFETY: `p` is a set live bit (physical slot < cap) with an
+            // initialised element; bounded by `'a` via the struct's `PhantomData`.
+            let v = unsafe { &*data.add(p) };
+            f(acc, (i, v))
+        })
+    }
 }
 
 impl<T, A: Arity> DoubleEndedIterator for PresentIter<'_, T, A> {
@@ -1373,6 +1394,21 @@ impl<T, A: Arity> DoubleEndedIterator for PresentIter<'_, T, A> {
         let p = self.live_bits.next_back().expect("equal count").as_usize();
         // SAFETY: as in `next`.
         Some((i, unsafe { &*self.data.add(p) }))
+    }
+
+    fn rfold<Acc, F>(self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        // Reverse of `fold`: both cursors are drawn from their back ends.
+        let data = self.data;
+        let mut live = self.live_bits;
+        self.occ_bits.rfold(init, move |acc, i| {
+            let p = live.next_back().expect("equal count").as_usize();
+            // SAFETY: as in `fold`.
+            let v = unsafe { &*data.add(p) };
+            f(acc, (i, v))
+        })
     }
 }
 
@@ -1990,6 +2026,44 @@ mod tests {
         assert_eq!(g.iter_present_mut().count(), 0);
         assert_eq!((&mut g).into_iter().filter(|(_, o)| o.is_some()).count(), 0);
         assert_eq!((&mut g).into_iter().count(), 16);
+    }
+
+    #[test]
+    fn iter_present_fold_and_rfold_match_next() {
+        // Build a layout with real physical gaps so the fold's live-cursor
+        // lockstep is exercised, not just a contiguous run.
+        let mut g = GappedArray::<u8, Arity16>::new();
+        for s in 0u8..6 {
+            g.insert(U4::new_masked(s), s * 10);
+        }
+        g.remove(U4::new_masked(1));
+        g.remove(U4::new_masked(3)); // present {0,2,4,5} at scattered live slots
+        let push = |mut v: std::vec::Vec<(u8, u8)>, (i, val): (U4, &u8)| {
+            v.push((i.as_u8(), *val));
+            v
+        };
+
+        assert_eq!(
+            g.iter_present().fold(std::vec::Vec::new(), push),
+            std::vec![(0, 0), (2, 20), (4, 40), (5, 50)]
+        );
+        assert_eq!(
+            g.iter_present().rfold(std::vec::Vec::new(), push),
+            std::vec![(5, 50), (4, 40), (2, 20), (0, 0)]
+        );
+
+        // fold/rfold only visit what next/next_back left behind.
+        let mut it = g.iter_present();
+        it.next(); // drops (0, 0)
+        it.next_back(); // drops (5, 50)
+        assert_eq!(it.clone().fold(std::vec::Vec::new(), push), std::vec![
+            (2, 20),
+            (4, 40)
+        ]);
+        assert_eq!(it.rfold(std::vec::Vec::new(), push), std::vec![
+            (4, 40),
+            (2, 20)
+        ]);
     }
 
     #[test]

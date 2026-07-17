@@ -43,6 +43,27 @@ impl<B: Bitmap> Iterator for BitIter<B> {
         let n = self.remaining.raw_popcount() as usize;
         (n, Some(n))
     }
+
+    /// Folds the remaining set bits in one loop over the bitmap snapshot,
+    /// clearing the lowest each step, instead of the default `next()`-per-item
+    /// drive. `PackedArray`/`GappedArray` present iteration delegates here, so
+    /// this is the shared internal-iteration primitive.
+    #[inline]
+    fn fold<Acc, F>(mut self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        let mut acc = init;
+        while !self.remaining.raw_is_zero() {
+            let pos = self.remaining.raw_lowest_pos();
+            self.remaining = self.remaining.raw_clear_lowest();
+            acc = f(
+                acc,
+                <B as Bitmap>::Index::try_from_usize(pos).expect("set-bit position < WIDTH"),
+            );
+        }
+        acc
+    }
 }
 
 impl<B: Bitmap> DoubleEndedIterator for BitIter<B> {
@@ -54,6 +75,25 @@ impl<B: Bitmap> DoubleEndedIterator for BitIter<B> {
         let pos = self.remaining.raw_highest_pos();
         self.remaining = self.remaining.raw_clear_highest();
         Some(<B as Bitmap>::Index::try_from_usize(pos).expect("set-bit position < WIDTH"))
+    }
+
+    /// Reverse counterpart of [`fold`](Iterator::fold): folds the remaining set
+    /// bits descending, clearing the highest each step.
+    #[inline]
+    fn rfold<Acc, F>(mut self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        let mut acc = init;
+        while !self.remaining.raw_is_zero() {
+            let pos = self.remaining.raw_highest_pos();
+            self.remaining = self.remaining.raw_clear_highest();
+            acc = f(
+                acc,
+                <B as Bitmap>::Index::try_from_usize(pos).expect("set-bit position < WIDTH"),
+            );
+        }
+        acc
     }
 }
 
@@ -83,5 +123,35 @@ mod tests {
         let cloned = it.clone();
         assert!(alloc::format!("{it:?}").contains("BitIter"));
         assert_eq!(it.count(), cloned.count());
+    }
+
+    #[test]
+    fn fold_and_rfold_match_next_including_partial_consumption() {
+        let bm = u16::ZERO
+            .with_bit(U4::new_masked(1))
+            .with_bit(U4::new_masked(4))
+            .with_bit(U4::new_masked(9))
+            .with_bit(U4::new_masked(14));
+        let push = |mut v: alloc::vec::Vec<u8>, i: U4| {
+            v.push(i.as_u8());
+            v
+        };
+
+        // fold ascending, rfold descending — full consumption.
+        assert_eq!(bm.bits().fold(alloc::vec::Vec::new(), push), alloc::vec![
+            1, 4, 9, 14
+        ]);
+        assert_eq!(bm.bits().rfold(alloc::vec::Vec::new(), push), alloc::vec![
+            14, 9, 4, 1
+        ]);
+
+        // fold/rfold must only visit what `next`/`next_back` left behind.
+        let mut it = bm.bits();
+        it.next(); // 1
+        it.next_back(); // 14
+        assert_eq!(it.clone().fold(alloc::vec::Vec::new(), push), alloc::vec![
+            4, 9
+        ]);
+        assert_eq!(it.rfold(alloc::vec::Vec::new(), push), alloc::vec![9, 4]);
     }
 }

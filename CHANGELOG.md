@@ -51,6 +51,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 - Marked the set-bit iterator `BitIter` `#[must_use]`, so constructing it (via
   `Bitmap::bits`) and discarding it without consuming it now warns ("iterators
   are lazy and do nothing unless consumed").
+- `BitIter` overrides `fold`/`rfold` to scan the bitmap snapshot in a single
+  loop (clearing the lowest/highest set bit each step) instead of the default
+  `next()`-per-item drive, so internal-iteration consumers — `.fold()`,
+  `.sum()`, `.for_each()`, `.collect()`, and `GappedArray`'s present iteration,
+  which delegates here — avoid the per-item `Option` round-trip. (`try_fold`/
+  `try_rfold` cannot be overridden on stable — the `Try` trait is unstable — so
+  short-circuiting consumers keep the default.)
 
 ## [arity-bitmap 0.2.0-alpha.2] - 2026-07-15
 
@@ -118,6 +125,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `iter_present` — `PartialEq`, `Hash`, `Debug`, and the `Compact` serde
   adapter. Yielded items and the iterator's exact-size/double-ended/fused
   semantics are unchanged.
+- `GappedArray`'s present iterator (`gapped::PresentIter`) overrides
+  `fold`/`rfold` to delegate the occupancy walk to `BitIter::fold`/`rfold`,
+  pulling the matching physical slot from the live cursor in lockstep. The
+  throughput benchmark measures the `iter_present().fold(..)` path meaningfully
+  faster than the default `next()`-based fold (the two-cursor `next()` did not
+  optimize as tightly). `PackedArray`'s present iterator keeps the default fold
+  — with its dense contiguous storage the compiler already lowers it to the same
+  code, so a custom fold showed no gain. `packed::PresentIterMut` forwards
+  `fold`/`rfold` to its inner `Zip`.
 
 ## [arity-arrays 0.2.0-alpha.2] - 2026-07-15
 

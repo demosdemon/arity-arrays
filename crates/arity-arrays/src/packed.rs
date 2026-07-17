@@ -764,6 +764,10 @@ impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.bits.size_hint()
     }
+    // No custom `fold`: with the dense contiguous storage, the compiler already
+    // lowers the default `next()`-based fold to essentially the same code (a
+    // measured A/B showed no gain beyond noise), unlike `GappedArray`'s
+    // two-cursor iterator, which does benefit from delegating to `BitIter::fold`.
 }
 
 impl<T, A: Arity> DoubleEndedIterator for PresentIter<'_, T, A> {
@@ -915,11 +919,25 @@ impl<'a, T, A: Arity> Iterator for PresentIterMut<'a, T, A> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }
+    fn fold<Acc, F>(self, init: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        // Forward to the inner `Zip`, whose `fold` drives the set-bit indices
+        // (`BitIter::fold`) against the contiguous `slice::IterMut` values.
+        self.inner.fold(init, f)
+    }
 }
 
 impl<T, A: Arity> DoubleEndedIterator for PresentIterMut<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back()
+    }
+    fn rfold<Acc, F>(self, init: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        self.inner.rfold(init, f)
     }
 }
 
@@ -1424,6 +1442,26 @@ mod tests {
         assert_eq!((&mut p).into_iter().filter(|(_, o)| o.is_some()).count(), 0);
         // All-slots walk still visits every slot, all absent.
         assert_eq!((&mut p).into_iter().count(), 16);
+    }
+
+    #[test]
+    fn iter_present_mut_fold_forwards_to_zip() {
+        extern crate alloc;
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for idx in [2u8, 7, 13] {
+            src[U4::new_masked(idx)] = Some(idx);
+        }
+        let mut p = PackedArray::from(src);
+        // fold can mutate through the &mut items and observe every present slot.
+        let seen = p
+            .iter_present_mut()
+            .fold(alloc::vec::Vec::new(), |mut v, (i, val)| {
+                *val += 100;
+                v.push((i.as_u8(), *val));
+                v
+            });
+        assert_eq!(seen, alloc::vec![(2, 102), (7, 107), (13, 113)]);
+        assert_eq!(p.get(U4::new_masked(7)), Some(&107));
     }
 
     #[test]
