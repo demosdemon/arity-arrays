@@ -425,6 +425,65 @@ impl<T, A: Arity> GappedArray<T, A> {
         }
     }
 
+    /// Iterates present elements as `(A::Index, &mut T)`, ascending, for
+    /// in-place mutation. Double-ended, exact-size, and fused. `O(1)` per
+    /// step (co-advances the occupancy and live bit cursors).
+    ///
+    /// The mutable counterpart of [`iter_present`](Self::iter_present) and the
+    /// bulk counterpart of the single-slot [`get_mut`](Self::get_mut): updating
+    /// every present element is one linear walk rather than a `get_mut` per
+    /// index. Which slots are present is unchanged — it hands out `&mut T` to
+    /// the existing elements and never inserts or removes.
+    pub fn iter_present_mut(
+        &mut self,
+    ) -> impl DoubleEndedIterator<Item = (A::Index, &mut T)>
+    + ExactSizeIterator
+    + core::iter::FusedIterator
+    + '_ {
+        self.present_iter_mut()
+    }
+
+    /// Iterates all `A::LEN` slots as `(A::Index, Option<&mut T>)`, ascending,
+    /// for in-place mutation. Double-ended — the mutable analogue of
+    /// [`iter`](Self::iter), and what `&mut array` iterates.
+    #[must_use]
+    pub fn iter_mut(&mut self) -> GappedAllIterMut<'_, T, A> {
+        let bitmap = self.bitmap();
+        let slots = <A::Index as Niche>::all();
+        GappedAllIterMut {
+            present: self.present_iter_mut(),
+            bitmap,
+            slots,
+        }
+    }
+
+    /// Builds the concrete mutable present-iterator both
+    /// [`iter_present_mut`](Self::iter_present_mut) (as `impl Iterator`) and
+    /// [`iter_mut`](Self::iter_mut) (as its element engine) share.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "the &mut receiver is the exclusive borrow that lets the returned iterator hand out &mut T; only raw pointers are formed, so clippy cannot see the borrow is load-bearing"
+    )]
+    fn present_iter_mut(&mut self) -> GappedPresentIterMut<'_, T, A> {
+        self.0.map_or_else(
+            || GappedPresentIterMut {
+                occ_bits: A::Bitmap::ZERO.bits(),
+                live_bits: A::Bitmap::ZERO.bits(),
+                data: core::ptr::null_mut(),
+                _marker: PhantomData,
+            },
+            // SAFETY: `Some` ↔ a valid allocation with initialised header/elements.
+            |ptr| unsafe {
+                GappedPresentIterMut {
+                    occ_bits: ptr.as_ref().occupancy.bits(),
+                    live_bits: ptr.as_ref().live.bits(),
+                    data: data_ptr(ptr),
+                    _marker: PhantomData,
+                }
+            },
+        )
+    }
+
     /// Reallocates to a fresh `new_cap`-slot block with all live elements
     /// re-laid at even spread positions, then frees the old block. Used by grow
     /// and respread. `new_cap` must be a power of two `≥ count`. No-op shape
@@ -1332,6 +1391,70 @@ impl<T, A: Arity> ExactSizeIterator for GappedPresentIter<'_, T, A> {
 
 impl<T, A: Arity> core::iter::FusedIterator for GappedPresentIter<'_, T, A> {}
 
+/// Mutable analogue of [`GappedPresentIter`], yielding `(A::Index, &mut T)` for
+/// each present element in ascending logical order. Private: surfaced only
+/// through [`GappedArray::iter_present_mut`] (as an opaque `impl Iterator`) and
+/// as the element engine of [`GappedAllIterMut`].
+///
+/// The occupancy cursor supplies the logical index and the live cursor the
+/// physical slot, advanced in lockstep exactly as in [`GappedPresentIter`].
+/// Each live slot is yielded once — front and back draws never cross — so every
+/// `&mut T` handed out is unique and non-aliasing.
+struct GappedPresentIterMut<'a, T, A: Arity> {
+    occ_bits: arity_bitmap::BitIter<A::Bitmap>,
+    live_bits: arity_bitmap::BitIter<A::Bitmap>,
+    data: *mut T,
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T, A: Arity> Iterator for GappedPresentIterMut<'a, T, A> {
+    type Item = (A::Index, &'a mut T);
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.occ_bits.next()?;
+        let p = self
+            .live_bits
+            .next()
+            .expect("live and occupancy have equal count")
+            .as_usize();
+        // SAFETY: `p` is a set live bit (physical slot < cap) with an initialised
+        // element. Each live bit is yielded once, so this `&mut` aliases no other
+        // yielded reference; it is bounded by `'a` (the originating `&'a mut
+        // GappedArray` borrow, carried via `PhantomData<&'a mut T>`).
+        Some((i, unsafe { &mut *self.data.add(p) }))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.occ_bits.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for GappedPresentIterMut<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.occ_bits.next_back()?;
+        let p = self.live_bits.next_back().expect("equal count").as_usize();
+        // SAFETY: as in `next`.
+        Some((i, unsafe { &mut *self.data.add(p) }))
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for GappedPresentIterMut<'_, T, A> {
+    fn len(&self) -> usize {
+        self.occ_bits.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for GappedPresentIterMut<'_, T, A> {}
+
+// SAFETY: holds a `*mut T` used only to hand out non-aliasing `&mut T` for the
+// lifetime it borrows its source array, plus two `BitIter<A::Bitmap>` cursors.
+// Like `&mut T`, it is `Send` when `T: Send` and `Sync` when `T: Sync`; the
+// `A::Bitmap: Send`/`Sync` bound covers the owned cursor fields, so clippy can
+// prove the impls sound with no `non_send_fields_in_send_ty` suppression.
+unsafe impl<T: Send, A: Arity> Send for GappedPresentIterMut<'_, T, A> where A::Bitmap: Send {}
+// SAFETY: sharing the iterator exposes only `&T` and `&A::Bitmap` (no interior
+// mutability), so — like `&mut T` — it is `Sync` when `T: Sync`; the
+// `A::Bitmap: Sync` bound covers the owned cursor fields.
+unsafe impl<T: Sync, A: Arity> Sync for GappedPresentIterMut<'_, T, A> where A::Bitmap: Sync {}
+
 /// Iterator over all slots of a [`GappedArray`]. See [`GappedArray::iter`].
 ///
 /// Drives off the index range (`slots`) and an `occupancy` snapshot, pulling
@@ -1412,6 +1535,80 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
     type IntoIter = GappedAllIter<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+/// Iterator over all slots of a [`GappedArray`] as `(A::Index, Option<&mut
+/// T>)`, ascending, for in-place mutation.
+///
+/// See [`GappedArray::iter_mut`]; this is what `&mut array` iterates, the
+/// mutable analogue of [`GappedAllIter`].
+///
+/// Drives off the index range (`slots`) and an `occupancy` snapshot, pulling
+/// the `&mut T` for a present slot from the front or back of the
+/// present-element stream (`present`) as the range crosses it — mirroring
+/// [`GappedAllIter`]. Absent slots yield `None` without advancing `present`.
+pub struct GappedAllIterMut<'a, T, A: Arity> {
+    present: GappedPresentIterMut<'a, T, A>,
+    bitmap: A::Bitmap,
+    slots: arity_index::NicheRangeInclusive<A::Index>,
+}
+
+impl<T, A: Arity> core::fmt::Debug for GappedAllIterMut<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GappedAllIterMut")
+            .field("remaining", &self.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, T, A: Arity> Iterator for GappedAllIterMut<'a, T, A> {
+    type Item = (A::Index, Option<&'a mut T>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.slots.next()?;
+        if self.bitmap.test(i) {
+            let (_, v) = self
+                .present
+                .next()
+                .expect("a set occupancy bit has a matching present element");
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slots.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for GappedAllIterMut<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.slots.next_back()?;
+        if self.bitmap.test(i) {
+            let (_, v) = self
+                .present
+                .next_back()
+                .expect("a set occupancy bit has a matching present element");
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for GappedAllIterMut<'_, T, A> {
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for GappedAllIterMut<'_, T, A> {}
+
+impl<'a, T, A: Arity> IntoIterator for &'a mut GappedArray<T, A> {
+    type Item = (A::Index, Option<&'a mut T>);
+    type IntoIter = GappedAllIterMut<'a, T, A>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
@@ -1698,6 +1895,103 @@ mod tests {
         assert_eq!(it.next_back().map(|(i, &v)| (i.as_u8(), v)), Some((14, 14)));
         assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((4, 4)));
         assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn iter_present_mut_mutates_in_place() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for s in [1u8, 4, 14] {
+            src[U4::new_masked(s)] = Some(s);
+        }
+        let mut g = GappedArray::from(src);
+
+        for (i, v) in g.iter_present_mut() {
+            *v = v.wrapping_add(i.as_u8());
+        }
+
+        let after: std::vec::Vec<(u8, u8)> =
+            g.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(after, std::vec![(1, 2), (4, 8), (14, 28)]);
+    }
+
+    #[test]
+    fn iter_present_mut_double_ended() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for s in [1u8, 4, 14] {
+            src[U4::new_masked(s)] = Some(s);
+        }
+        let mut g = GappedArray::from(src);
+
+        {
+            let mut it = g.iter_present_mut();
+            *it.next().expect("first present").1 = 100;
+            *it.next_back().expect("last present").1 = 200;
+            assert_eq!(it.len(), 1);
+            *it.next().expect("middle present").1 = 50;
+            assert!(it.next().is_none());
+        }
+        assert_eq!(g.get(U4::new_masked(1)), Some(&100));
+        assert_eq!(g.get(U4::new_masked(14)), Some(&200));
+        assert_eq!(g.get(U4::new_masked(4)), Some(&50));
+    }
+
+    #[test]
+    fn iter_present_mut_skips_physical_gaps() {
+        // Build a layout with real physical gaps: inserts fill contiguous slots,
+        // then removes punch holes that "never move" the survivors. The mutable
+        // present iterator must co-advance occupancy and live cursors so each
+        // `&mut T` lands on the surviving element's own physical slot, skipping
+        // the gap slots (whose memory is dead).
+        let mut g = GappedArray::<u8, Arity16>::new();
+        for s in 0u8..6 {
+            g.insert(U4::new_masked(s), s * 10);
+        }
+        g.remove(U4::new_masked(1));
+        g.remove(U4::new_masked(3));
+
+        for (i, v) in g.iter_present_mut() {
+            *v = v.wrapping_add(i.as_u8());
+        }
+
+        assert_eq!(g.get(U4::new_masked(0)), Some(&0)); // 0 + 0
+        assert_eq!(g.get(U4::new_masked(2)), Some(&22)); // 20 + 2
+        assert_eq!(g.get(U4::new_masked(4)), Some(&44)); // 40 + 4
+        assert_eq!(g.get(U4::new_masked(5)), Some(&55)); // 50 + 5
+        assert_eq!(g.get(U4::new_masked(1)), None);
+        assert_eq!(g.get(U4::new_masked(3)), None);
+    }
+
+    #[test]
+    fn into_iter_mut_walks_all_slots() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        src[U4::new_masked(2)] = Some(2);
+        src[U4::new_masked(9)] = Some(9);
+        let mut g = GappedArray::from(src);
+
+        let mut present = 0usize;
+        let mut absent = 0usize;
+        for (i, opt) in &mut g {
+            match opt {
+                Some(v) => {
+                    *v += 1;
+                    present += 1;
+                    assert!(i.as_u8() == 2 || i.as_u8() == 9);
+                }
+                None => absent += 1,
+            }
+        }
+        assert_eq!(present, 2);
+        assert_eq!(absent, 14);
+        assert_eq!(g.get(U4::new_masked(2)), Some(&3));
+        assert_eq!(g.get(U4::new_masked(9)), Some(&10));
+    }
+
+    #[test]
+    fn iter_present_mut_empty_is_empty() {
+        let mut g = GappedArray::<u8, Arity16>::new();
+        assert_eq!(g.iter_present_mut().count(), 0);
+        assert_eq!((&mut g).into_iter().filter(|(_, o)| o.is_some()).count(), 0);
+        assert_eq!((&mut g).into_iter().count(), 16);
     }
 
     #[test]

@@ -291,6 +291,66 @@ impl<T, A: Arity> PackedArray<T, A> {
         }
     }
 
+    /// Iterates over present elements as `(A::Index, &mut T)`, ascending, for
+    /// in-place mutation. Double-ended, exact-size, and fused.
+    ///
+    /// The mutable counterpart of [`iter_present`](Self::iter_present) and the
+    /// bulk counterpart of the single-slot [`get_mut`](Self::get_mut): a whole
+    /// present-set update (e.g. adding to every value) is one linear walk
+    /// rather than a `get_mut` per index. Which slots are present is
+    /// unchanged — the iterator hands out `&mut T` to the existing elements
+    /// and never inserts or removes.
+    pub fn iter_present_mut(
+        &mut self,
+    ) -> impl DoubleEndedIterator<Item = (A::Index, &mut T)>
+    + ExactSizeIterator
+    + core::iter::FusedIterator
+    + '_ {
+        // Storage is a dense, contiguous run in ascending-rank order, so the
+        // set-bit indices (which advance in that same order) zip one-to-one with
+        // a plain slice `iter_mut` — each `&mut T` handed out exactly once, with
+        // no unchecked per-element pointer arithmetic.
+        let (bitmap, elems) = self.present_slice_mut();
+        bitmap.bits().zip(elems.iter_mut())
+    }
+
+    /// Iterates over all `A::LEN` slots as `(A::Index, Option<&mut T>)`,
+    /// ascending, for in-place mutation. Double-ended — the mutable analogue of
+    /// [`iter`](Self::iter), and what `&mut array` iterates.
+    #[must_use]
+    pub fn iter_mut(&mut self) -> PackedAllIterMut<'_, T, A> {
+        let (bitmap, elems) = self.present_slice_mut();
+        PackedAllIterMut {
+            slots: A::Index::all(),
+            bitmap,
+            elems: elems.iter_mut(),
+        }
+    }
+
+    /// The membership bitmap paired with the dense element slice, shared by
+    /// [`iter_present_mut`](Self::iter_present_mut) and
+    /// [`iter_mut`](Self::iter_mut).
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "the &mut receiver is the exclusive borrow that lets callers hand out &mut T; no field is written, so clippy cannot see the borrow is load-bearing"
+    )]
+    fn present_slice_mut(&mut self) -> (A::Bitmap, &mut [T]) {
+        self.0.map_or_else(
+            || (A::Bitmap::ZERO, &mut [][..]),
+            // SAFETY: `Some` ↔ a valid allocation with an initialised bitmap and
+            // `count` initialised, contiguous elements, exclusively borrowed
+            // through `&mut self`.
+            |ptr| unsafe {
+                let bitmap = ptr.as_ref().bitmap;
+                let count = bitmap.count_ones() as usize;
+                (
+                    bitmap,
+                    core::slice::from_raw_parts_mut(data_ptr(ptr), count),
+                )
+            },
+        )
+    }
+
     /// Returns a mutable reference to the element at `index`, or `None` if
     /// absent. Does not change which slots are present (no reallocation).
     ///
@@ -829,6 +889,82 @@ impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
     }
 }
 
+/// Iterator over all slots of a [`PackedArray`] as `(A::Index, Option<&mut
+/// T>)`, ascending, for in-place mutation.
+///
+/// See [`PackedArray::iter_mut`]; this is what `&mut array` iterates, the
+/// mutable analogue of [`PackedAllIter`].
+///
+/// The slot range (`slots`) owns termination and front/back crossing; the
+/// contiguous dense `elems` cursor supplies the `&mut T` for each present slot.
+/// Because storage is in ascending-rank order — the same order the range visits
+/// set bits — a present slot drawn from the front takes the front of `elems`
+/// and one drawn from the back takes the back, so every element is handed out
+/// exactly once. Absent slots yield `None` without touching `elems`.
+pub struct PackedAllIterMut<'a, T, A: Arity> {
+    slots: arity_index::NicheRangeInclusive<A::Index>,
+    bitmap: A::Bitmap,
+    elems: core::slice::IterMut<'a, T>,
+}
+
+impl<T, A: Arity> core::fmt::Debug for PackedAllIterMut<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PackedAllIterMut")
+            .field("remaining", &self.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, T, A: Arity> Iterator for PackedAllIterMut<'a, T, A> {
+    type Item = (A::Index, Option<&'a mut T>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.slots.next()?;
+        if self.bitmap.test(i) {
+            let v = self
+                .elems
+                .next()
+                .expect("a set bit has a matching dense element");
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slots.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for PackedAllIterMut<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.slots.next_back()?;
+        if self.bitmap.test(i) {
+            let v = self
+                .elems
+                .next_back()
+                .expect("a set bit has a matching dense element");
+            Some((i, Some(v)))
+        } else {
+            Some((i, None))
+        }
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for PackedAllIterMut<'_, T, A> {
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for PackedAllIterMut<'_, T, A> {}
+
+impl<'a, T, A: Arity> IntoIterator for &'a mut PackedArray<T, A> {
+    type Item = (A::Index, Option<&'a mut T>);
+    type IntoIter = PackedAllIterMut<'a, T, A>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 /// Owned, consuming iterator over the present `(index, value)` pairs of a
 /// [`PackedArray`], ascending by index. Created by
 /// `<PackedArray as IntoIterator>::into_iter`.
@@ -1169,6 +1305,81 @@ mod tests {
         assert_eq!(pair(&mut it, false), Some((8, 8)));
         assert_eq!(pair(&mut it, true), None);
         assert_eq!(pair(&mut it, false), None);
+    }
+
+    #[test]
+    fn iter_present_mut_mutates_in_place() {
+        extern crate alloc;
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for idx in [1u8, 4, 14] {
+            src[U4::new_masked(idx)] = Some(idx);
+        }
+        let mut p = PackedArray::from(src);
+
+        for (i, v) in p.iter_present_mut() {
+            *v = v.wrapping_add(i.as_u8());
+        }
+
+        let after: alloc::vec::Vec<(u8, u8)> =
+            p.iter_present().map(|(i, &v)| (i.as_u8(), v)).collect();
+        assert_eq!(after, alloc::vec![(1, 2), (4, 8), (14, 28)]);
+    }
+
+    #[test]
+    fn iter_present_mut_double_ended() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for idx in [1u8, 4, 14] {
+            src[U4::new_masked(idx)] = Some(idx);
+        }
+        let mut p = PackedArray::from(src);
+
+        {
+            let mut it = p.iter_present_mut();
+            // Front then back mutate the outer two; the counter crossing must
+            // still land each &mut on its own dense element.
+            *it.next().expect("first present").1 = 100;
+            *it.next_back().expect("last present").1 = 200;
+            assert_eq!(it.len(), 1);
+            *it.next().expect("middle present").1 = 50;
+            assert!(it.next().is_none());
+        }
+        assert_eq!(p.get(U4::new_masked(1)), Some(&100));
+        assert_eq!(p.get(U4::new_masked(14)), Some(&200));
+        assert_eq!(p.get(U4::new_masked(4)), Some(&50));
+    }
+
+    #[test]
+    fn into_iter_mut_walks_all_slots() {
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        src[U4::new_masked(2)] = Some(2);
+        src[U4::new_masked(9)] = Some(9);
+        let mut p = PackedArray::from(src);
+
+        let mut present = 0usize;
+        let mut absent = 0usize;
+        for (i, opt) in &mut p {
+            match opt {
+                Some(v) => {
+                    *v += 1;
+                    present += 1;
+                    assert!(i.as_u8() == 2 || i.as_u8() == 9);
+                }
+                None => absent += 1,
+            }
+        }
+        assert_eq!(present, 2);
+        assert_eq!(absent, 14);
+        assert_eq!(p.get(U4::new_masked(2)), Some(&3));
+        assert_eq!(p.get(U4::new_masked(9)), Some(&10));
+    }
+
+    #[test]
+    fn iter_present_mut_empty_is_empty() {
+        let mut p = PackedArray::<u8, Arity16>::new();
+        assert_eq!(p.iter_present_mut().count(), 0);
+        assert_eq!((&mut p).into_iter().filter(|(_, o)| o.is_some()).count(), 0);
+        // All-slots walk still visits every slot, all absent.
+        assert_eq!((&mut p).into_iter().count(), 16);
     }
 
     #[test]

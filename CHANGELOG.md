@@ -53,6 +53,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
 ## [arity-arrays Unreleased]
 
+### Added
+
+- In-place mutation over present elements on `PackedArray` and `GappedArray`,
+  closing the gap with `FixedArray` (which already exposed a `&mut` iterator):
+  - `iter_present_mut(&mut self)` yields `(A::Index, &mut T)` over the present
+    elements, ascending — the mutable counterpart of `iter_present` and the bulk
+    counterpart of the single-slot `get_mut`, so updating every value is one
+    linear walk instead of a `get_mut` per index. Double-ended, exact-size, and
+    fused.
+  - `impl IntoIterator for &mut PackedArray` / `&mut GappedArray` yields
+    `(A::Index, Option<&mut T>)` over every slot, so `for (i, slot) in &mut array`
+    mirrors the shared-borrow `&array` walk. `iter_mut(&mut self)` returns the
+    same iterator directly (`PackedAllIterMut` / `GappedAllIterMut`).
+
+  Which slots are present is unchanged — these hand out `&mut T` to the existing
+  elements and never insert or remove.
+
 ### Changed
 
 - `PackedArray::iter_present` now advances a running dense-rank counter per step
