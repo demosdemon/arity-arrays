@@ -417,8 +417,8 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Iterates all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
     /// Double-ended.
     #[must_use]
-    pub fn iter(&self) -> GappedAllIter<'_, T, A> {
-        GappedAllIter {
+    pub fn iter(&self) -> Iter<'_, T, A> {
+        Iter {
             present: self.iter_present(),
             bitmap: self.bitmap(),
             slots: <A::Index as Niche>::all(),
@@ -434,12 +434,7 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// every present element is one linear walk rather than a `get_mut` per
     /// index. Which slots are present is unchanged — it hands out `&mut T` to
     /// the existing elements and never inserts or removes.
-    pub fn iter_present_mut(
-        &mut self,
-    ) -> impl DoubleEndedIterator<Item = (A::Index, &mut T)>
-    + ExactSizeIterator
-    + core::iter::FusedIterator
-    + '_ {
+    pub fn iter_present_mut(&mut self) -> PresentIterMut<'_, T, A> {
         self.present_iter_mut()
     }
 
@@ -447,26 +442,26 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// for in-place mutation. Double-ended — the mutable analogue of
     /// [`iter`](Self::iter), and what `&mut array` iterates.
     #[must_use]
-    pub fn iter_mut(&mut self) -> GappedAllIterMut<'_, T, A> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T, A> {
         let bitmap = self.bitmap();
         let slots = <A::Index as Niche>::all();
-        GappedAllIterMut {
+        IterMut {
             present: self.present_iter_mut(),
             bitmap,
             slots,
         }
     }
 
-    /// Builds the concrete mutable present-iterator both
-    /// [`iter_present_mut`](Self::iter_present_mut) (as `impl Iterator`) and
+    /// Builds the [`PresentIterMut`] both
+    /// [`iter_present_mut`](Self::iter_present_mut) (which returns it) and
     /// [`iter_mut`](Self::iter_mut) (as its element engine) share.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         reason = "the &mut receiver is the exclusive borrow that lets the returned iterator hand out &mut T; only raw pointers are formed, so clippy cannot see the borrow is load-bearing"
     )]
-    fn present_iter_mut(&mut self) -> GappedPresentIterMut<'_, T, A> {
+    fn present_iter_mut(&mut self) -> PresentIterMut<'_, T, A> {
         self.0.map_or_else(
-            || GappedPresentIterMut {
+            || PresentIterMut {
                 occ_bits: A::Bitmap::ZERO.bits(),
                 live_bits: A::Bitmap::ZERO.bits(),
                 data: core::ptr::null_mut(),
@@ -474,7 +469,7 @@ impl<T, A: Arity> GappedArray<T, A> {
             },
             // SAFETY: `Some` ↔ a valid allocation with initialised header/elements.
             |ptr| unsafe {
-                GappedPresentIterMut {
+                PresentIterMut {
                     occ_bits: ptr.as_ref().occupancy.bits(),
                     live_bits: ptr.as_ref().live.bits(),
                     data: data_ptr(ptr),
@@ -935,9 +930,9 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Iterates present elements as `(A::Index, &T)`, ascending. Double-ended.
     /// `O(1)` per step (co-advances the occupancy and live bit cursors).
     #[must_use]
-    pub fn iter_present(&self) -> GappedPresentIter<'_, T, A> {
+    pub fn iter_present(&self) -> PresentIter<'_, T, A> {
         self.0.map_or_else(
-            || GappedPresentIter {
+            || PresentIter {
                 occ_bits: A::Bitmap::ZERO.bits(),
                 live_bits: A::Bitmap::ZERO.bits(),
                 data: core::ptr::null(),
@@ -945,7 +940,7 @@ impl<T, A: Arity> GappedArray<T, A> {
             },
             // SAFETY: `Some` ↔ a valid allocation with initialised header/elements.
             |ptr| unsafe {
-                GappedPresentIter {
+                PresentIter {
                     occ_bits: ptr.as_ref().occupancy.bits(),
                     live_bits: ptr.as_ref().live.bits(),
                     data: data_ptr(ptr).cast_const(),
@@ -1329,14 +1324,14 @@ impl<T: Clone, A: Arity> From<&GappedArray<T, A>> for PackedArray<T, A> {
 /// The occupancy cursor supplies the logical index; the live cursor supplies
 /// the physical slot. The two are advanced in lockstep, so the `r`-th of one
 /// pairs with the `r`-th of the other.
-pub struct GappedPresentIter<'a, T, A: Arity> {
+pub struct PresentIter<'a, T, A: Arity> {
     occ_bits: arity_bitmap::BitIter<A::Bitmap>,
     live_bits: arity_bitmap::BitIter<A::Bitmap>,
     data: *const T,
     _marker: PhantomData<&'a T>,
 }
 
-impl<T, A: Arity> Clone for GappedPresentIter<'_, T, A> {
+impl<T, A: Arity> Clone for PresentIter<'_, T, A> {
     fn clone(&self) -> Self {
         Self {
             occ_bits: self.occ_bits.clone(),
@@ -1347,15 +1342,15 @@ impl<T, A: Arity> Clone for GappedPresentIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> core::fmt::Debug for GappedPresentIter<'_, T, A> {
+impl<T, A: Arity> core::fmt::Debug for PresentIter<'_, T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("GappedPresentIter")
+        f.debug_struct("PresentIter")
             .field("remaining", &self.occ_bits.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, T, A: Arity> Iterator for GappedPresentIter<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
     type Item = (A::Index, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.occ_bits.next()?;
@@ -1374,7 +1369,7 @@ impl<'a, T, A: Arity> Iterator for GappedPresentIter<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for GappedPresentIter<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for PresentIter<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.occ_bits.next_back()?;
         let p = self.live_bits.next_back().expect("equal count").as_usize();
@@ -1383,31 +1378,32 @@ impl<T, A: Arity> DoubleEndedIterator for GappedPresentIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for GappedPresentIter<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for PresentIter<'_, T, A> {
     fn len(&self) -> usize {
         self.occ_bits.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for GappedPresentIter<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for PresentIter<'_, T, A> {}
 
-/// Mutable analogue of [`GappedPresentIter`], yielding `(A::Index, &mut T)` for
-/// each present element in ascending logical order. Private: surfaced only
-/// through [`GappedArray::iter_present_mut`] (as an opaque `impl Iterator`) and
-/// as the element engine of [`GappedAllIterMut`].
+/// Iterator over present elements of a [`GappedArray`] as `(A::Index, &mut T)`,
+/// ascending, for in-place mutation.
+///
+/// See [`GappedArray::iter_present_mut`]; the mutable analogue of
+/// [`PresentIter`], and the element engine of [`IterMut`].
 ///
 /// The occupancy cursor supplies the logical index and the live cursor the
-/// physical slot, advanced in lockstep exactly as in [`GappedPresentIter`].
+/// physical slot, advanced in lockstep exactly as in [`PresentIter`].
 /// Each live slot is yielded once — front and back draws never cross — so every
 /// `&mut T` handed out is unique and non-aliasing.
-struct GappedPresentIterMut<'a, T, A: Arity> {
+pub struct PresentIterMut<'a, T, A: Arity> {
     occ_bits: arity_bitmap::BitIter<A::Bitmap>,
     live_bits: arity_bitmap::BitIter<A::Bitmap>,
     data: *mut T,
     _marker: PhantomData<&'a mut T>,
 }
 
-impl<'a, T, A: Arity> Iterator for GappedPresentIterMut<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for PresentIterMut<'a, T, A> {
     type Item = (A::Index, &'a mut T);
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.occ_bits.next()?;
@@ -1427,7 +1423,7 @@ impl<'a, T, A: Arity> Iterator for GappedPresentIterMut<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for GappedPresentIterMut<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for PresentIterMut<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.occ_bits.next_back()?;
         let p = self.live_bits.next_back().expect("equal count").as_usize();
@@ -1436,41 +1432,41 @@ impl<T, A: Arity> DoubleEndedIterator for GappedPresentIterMut<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for GappedPresentIterMut<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for PresentIterMut<'_, T, A> {
     fn len(&self) -> usize {
         self.occ_bits.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for GappedPresentIterMut<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for PresentIterMut<'_, T, A> {}
 
 // SAFETY: holds a `*mut T` used only to hand out non-aliasing `&mut T` for the
 // lifetime it borrows its source array, plus two `BitIter<A::Bitmap>` cursors.
 // Like `&mut T`, it is `Send` when `T: Send` and `Sync` when `T: Sync`; the
 // `A::Bitmap: Send`/`Sync` bound covers the owned cursor fields, so clippy can
 // prove the impls sound with no `non_send_fields_in_send_ty` suppression.
-unsafe impl<T: Send, A: Arity> Send for GappedPresentIterMut<'_, T, A> where A::Bitmap: Send {}
+unsafe impl<T: Send, A: Arity> Send for PresentIterMut<'_, T, A> where A::Bitmap: Send {}
 // SAFETY: sharing the iterator exposes only `&T` and `&A::Bitmap` (no interior
 // mutability), so — like `&mut T` — it is `Sync` when `T: Sync`; the
 // `A::Bitmap: Sync` bound covers the owned cursor fields.
-unsafe impl<T: Sync, A: Arity> Sync for GappedPresentIterMut<'_, T, A> where A::Bitmap: Sync {}
+unsafe impl<T: Sync, A: Arity> Sync for PresentIterMut<'_, T, A> where A::Bitmap: Sync {}
 
 /// Iterator over all slots of a [`GappedArray`]. See [`GappedArray::iter`].
 ///
 /// Drives off the index range (`slots`) and an `occupancy` snapshot, pulling
 /// the element for a present slot from the front or back of the present-element
-/// stream as the range crosses it — mirroring `PackedAllIter`. Each step is a
+/// stream as the range crosses it — mirroring `packed::Iter`. Each step is a
 /// range advance plus, for a present slot, one `present` advance: `O(1)`, no
 /// per-slot `select`. Because `slots` partitions the index domain between the
 /// two ends and `present` holds exactly the present elements in order, the
 /// front and back draws never cross.
-pub struct GappedAllIter<'a, T, A: Arity> {
-    present: GappedPresentIter<'a, T, A>,
+pub struct Iter<'a, T, A: Arity> {
+    present: PresentIter<'a, T, A>,
     bitmap: A::Bitmap,
     slots: arity_index::NicheRangeInclusive<A::Index>,
 }
 
-impl<T, A: Arity> Clone for GappedAllIter<'_, T, A> {
+impl<T, A: Arity> Clone for Iter<'_, T, A> {
     fn clone(&self) -> Self {
         Self {
             present: self.present.clone(),
@@ -1480,15 +1476,15 @@ impl<T, A: Arity> Clone for GappedAllIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> core::fmt::Debug for GappedAllIter<'_, T, A> {
+impl<T, A: Arity> core::fmt::Debug for Iter<'_, T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("GappedAllIter")
+        f.debug_struct("Iter")
             .field("remaining", &self.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, T, A: Arity> Iterator for GappedAllIter<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for Iter<'a, T, A> {
     type Item = (A::Index, Option<&'a T>);
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.slots.next()?;
@@ -1507,7 +1503,7 @@ impl<'a, T, A: Arity> Iterator for GappedAllIter<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for GappedAllIter<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for Iter<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.slots.next_back()?;
         if self.bitmap.test(i) {
@@ -1522,17 +1518,17 @@ impl<T, A: Arity> DoubleEndedIterator for GappedAllIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for GappedAllIter<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for Iter<'_, T, A> {
     fn len(&self) -> usize {
         self.slots.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for GappedAllIter<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for Iter<'_, T, A> {}
 
 impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
     type Item = (A::Index, Option<&'a T>);
-    type IntoIter = GappedAllIter<'a, T, A>;
+    type IntoIter = Iter<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
@@ -1542,27 +1538,27 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
 /// T>)`, ascending, for in-place mutation.
 ///
 /// See [`GappedArray::iter_mut`]; this is what `&mut array` iterates, the
-/// mutable analogue of [`GappedAllIter`].
+/// mutable analogue of [`Iter`].
 ///
 /// Drives off the index range (`slots`) and an `occupancy` snapshot, pulling
 /// the `&mut T` for a present slot from the front or back of the
 /// present-element stream (`present`) as the range crosses it — mirroring
-/// [`GappedAllIter`]. Absent slots yield `None` without advancing `present`.
-pub struct GappedAllIterMut<'a, T, A: Arity> {
-    present: GappedPresentIterMut<'a, T, A>,
+/// [`Iter`]. Absent slots yield `None` without advancing `present`.
+pub struct IterMut<'a, T, A: Arity> {
+    present: PresentIterMut<'a, T, A>,
     bitmap: A::Bitmap,
     slots: arity_index::NicheRangeInclusive<A::Index>,
 }
 
-impl<T, A: Arity> core::fmt::Debug for GappedAllIterMut<'_, T, A> {
+impl<T, A: Arity> core::fmt::Debug for IterMut<'_, T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("GappedAllIterMut")
+        f.debug_struct("IterMut")
             .field("remaining", &self.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, T, A: Arity> Iterator for GappedAllIterMut<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for IterMut<'a, T, A> {
     type Item = (A::Index, Option<&'a mut T>);
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.slots.next()?;
@@ -1581,7 +1577,7 @@ impl<'a, T, A: Arity> Iterator for GappedAllIterMut<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for GappedAllIterMut<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for IterMut<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.slots.next_back()?;
         if self.bitmap.test(i) {
@@ -1596,17 +1592,17 @@ impl<T, A: Arity> DoubleEndedIterator for GappedAllIterMut<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for GappedAllIterMut<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for IterMut<'_, T, A> {
     fn len(&self) -> usize {
         self.slots.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for GappedAllIterMut<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for IterMut<'_, T, A> {}
 
 impl<'a, T, A: Arity> IntoIterator for &'a mut GappedArray<T, A> {
     type Item = (A::Index, Option<&'a mut T>);
-    type IntoIter = GappedAllIterMut<'a, T, A>;
+    type IntoIter = IterMut<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
@@ -1626,7 +1622,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut GappedArray<T, A> {
 /// The r-th occupancy (logical) index pairs with the r-th live (physical)
 /// slot. Storage has gaps, so `Drop` drops the still-live physical slots
 /// tracked in `remaining_live` and frees the block.
-pub struct GappedIntoIter<T, A: Arity> {
+pub struct IntoIter<T, A: Arity> {
     /// `Some` while a block is owned; `None` for a drained-empty source.
     ptr: Option<NonNull<Inner<A, T>>>,
     /// Logical indices not yet yielded, ascending. Drives the index half.
@@ -1642,7 +1638,7 @@ pub struct GappedIntoIter<T, A: Arity> {
     cap: usize,
 }
 
-impl<T, A: Arity> Iterator for GappedIntoIter<T, A> {
+impl<T, A: Arity> Iterator for IntoIter<T, A> {
     type Item = (A::Index, T);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1666,7 +1662,7 @@ impl<T, A: Arity> Iterator for GappedIntoIter<T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for GappedIntoIter<T, A> {
+impl<T, A: Arity> DoubleEndedIterator for IntoIter<T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.occ_bits.next_back()?;
         let p = self
@@ -1684,15 +1680,15 @@ impl<T, A: Arity> DoubleEndedIterator for GappedIntoIter<T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for GappedIntoIter<T, A> {
+impl<T, A: Arity> ExactSizeIterator for IntoIter<T, A> {
     fn len(&self) -> usize {
         self.occ_bits.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for GappedIntoIter<T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for IntoIter<T, A> {}
 
-impl<T, A: Arity> Drop for GappedIntoIter<T, A> {
+impl<T, A: Arity> Drop for IntoIter<T, A> {
     fn drop(&mut self) {
         // Free the block no matter what — armed before dropping elements so it
         // runs even if a destructor unwinds through `drop_live_elems`. Declared
@@ -1727,7 +1723,7 @@ impl<T, A: Arity> Drop for GappedIntoIter<T, A> {
 
 impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
     type Item = (A::Index, T);
-    type IntoIter = GappedIntoIter<T, A>;
+    type IntoIter = IntoIter<T, A>;
 
     fn into_iter(self) -> Self::IntoIter {
         // Suppress `GappedArray::drop`: the iterator owns the block and frees
@@ -1736,7 +1732,7 @@ impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
         // value-producing two-arm match.
         let this = ManuallyDrop::new(self);
         this.0.map_or_else(
-            || GappedIntoIter {
+            || IntoIter {
                 ptr: None,
                 occ_bits: A::Bitmap::ZERO.bits(),
                 live_bits: A::Bitmap::ZERO.bits(),
@@ -1750,7 +1746,7 @@ impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
                 let live = unsafe { ptr.as_ref().live };
                 // SAFETY: as above.
                 let cap = 1usize << unsafe { ptr.as_ref().cap_exp };
-                GappedIntoIter {
+                IntoIter {
                     ptr: Some(ptr),
                     occ_bits: occ.bits(),
                     live_bits: live.bits(),
@@ -1762,7 +1758,7 @@ impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
     }
 }
 
-impl_dense_common!(GappedArray, GappedPresentIter);
+impl_dense_common!(GappedArray, PresentIter);
 
 impl_logical_serde!(GappedArray, "GappedArray");
 
@@ -2414,12 +2410,12 @@ mod tests {
 
         let present = g.iter_present();
         let present_clone = present.clone();
-        assert!(std::format!("{present:?}").contains("GappedPresentIter"));
+        assert!(std::format!("{present:?}").contains("PresentIter"));
         assert_eq!(present.count(), present_clone.count());
 
         let all = g.iter();
         let all_clone = all.clone();
-        assert!(std::format!("{all:?}").contains("GappedAllIter"));
+        assert!(std::format!("{all:?}").contains("Iter"));
         assert_eq!(all.count(), all_clone.count());
     }
 
@@ -2427,8 +2423,8 @@ mod tests {
     fn dense_types_are_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<GappedArray<u16, Arity16>>();
-        assert_send_sync::<GappedPresentIter<'static, u16, Arity16>>();
-        assert_send_sync::<GappedAllIter<'static, u16, Arity16>>();
+        assert_send_sync::<PresentIter<'static, u16, Arity16>>();
+        assert_send_sync::<Iter<'static, u16, Arity16>>();
 
         // `Arity256`'s bitmap is `U256`, the only non-primitive backing; it
         // exercises the `A::Bitmap: Send + Sync` bound that primitive
@@ -2436,8 +2432,8 @@ mod tests {
         #[cfg(feature = "256")]
         {
             assert_send_sync::<GappedArray<u16, Arity256>>();
-            assert_send_sync::<GappedPresentIter<'static, u16, Arity256>>();
-            assert_send_sync::<GappedAllIter<'static, u16, Arity256>>();
+            assert_send_sync::<PresentIter<'static, u16, Arity256>>();
+            assert_send_sync::<Iter<'static, u16, Arity256>>();
         }
     }
 

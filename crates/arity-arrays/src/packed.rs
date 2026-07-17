@@ -234,7 +234,7 @@ impl<T, A: Arity> PackedArray<T, A> {
 
     /// Returns the element at dense storage position `rank`, skipping the
     /// bitmap `test`/`rank` that [`get`](Self::get) performs. Lets
-    /// [`PackedAllIter`] reuse a running rank counter instead of re-scanning
+    /// [`Iter`] reuse a running rank counter instead of re-scanning
     /// the bitmap per slot.
     ///
     /// # Safety
@@ -251,9 +251,9 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// Iterates over present elements as `(A::Index, &T)`, ascending.
     /// Double-ended.
     #[must_use]
-    pub fn iter_present(&self) -> PackedPresentIter<'_, T, A> {
+    pub fn iter_present(&self) -> PresentIter<'_, T, A> {
         self.0.map_or_else(
-            || PackedPresentIter {
+            || PresentIter {
                 bits: A::Bitmap::ZERO.bits(),
                 data: core::ptr::null(),
                 count: 0,
@@ -264,7 +264,7 @@ impl<T, A: Arity> PackedArray<T, A> {
             // SAFETY: `Some` ↔ a valid allocation with initialised bitmap/elements.
             |ptr| unsafe {
                 let bitmap = ptr.as_ref().bitmap;
-                PackedPresentIter {
+                PresentIter {
                     bits: bitmap.bits(),
                     data: data_ptr(ptr).cast_const(),
                     count: bitmap.count_ones() as usize,
@@ -279,9 +279,9 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// Iterates over all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
     /// Double-ended.
     #[must_use]
-    pub fn iter(&self) -> PackedAllIter<'_, T, A> {
+    pub fn iter(&self) -> Iter<'_, T, A> {
         let bitmap = self.bitmap();
-        PackedAllIter {
+        Iter {
             array: self,
             bitmap,
             count: bitmap.count_ones() as usize,
@@ -300,27 +300,24 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// rather than a `get_mut` per index. Which slots are present is
     /// unchanged — the iterator hands out `&mut T` to the existing elements
     /// and never inserts or removes.
-    pub fn iter_present_mut(
-        &mut self,
-    ) -> impl DoubleEndedIterator<Item = (A::Index, &mut T)>
-    + ExactSizeIterator
-    + core::iter::FusedIterator
-    + '_ {
+    pub fn iter_present_mut(&mut self) -> PresentIterMut<'_, T, A> {
         // Storage is a dense, contiguous run in ascending-rank order, so the
         // set-bit indices (which advance in that same order) zip one-to-one with
         // a plain slice `iter_mut` — each `&mut T` handed out exactly once, with
         // no unchecked per-element pointer arithmetic.
         let (bitmap, elems) = self.present_slice_mut();
-        bitmap.bits().zip(elems.iter_mut())
+        PresentIterMut {
+            inner: bitmap.bits().zip(elems.iter_mut()),
+        }
     }
 
     /// Iterates over all `A::LEN` slots as `(A::Index, Option<&mut T>)`,
     /// ascending, for in-place mutation. Double-ended — the mutable analogue of
     /// [`iter`](Self::iter), and what `&mut array` iterates.
     #[must_use]
-    pub fn iter_mut(&mut self) -> PackedAllIterMut<'_, T, A> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T, A> {
         let (bitmap, elems) = self.present_slice_mut();
-        PackedAllIterMut {
+        IterMut {
             slots: A::Index::all(),
             bitmap,
             elems: elems.iter_mut(),
@@ -697,7 +694,7 @@ use arity_index::Niche;
 /// Drives off a `bits` cursor over the set bits plus two running rank counters
 /// rather than recomputing `bitmap.rank(index)` per step, so each step is an
 /// O(1) bit advance plus a counter bump — no repeated `rank` scan (mirroring
-/// [`PackedAllIter`]). Because `bits` yields each set bit once — ascending from
+/// [`Iter`]). Because `bits` yields each set bit once — ascending from
 /// the front, descending from the back — and packed elements are stored in
 /// exactly that ascending-rank order, a bit yielded from the front has dense
 /// rank `front_rank`, and one yielded from the back has dense rank
@@ -711,7 +708,7 @@ use arity_index::Niche;
 /// each set bit to exactly one end, no element is counted by both, so each
 /// computed dense rank is `< count` — the bound the private `elem_at_rank`
 /// helper requires.
-pub struct PackedPresentIter<'a, T, A: Arity> {
+pub struct PresentIter<'a, T, A: Arity> {
     bits: arity_bitmap::BitIter<A::Bitmap>,
     data: *const T,
     count: usize,
@@ -720,7 +717,7 @@ pub struct PackedPresentIter<'a, T, A: Arity> {
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T, A: Arity> PackedPresentIter<'a, T, A> {
+impl<'a, T, A: Arity> PresentIter<'a, T, A> {
     /// Returns the element at dense storage position `rank`, paired with
     /// `index`. Skips the `bitmap.rank(index)` recompute by trusting the
     /// running counter the caller maintains.
@@ -735,7 +732,7 @@ impl<'a, T, A: Arity> PackedPresentIter<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> Clone for PackedPresentIter<'_, T, A> {
+impl<T, A: Arity> Clone for PresentIter<'_, T, A> {
     fn clone(&self) -> Self {
         Self {
             bits: self.bits.clone(),
@@ -748,15 +745,15 @@ impl<T, A: Arity> Clone for PackedPresentIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> core::fmt::Debug for PackedPresentIter<'_, T, A> {
+impl<T, A: Arity> core::fmt::Debug for PresentIter<'_, T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PackedPresentIter")
+        f.debug_struct("PresentIter")
             .field("remaining", &self.bits.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, T, A: Arity> Iterator for PackedPresentIter<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
     type Item = (A::Index, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.bits.next()?;
@@ -771,7 +768,7 @@ impl<'a, T, A: Arity> Iterator for PackedPresentIter<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for PackedPresentIter<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for PresentIter<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let index = self.bits.next_back()?;
         let rank = self.count - 1 - self.back_consumed;
@@ -782,13 +779,13 @@ impl<T, A: Arity> DoubleEndedIterator for PackedPresentIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for PackedPresentIter<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for PresentIter<'_, T, A> {
     fn len(&self) -> usize {
         self.bits.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for PackedPresentIter<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for PresentIter<'_, T, A> {}
 
 /// Iterator over all slots of a [`PackedArray`]. See [`PackedArray::iter`].
 ///
@@ -808,7 +805,7 @@ impl<T, A: Arity> core::iter::FusedIterator for PackedPresentIter<'_, T, A> {}
 /// partitions the index domain between the two ends, no present slot is counted
 /// by both, so each computed dense rank is `< count` — which the private
 /// `elem_at_rank` helper requires.
-pub struct PackedAllIter<'a, T, A: Arity> {
+pub struct Iter<'a, T, A: Arity> {
     array: &'a PackedArray<T, A>,
     bitmap: A::Bitmap,
     count: usize,
@@ -817,7 +814,7 @@ pub struct PackedAllIter<'a, T, A: Arity> {
     back_consumed: usize,
 }
 
-impl<T, A: Arity> Clone for PackedAllIter<'_, T, A> {
+impl<T, A: Arity> Clone for Iter<'_, T, A> {
     fn clone(&self) -> Self {
         Self {
             array: self.array,
@@ -830,15 +827,15 @@ impl<T, A: Arity> Clone for PackedAllIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> core::fmt::Debug for PackedAllIter<'_, T, A> {
+impl<T, A: Arity> core::fmt::Debug for Iter<'_, T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PackedAllIter")
+        f.debug_struct("Iter")
             .field("remaining", &self.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, T, A: Arity> Iterator for PackedAllIter<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for Iter<'a, T, A> {
     type Item = (A::Index, Option<&'a T>);
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.slots.next()?;
@@ -857,7 +854,7 @@ impl<'a, T, A: Arity> Iterator for PackedAllIter<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for PackedAllIter<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for Iter<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.slots.next_back()?;
         if self.bitmap.test(i) {
@@ -873,27 +870,72 @@ impl<T, A: Arity> DoubleEndedIterator for PackedAllIter<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for PackedAllIter<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for Iter<'_, T, A> {
     fn len(&self) -> usize {
         self.slots.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for PackedAllIter<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for Iter<'_, T, A> {}
 
 impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
     type Item = (A::Index, Option<&'a T>);
-    type IntoIter = PackedAllIter<'a, T, A>;
+    type IntoIter = Iter<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
+/// Iterator over present elements of a [`PackedArray`] as `(A::Index, &mut T)`,
+/// ascending, for in-place mutation.
+///
+/// See [`PackedArray::iter_present_mut`]; the mutable analogue of
+/// [`PresentIter`].
+///
+/// A thin newtype over the set-bit cursor zipped with a `slice::IterMut` across
+/// the dense storage — the same order — so it forwards the double-ended,
+/// exact-size, and fused behavior of both without unchecked pointer work.
+pub struct PresentIterMut<'a, T, A: Arity> {
+    inner: core::iter::Zip<arity_bitmap::BitIter<A::Bitmap>, core::slice::IterMut<'a, T>>,
+}
+
+impl<T, A: Arity> core::fmt::Debug for PresentIterMut<'_, T, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PresentIterMut")
+            .field("remaining", &self.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, T, A: Arity> Iterator for PresentIterMut<'a, T, A> {
+    type Item = (A::Index, &'a mut T);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for PresentIterMut<'_, T, A> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back()
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for PresentIterMut<'_, T, A> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for PresentIterMut<'_, T, A> {}
+
 /// Iterator over all slots of a [`PackedArray`] as `(A::Index, Option<&mut
 /// T>)`, ascending, for in-place mutation.
 ///
 /// See [`PackedArray::iter_mut`]; this is what `&mut array` iterates, the
-/// mutable analogue of [`PackedAllIter`].
+/// mutable analogue of [`Iter`].
 ///
 /// The slot range (`slots`) owns termination and front/back crossing; the
 /// contiguous dense `elems` cursor supplies the `&mut T` for each present slot.
@@ -901,21 +943,21 @@ impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
 /// set bits — a present slot drawn from the front takes the front of `elems`
 /// and one drawn from the back takes the back, so every element is handed out
 /// exactly once. Absent slots yield `None` without touching `elems`.
-pub struct PackedAllIterMut<'a, T, A: Arity> {
+pub struct IterMut<'a, T, A: Arity> {
     slots: arity_index::NicheRangeInclusive<A::Index>,
     bitmap: A::Bitmap,
     elems: core::slice::IterMut<'a, T>,
 }
 
-impl<T, A: Arity> core::fmt::Debug for PackedAllIterMut<'_, T, A> {
+impl<T, A: Arity> core::fmt::Debug for IterMut<'_, T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PackedAllIterMut")
+        f.debug_struct("IterMut")
             .field("remaining", &self.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, T, A: Arity> Iterator for PackedAllIterMut<'a, T, A> {
+impl<'a, T, A: Arity> Iterator for IterMut<'a, T, A> {
     type Item = (A::Index, Option<&'a mut T>);
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.slots.next()?;
@@ -934,7 +976,7 @@ impl<'a, T, A: Arity> Iterator for PackedAllIterMut<'a, T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for PackedAllIterMut<'_, T, A> {
+impl<T, A: Arity> DoubleEndedIterator for IterMut<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.slots.next_back()?;
         if self.bitmap.test(i) {
@@ -949,17 +991,17 @@ impl<T, A: Arity> DoubleEndedIterator for PackedAllIterMut<'_, T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for PackedAllIterMut<'_, T, A> {
+impl<T, A: Arity> ExactSizeIterator for IterMut<'_, T, A> {
     fn len(&self) -> usize {
         self.slots.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for PackedAllIterMut<'_, T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for IterMut<'_, T, A> {}
 
 impl<'a, T, A: Arity> IntoIterator for &'a mut PackedArray<T, A> {
     type Item = (A::Index, Option<&'a mut T>);
-    type IntoIter = PackedAllIterMut<'a, T, A>;
+    type IntoIter = IterMut<'a, T, A>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
@@ -979,7 +1021,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut PackedArray<T, A> {
 /// Storage is dense (rank order), so the not-yet-yielded elements are always
 /// the contiguous rank range `[front, back)`; `Drop` drops exactly that range
 /// and frees the block.
-pub struct PackedIntoIter<T, A: Arity> {
+pub struct IntoIter<T, A: Arity> {
     /// `Some` while a block is owned; `None` for a drained-empty source. The
     /// block is freed by this iterator's `Drop`, never by `PackedArray::drop`
     /// (the source was consumed via `ManuallyDrop`).
@@ -997,7 +1039,7 @@ pub struct PackedIntoIter<T, A: Arity> {
     count: usize,
 }
 
-impl<T, A: Arity> Iterator for PackedIntoIter<T, A> {
+impl<T, A: Arity> Iterator for IntoIter<T, A> {
     type Item = (A::Index, T);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1019,7 +1061,7 @@ impl<T, A: Arity> Iterator for PackedIntoIter<T, A> {
     }
 }
 
-impl<T, A: Arity> DoubleEndedIterator for PackedIntoIter<T, A> {
+impl<T, A: Arity> DoubleEndedIterator for IntoIter<T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let i = self.bits.next_back()?;
         // The largest remaining set bit is stored at dense rank `back - 1`.
@@ -1035,15 +1077,15 @@ impl<T, A: Arity> DoubleEndedIterator for PackedIntoIter<T, A> {
     }
 }
 
-impl<T, A: Arity> ExactSizeIterator for PackedIntoIter<T, A> {
+impl<T, A: Arity> ExactSizeIterator for IntoIter<T, A> {
     fn len(&self) -> usize {
         self.bits.len()
     }
 }
 
-impl<T, A: Arity> core::iter::FusedIterator for PackedIntoIter<T, A> {}
+impl<T, A: Arity> core::iter::FusedIterator for IntoIter<T, A> {}
 
-impl<T, A: Arity> Drop for PackedIntoIter<T, A> {
+impl<T, A: Arity> Drop for IntoIter<T, A> {
     fn drop(&mut self) {
         // Free the block no matter what — armed before `drop_in_place` so it
         // runs even if an element destructor unwinds through the slice drop
@@ -1088,7 +1130,7 @@ impl<T, A: Arity> Drop for PackedIntoIter<T, A> {
 
 impl<T, A: Arity> IntoIterator for PackedArray<T, A> {
     type Item = (A::Index, T);
-    type IntoIter = PackedIntoIter<T, A>;
+    type IntoIter = IntoIter<T, A>;
 
     fn into_iter(self) -> Self::IntoIter {
         // Suppress `PackedArray::drop`: the new iterator now owns the block and
@@ -1097,7 +1139,7 @@ impl<T, A: Arity> IntoIterator for PackedArray<T, A> {
         // value-producing two-arm match.
         let this = ManuallyDrop::new(self);
         this.0.map_or_else(
-            || PackedIntoIter {
+            || IntoIter {
                 ptr: None,
                 bits: A::Bitmap::ZERO.bits(),
                 front: 0,
@@ -1108,7 +1150,7 @@ impl<T, A: Arity> IntoIterator for PackedArray<T, A> {
                 // SAFETY: `ptr` valid per the type invariant.
                 let bitmap = unsafe { ptr.as_ref().bitmap };
                 let count = bitmap.count_ones() as usize;
-                PackedIntoIter {
+                IntoIter {
                     ptr: Some(ptr),
                     bits: bitmap.bits(),
                     front: 0,
@@ -1188,7 +1230,7 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
     }
 }
 
-impl_dense_common!(PackedArray, PackedPresentIter);
+impl_dense_common!(PackedArray, PresentIter);
 
 impl_logical_serde!(PackedArray, "PackedArray");
 
@@ -1293,7 +1335,7 @@ mod tests {
         let p = PackedArray::from(src);
 
         let mut it = p.iter_present();
-        let pair = |it: &mut PackedPresentIter<'_, u8, Arity16>, f: bool| {
+        let pair = |it: &mut PresentIter<'_, u8, Arity16>, f: bool| {
             let step = if f { it.next() } else { it.next_back() };
             step.map(|(i, &v)| (i.as_u8(), v))
         };
@@ -1764,12 +1806,12 @@ mod tests {
 
         let present = p.iter_present();
         let present_clone = present.clone();
-        assert!(std::format!("{present:?}").contains("PackedPresentIter"));
+        assert!(std::format!("{present:?}").contains("PresentIter"));
         assert_eq!(present.count(), present_clone.count());
 
         let all = p.iter();
         let all_clone = all.clone();
-        assert!(std::format!("{all:?}").contains("PackedAllIter"));
+        assert!(std::format!("{all:?}").contains("Iter"));
         assert_eq!(all.count(), all_clone.count());
     }
 
@@ -1777,8 +1819,8 @@ mod tests {
     fn dense_types_are_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<PackedArray<u16, Arity16>>();
-        assert_send_sync::<PackedPresentIter<'static, u16, Arity16>>();
-        assert_send_sync::<PackedAllIter<'static, u16, Arity16>>();
+        assert_send_sync::<PresentIter<'static, u16, Arity16>>();
+        assert_send_sync::<Iter<'static, u16, Arity16>>();
 
         // `Arity256`'s bitmap is `U256`, the only non-primitive backing; it
         // exercises the `A::Bitmap: Send + Sync` bound that primitive
@@ -1786,8 +1828,8 @@ mod tests {
         #[cfg(feature = "256")]
         {
             assert_send_sync::<PackedArray<u16, Arity256>>();
-            assert_send_sync::<PackedPresentIter<'static, u16, Arity256>>();
-            assert_send_sync::<PackedAllIter<'static, u16, Arity256>>();
+            assert_send_sync::<PresentIter<'static, u16, Arity256>>();
+            assert_send_sync::<Iter<'static, u16, Arity256>>();
         }
     }
 

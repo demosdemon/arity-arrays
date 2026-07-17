@@ -57,7 +57,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
 - In-place mutation over present elements on `PackedArray` and `GappedArray`,
   closing the gap with `FixedArray` (which already exposed a `&mut` iterator):
-  - `iter_present_mut(&mut self)` yields `(A::Index, &mut T)` over the present
+  - `iter_present_mut(&mut self)` (→ `packed::PresentIterMut` /
+    `gapped::PresentIterMut`) yields `(A::Index, &mut T)` over the present
     elements, ascending — the mutable counterpart of `iter_present` and the bulk
     counterpart of the single-slot `get_mut`, so updating every value is one
     linear walk instead of a `get_mut` per index. Double-ended, exact-size, and
@@ -65,13 +66,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   - `impl IntoIterator for &mut PackedArray` / `&mut GappedArray` yields
     `(A::Index, Option<&mut T>)` over every slot, so `for (i, slot) in &mut array`
     mirrors the shared-borrow `&array` walk. `iter_mut(&mut self)` returns the
-    same iterator directly (`PackedAllIterMut` / `GappedAllIterMut`).
+    same iterator directly (`packed::IterMut` / `gapped::IterMut`).
 
   Which slots are present is unchanged — these hand out `&mut T` to the existing
   elements and never insert or remove.
 
 ### Changed
 
+- **Breaking:** renamed the module-scoped iterator types to drop the redundant
+  `Packed`/`Gapped` prefix and match their producing methods (Rust API
+  Guidelines C-STUTTER and C-ITER-TY). None was ever root-re-exported, so the
+  change is confined to the `arity_arrays::packed` / `arity_arrays::gapped`
+  paths:
+  - `PackedAllIter` → `packed::Iter` (produced by `iter()`),
+    `PackedPresentIter` → `packed::PresentIter`, `PackedIntoIter` →
+    `packed::IntoIter`, and the `gapped::Gapped*` counterparts.
+
+  After the rename `packed::Iter` / `packed::IntoIter` read like
+  `std::vec::IntoIter` and `hash_map::Iter`. The module path is the
+  disambiguator, so the type names stay short and unprefixed. (The new mutable
+  iterators above ship with idiomatic names from the start.)
 - `PackedArray::iter_present` now advances a running dense-rank counter per step
   instead of recomputing a full bitmap `rank()` for every element, matching the
   sibling all-slots iterator (`PackedArray::iter`). A full present-order
