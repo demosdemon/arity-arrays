@@ -255,8 +255,10 @@ impl<T, A: Arity> PackedArray<T, A> {
         self.0.map_or_else(
             || PackedPresentIter {
                 bits: A::Bitmap::ZERO.bits(),
-                bitmap: A::Bitmap::ZERO,
                 data: core::ptr::null(),
+                count: 0,
+                front_rank: 0,
+                back_consumed: 0,
                 _marker: PhantomData,
             },
             // SAFETY: `Some` ↔ a valid allocation with initialised bitmap/elements.
@@ -264,8 +266,10 @@ impl<T, A: Arity> PackedArray<T, A> {
                 let bitmap = ptr.as_ref().bitmap;
                 PackedPresentIter {
                     bits: bitmap.bits(),
-                    bitmap,
                     data: data_ptr(ptr).cast_const(),
+                    count: bitmap.count_ones() as usize,
+                    front_rank: 0,
+                    back_consumed: 0,
                     _marker: PhantomData,
                 }
             },
@@ -629,20 +633,44 @@ use arity_index::Niche;
 
 /// Iterator over present elements of a [`PackedArray`]. See
 /// [`PackedArray::iter_present`].
+///
+/// Drives off a `bits` cursor over the set bits plus two running rank counters
+/// rather than recomputing `bitmap.rank(index)` per step, so each step is an
+/// O(1) bit advance plus a counter bump — no repeated `rank` scan (mirroring
+/// [`PackedAllIter`]). Because `bits` yields each set bit once — ascending from
+/// the front, descending from the back — and packed elements are stored in
+/// exactly that ascending-rank order, a bit yielded from the front has dense
+/// rank `front_rank`, and one yielded from the back has dense rank
+/// `count - 1 - back_consumed`.
+///
+/// # Safety
+///
+/// Invariant: `front_rank` counts the present elements yielded from the front
+/// and `back_consumed` counts those yielded from the back, with
+/// `front_rank + back_consumed <= count` at all times. Because `bits` yields
+/// each set bit to exactly one end, no element is counted by both, so each
+/// computed dense rank is `< count` — the bound the private `elem_at_rank`
+/// helper requires.
 pub struct PackedPresentIter<'a, T, A: Arity> {
     bits: arity_bitmap::BitIter<A::Bitmap>,
-    bitmap: A::Bitmap,
     data: *const T,
+    count: usize,
+    front_rank: usize,
+    back_consumed: usize,
     _marker: PhantomData<&'a T>,
 }
 
 impl<'a, T, A: Arity> PackedPresentIter<'a, T, A> {
-    fn elem(&self, index: A::Index) -> (A::Index, &'a T) {
-        let rank = self.bitmap.rank(index) as usize;
-        // SAFETY: `index` is a set bit of the original `bitmap` snapshot, so
-        // `rank < count`; `data` is the element base; `.add(rank)` is in bounds
-        // and initialised. `rank` uses the original bitmap, not the drained
-        // `bits` state, so the offset is correct in either direction.
+    /// Returns the element at dense storage position `rank`, paired with
+    /// `index`. Skips the `bitmap.rank(index)` recompute by trusting the
+    /// running counter the caller maintains.
+    ///
+    /// # Safety
+    /// `data` must be non-null (the array non-empty) and `rank < count`.
+    const unsafe fn elem_at_rank(&self, index: A::Index, rank: usize) -> (A::Index, &'a T) {
+        // SAFETY: `rank < count` per the caller, so `data.add(rank)` is an
+        // initialised element within the allocation; the reference is bounded
+        // by `'a` via `PhantomData<&'a T>`.
         (index, unsafe { &*self.data.add(rank) })
     }
 }
@@ -651,8 +679,10 @@ impl<T, A: Arity> Clone for PackedPresentIter<'_, T, A> {
     fn clone(&self) -> Self {
         Self {
             bits: self.bits.clone(),
-            bitmap: self.bitmap,
             data: self.data,
+            count: self.count,
+            front_rank: self.front_rank,
+            back_consumed: self.back_consumed,
             _marker: PhantomData,
         }
     }
@@ -669,7 +699,12 @@ impl<T, A: Arity> core::fmt::Debug for PackedPresentIter<'_, T, A> {
 impl<'a, T, A: Arity> Iterator for PackedPresentIter<'a, T, A> {
     type Item = (A::Index, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
-        self.bits.next().map(|i| self.elem(i))
+        let index = self.bits.next()?;
+        let rank = self.front_rank;
+        self.front_rank += 1;
+        // SAFETY: `index` is a set bit, so the array is non-empty (`data`
+        // non-null) and `rank == rank(index) < count`.
+        Some(unsafe { self.elem_at_rank(index, rank) })
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.bits.size_hint()
@@ -678,7 +713,12 @@ impl<'a, T, A: Arity> Iterator for PackedPresentIter<'a, T, A> {
 
 impl<T, A: Arity> DoubleEndedIterator for PackedPresentIter<'_, T, A> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.bits.next_back().map(|i| self.elem(i))
+        let index = self.bits.next_back()?;
+        let rank = self.count - 1 - self.back_consumed;
+        self.back_consumed += 1;
+        // SAFETY: `index` is a set bit, so the array is non-empty (`data`
+        // non-null) and `rank == rank(index) < count`.
+        Some(unsafe { self.elem_at_rank(index, rank) })
     }
 }
 
@@ -1101,6 +1141,34 @@ mod tests {
         assert_eq!(it.next_back().map(|(i, &v)| (i.as_u8(), v)), Some((14, 14)));
         assert_eq!(it.next().map(|(i, &v)| (i.as_u8(), v)), Some((4, 4)));
         assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn iter_present_alternating_ends_reads_correct_ranks() {
+        // Six present elements with values equal to their indices, walked by
+        // alternating `next`/`next_back`. This drives the front and back dense-
+        // rank counters through several increments each before they cross, so a
+        // mixed-up counter surfaces as a wrong (index, value) pair.
+        extern crate alloc;
+        let mut src = FixedArray::<Option<u8>, Arity16>::new();
+        for idx in [0u8, 3, 5, 8, 11, 15] {
+            src[U4::new_masked(idx)] = Some(idx);
+        }
+        let p = PackedArray::from(src);
+
+        let mut it = p.iter_present();
+        let pair = |it: &mut PackedPresentIter<'_, u8, Arity16>, f: bool| {
+            let step = if f { it.next() } else { it.next_back() };
+            step.map(|(i, &v)| (i.as_u8(), v))
+        };
+        assert_eq!(pair(&mut it, true), Some((0, 0)));
+        assert_eq!(pair(&mut it, false), Some((15, 15)));
+        assert_eq!(pair(&mut it, true), Some((3, 3)));
+        assert_eq!(pair(&mut it, false), Some((11, 11)));
+        assert_eq!(pair(&mut it, true), Some((5, 5)));
+        assert_eq!(pair(&mut it, false), Some((8, 8)));
+        assert_eq!(pair(&mut it, true), None);
+        assert_eq!(pair(&mut it, false), None);
     }
 
     #[test]

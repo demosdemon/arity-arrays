@@ -51,6 +51,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `count_ones`, `bits`, and the raw scan primitives) whose results feed
   `arity-arrays`'s unchecked pointer arithmetic.
 
+## [arity-arrays Unreleased]
+
+### Changed
+
+- `PackedArray::iter_present` now advances a running dense-rank counter per step
+  instead of recomputing a full bitmap `rank()` for every element, matching the
+  sibling all-slots iterator (`PackedArray::iter`). A full present-order
+  traversal drops from O(n) bitmap mask+popcount scans to O(n) counter
+  increments. The win is inherited by everything that routes through
+  `iter_present` — `PartialEq`, `Hash`, `Debug`, and the `Compact` serde
+  adapter. Yielded items and the iterator's exact-size/double-ended/fused
+  semantics are unchanged.
+
 ## [arity-arrays 0.2.0-alpha.2] - 2026-07-15
 
 ### Added
