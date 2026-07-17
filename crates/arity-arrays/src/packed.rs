@@ -250,7 +250,6 @@ impl<T, A: Arity> PackedArray<T, A> {
 
     /// Iterates over present elements as `(A::Index, &T)`, ascending.
     /// Double-ended.
-    #[must_use]
     pub fn iter_present(&self) -> PresentIter<'_, T, A> {
         self.0.map_or_else(
             || PresentIter {
@@ -278,7 +277,6 @@ impl<T, A: Arity> PackedArray<T, A> {
 
     /// Iterates over all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
     /// Double-ended.
-    #[must_use]
     pub fn iter(&self) -> Iter<'_, T, A> {
         let bitmap = self.bitmap();
         Iter {
@@ -314,7 +312,6 @@ impl<T, A: Arity> PackedArray<T, A> {
     /// Iterates over all `A::LEN` slots as `(A::Index, Option<&mut T>)`,
     /// ascending, for in-place mutation. Double-ended — the mutable analogue of
     /// [`iter`](Self::iter), and what `&mut array` iterates.
-    #[must_use]
     pub fn iter_mut(&mut self) -> IterMut<'_, T, A> {
         let (bitmap, elems) = self.present_slice_mut();
         IterMut {
@@ -708,6 +705,7 @@ use arity_index::Niche;
 /// each set bit to exactly one end, no element is counted by both, so each
 /// computed dense rank is `< count` — the bound the private `elem_at_rank`
 /// helper requires.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct PresentIter<'a, T, A: Arity> {
     bits: arity_bitmap::BitIter<A::Bitmap>,
     data: *const T,
@@ -805,6 +803,7 @@ impl<T, A: Arity> core::iter::FusedIterator for PresentIter<'_, T, A> {}
 /// partitions the index domain between the two ends, no present slot is counted
 /// by both, so each computed dense rank is `< count` — which the private
 /// `elem_at_rank` helper requires.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct Iter<'a, T, A: Arity> {
     array: &'a PackedArray<T, A>,
     bitmap: A::Bitmap,
@@ -895,6 +894,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a PackedArray<T, A> {
 /// A thin newtype over the set-bit cursor zipped with a `slice::IterMut` across
 /// the dense storage — the same order — so it forwards the double-ended,
 /// exact-size, and fused behavior of both without unchecked pointer work.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct PresentIterMut<'a, T, A: Arity> {
     inner: core::iter::Zip<arity_bitmap::BitIter<A::Bitmap>, core::slice::IterMut<'a, T>>,
 }
@@ -943,6 +943,7 @@ impl<T, A: Arity> core::iter::FusedIterator for PresentIterMut<'_, T, A> {}
 /// set bits — a present slot drawn from the front takes the front of `elems`
 /// and one drawn from the back takes the back, so every element is handed out
 /// exactly once. Absent slots yield `None` without touching `elems`.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IterMut<'a, T, A: Arity> {
     slots: arity_index::NicheRangeInclusive<A::Index>,
     bitmap: A::Bitmap,
@@ -1021,6 +1022,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut PackedArray<T, A> {
 /// Storage is dense (rank order), so the not-yet-yielded elements are always
 /// the contiguous rank range `[front, back)`; `Drop` drops exactly that range
 /// and frees the block.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IntoIter<T, A: Arity> {
     /// `Some` while a block is owned; `None` for a drained-empty source. The
     /// block is freed by this iterator's `Drop`, never by `PackedArray::drop`

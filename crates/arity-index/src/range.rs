@@ -21,6 +21,7 @@ use crate::Niche;
 /// iterator impls depends on this; any new method that mutates `lo`/`hi` must
 /// preserve it.
 #[derive(Clone, Debug)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct NicheRange<N: Niche> {
     lo: usize,
     hi: usize,
@@ -29,7 +30,6 @@ pub struct NicheRange<N: Niche> {
 
 impl<N: Niche> NicheRange<N> {
     /// Creates the half-open range `[start, end)`. Empty if `start >= end`.
-    #[must_use]
     pub fn new(start: N, end: N) -> Self {
         Self {
             lo: start.as_usize(),
@@ -90,6 +90,7 @@ impl<N: Niche> FusedIterator for NicheRange<N> {}
 /// depends on this; any new method that mutates `lo`/`hi`/`done` must preserve
 /// it.
 #[derive(Clone, Debug)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct NicheRangeInclusive<N: Niche> {
     lo: usize,
     hi: usize,
@@ -99,7 +100,6 @@ pub struct NicheRangeInclusive<N: Niche> {
 
 impl<N: Niche> NicheRangeInclusive<N> {
     /// Creates the closed range `[start, end]`. Empty if `start > end`.
-    #[must_use]
     pub fn new(start: N, end: N) -> Self {
         let (lo, hi) = (start.as_usize(), end.as_usize());
         Self {

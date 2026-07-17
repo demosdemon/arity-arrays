@@ -5,6 +5,16 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
+## [arity-index Unreleased]
+
+### Changed
+
+- Marked the range iterators `NicheRange` and `NicheRangeInclusive`
+  `#[must_use]`, so constructing one and discarding it without consuming it now
+  warns ("iterators are lazy and do nothing unless consumed"). The redundant
+  method-level `#[must_use]` on their `new` constructors and on `Niche::all` is
+  dropped in favor of the type-level attribute.
+
 ## [arity-index 0.1.2] - 2026-07-15
 
 ### Added
@@ -33,6 +43,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
 - Document `Niche::as_usize`'s `< COUNT` contract as safety-critical:
   `arity-arrays` relies on it for its internal `slice::get_unchecked` calls.
+
+## [arity-bitmap Unreleased]
+
+### Changed
+
+- Marked the set-bit iterator `BitIter` `#[must_use]`, so constructing it (via
+  `Bitmap::bits`) and discarding it without consuming it now warns ("iterators
+  are lazy and do nothing unless consumed").
 
 ## [arity-bitmap 0.2.0-alpha.2] - 2026-07-15
 
@@ -86,6 +104,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `std::vec::IntoIter` and `hash_map::Iter`. The module path is the
   disambiguator, so the type names stay short and unprefixed. (The new mutable
   iterators above ship with idiomatic names from the start.)
+- Marked every iterator type `#[must_use]` — `packed::Iter`, `PresentIter`,
+  `IntoIter`, `IterMut`, `PresentIterMut` and the `gapped::` counterparts — so
+  building an iterator and discarding it without consuming it now warns
+  ("iterators are lazy and do nothing unless consumed"). The redundant
+  method-level `#[must_use]` on `iter`/`iter_present`/`iter_mut` is dropped in
+  favor of the type-level attribute.
 - `PackedArray::iter_present` now advances a running dense-rank counter per step
   instead of recomputing a full bitmap `rank()` for every element, matching the
   sibling all-slots iterator (`PackedArray::iter`). A full present-order

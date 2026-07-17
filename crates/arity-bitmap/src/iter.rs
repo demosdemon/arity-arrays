@@ -12,6 +12,7 @@ use crate::Bitmap;
 ///
 /// [`Niche`]: arity_index::Niche
 #[derive(Clone, Debug)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct BitIter<B: Bitmap> {
     remaining: B,
 }

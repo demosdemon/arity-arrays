@@ -416,7 +416,6 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Iterates all `A::LEN` slots as `(A::Index, Option<&T>)`, ascending.
     /// Double-ended.
-    #[must_use]
     pub fn iter(&self) -> Iter<'_, T, A> {
         Iter {
             present: self.iter_present(),
@@ -441,7 +440,6 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Iterates all `A::LEN` slots as `(A::Index, Option<&mut T>)`, ascending,
     /// for in-place mutation. Double-ended — the mutable analogue of
     /// [`iter`](Self::iter), and what `&mut array` iterates.
-    #[must_use]
     pub fn iter_mut(&mut self) -> IterMut<'_, T, A> {
         let bitmap = self.bitmap();
         let slots = <A::Index as Niche>::all();
@@ -929,7 +927,6 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Iterates present elements as `(A::Index, &T)`, ascending. Double-ended.
     /// `O(1)` per step (co-advances the occupancy and live bit cursors).
-    #[must_use]
     pub fn iter_present(&self) -> PresentIter<'_, T, A> {
         self.0.map_or_else(
             || PresentIter {
@@ -1324,6 +1321,7 @@ impl<T: Clone, A: Arity> From<&GappedArray<T, A>> for PackedArray<T, A> {
 /// The occupancy cursor supplies the logical index; the live cursor supplies
 /// the physical slot. The two are advanced in lockstep, so the `r`-th of one
 /// pairs with the `r`-th of the other.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct PresentIter<'a, T, A: Arity> {
     occ_bits: arity_bitmap::BitIter<A::Bitmap>,
     live_bits: arity_bitmap::BitIter<A::Bitmap>,
@@ -1396,6 +1394,7 @@ impl<T, A: Arity> core::iter::FusedIterator for PresentIter<'_, T, A> {}
 /// physical slot, advanced in lockstep exactly as in [`PresentIter`].
 /// Each live slot is yielded once — front and back draws never cross — so every
 /// `&mut T` handed out is unique and non-aliasing.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct PresentIterMut<'a, T, A: Arity> {
     occ_bits: arity_bitmap::BitIter<A::Bitmap>,
     live_bits: arity_bitmap::BitIter<A::Bitmap>,
@@ -1460,6 +1459,7 @@ unsafe impl<T: Sync, A: Arity> Sync for PresentIterMut<'_, T, A> where A::Bitmap
 /// per-slot `select`. Because `slots` partitions the index domain between the
 /// two ends and `present` holds exactly the present elements in order, the
 /// front and back draws never cross.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct Iter<'a, T, A: Arity> {
     present: PresentIter<'a, T, A>,
     bitmap: A::Bitmap,
@@ -1544,6 +1544,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a GappedArray<T, A> {
 /// the `&mut T` for a present slot from the front or back of the
 /// present-element stream (`present`) as the range crosses it — mirroring
 /// [`Iter`]. Absent slots yield `None` without advancing `present`.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IterMut<'a, T, A: Arity> {
     present: PresentIterMut<'a, T, A>,
     bitmap: A::Bitmap,
@@ -1622,6 +1623,7 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut GappedArray<T, A> {
 /// The r-th occupancy (logical) index pairs with the r-th live (physical)
 /// slot. Storage has gaps, so `Drop` drops the still-live physical slots
 /// tracked in `remaining_live` and frees the block.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IntoIter<T, A: Arity> {
     /// `Some` while a block is owned; `None` for a drained-empty source.
     ptr: Option<NonNull<Inner<A, T>>>,
