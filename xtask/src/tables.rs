@@ -133,8 +133,10 @@ fn single_op_table(
     s
 }
 
-/// One cell's workload table: rows are workload ops (`build`, `churn`), columns
-/// are subjects. No occupancy (the macro sweeps the full arity).
+/// One cell's workload table: rows are workload ops (`build`, `build_collect`,
+/// `churn`), columns are subjects, with `–` where a subject does not run an op
+/// (`build_collect` covers only the bulk-constructible types). No occupancy
+/// (the macro sweeps the full arity).
 fn workload_table(
     heading: &str,
     want: crate::bench_id::Cell,

@@ -95,7 +95,7 @@ pub enum BenchId {
 }
 
 /// Throughput ops that carry no occupancy segment.
-const WORKLOAD_OPS: &[&str] = &["build", "churn"];
+const WORKLOAD_OPS: &[&str] = &["build", "build_collect", "churn"];
 
 fn occ(s: &str) -> anyhow::Result<usize> {
     s.parse::<usize>()
@@ -180,6 +180,7 @@ mod tests {
         "throughput/cell_b/iter_present/HashMap/256",
         "throughput/cell_a/insert_new/GappedArray/8",
         "throughput/cell_a/build/PackedArray",
+        "throughput/cell_b/build_collect/GappedArray",
         "throughput/cell_b/churn/BTreeMap",
         "throughput/convert/pack/cell_a/8",
         "throughput/convert/unpack/cell_b/128",

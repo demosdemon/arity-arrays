@@ -27,6 +27,7 @@ use quick::quick_criterion;
 use support::BenchContainer;
 use support::BoxArr;
 use support::ChurnOp;
+use support::CollectBuild;
 use support::Payload;
 use support::RAND_SEQ_LEN;
 use support::churn_ops;
@@ -337,6 +338,53 @@ workload_benches!(
     ]
 );
 
+/// Registers `build_collect` for one cell under
+/// `throughput/<cell>/build_collect`: the same full-arity construction the
+/// `build` group measures, but via the `FromIterator`/`collect` fast path the
+/// sparse types' docs recommend over repeated `insert`. Swept only over the
+/// representations that provide a bulk constructor — the sparse arrays and the
+/// maps; `BoxArr` and `FixedArray<Option<T>>` have none, so they are absent
+/// from the type list (and render as `–` in the workload table beside `build`).
+macro_rules! build_collect_benches {
+    ($fn:ident, $cell:literal, $ty:ty, $arity:ty, [$($ctype:ty),+ $(,)?]) => {
+        fn $fn(c: &mut Criterion) {
+            let mut g = c.benchmark_group(concat!("throughput/", $cell, "/build_collect"));
+            let n = <$arity as Arity>::LEN;
+            $(
+                // bench_function (no parameter) so the id is the exact
+                // four-segment `throughput/<cell>/build_collect/<NAME>`, matching
+                // the sibling `build` group the workload table sets it beside.
+                g.bench_function(<$ctype as BenchContainer<$ty>>::NAME, |b| {
+                    b.iter_with_large_drop(|| {
+                        <$ctype as CollectBuild<$ty>>::build_collect(black_box(n))
+                    })
+                });
+            )+
+            g.finish();
+        }
+    };
+}
+
+build_collect_benches!(
+    build_collect_cell_a, "cell_a", [u8; 32], Arity16,
+    [
+        PackedArray<[u8; 32], Arity16>,
+        GappedArray<[u8; 32], Arity16>,
+        BTreeMap<usize, [u8; 32]>,
+        HashMap<usize, [u8; 32]>,
+    ]
+);
+
+build_collect_benches!(
+    build_collect_cell_b, "cell_b", u64, Arity256,
+    [
+        PackedArray<u64, Arity256>,
+        GappedArray<u64, Arity256>,
+        BTreeMap<usize, u64>,
+        HashMap<usize, u64>,
+    ]
+);
+
 /// pack/unpack between a populated `FixedArray` and a `PackedArray`, swept by
 /// occupancy per cell, under `throughput/convert/<op>`.
 fn convert(c: &mut Criterion) {
@@ -383,6 +431,7 @@ criterion_group!(
     name = benches;
     config = quick_criterion();
     targets = single_cell_a, single_cell_b, rand_cell_a, rand_cell_b,
-              workload_cell_a, workload_cell_b, convert
+              workload_cell_a, workload_cell_b,
+              build_collect_cell_a, build_collect_cell_b, convert
 );
 criterion_main!(benches);

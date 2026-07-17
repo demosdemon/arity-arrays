@@ -20,6 +20,7 @@ use arity_arrays::index::Niche;
 use support::BenchContainer;
 use support::BoxArr;
 use support::ChurnOp;
+use support::CollectBuild;
 use support::Payload;
 use support::churn_len;
 use support::churn_ops;
@@ -75,6 +76,41 @@ fn adapters_behave_cell_b() {
     adapter_roundtrip::<u64, BoxArr<u64, Arity256>>();
     adapter_roundtrip::<u64, BTreeMap<usize, u64>>();
     adapter_roundtrip::<u64, HashMap<usize, u64>>();
+}
+
+fn collect_build_matches_fill<T, C>(n: usize)
+where
+    T: Payload + PartialEq + core::fmt::Debug,
+    C: CollectBuild<T>,
+{
+    // `build_collect` must produce the same present set as `fill` for the same
+    // `n`, so the `build` and `build_collect` benches time two routes to one
+    // container. `n` is kept below the arity width so slot `n` is a valid
+    // absent-slot probe for the bounded (masked) representations.
+    let collected = C::build_collect(n);
+    let filled = C::fill(n);
+    for i in 0..n {
+        assert_eq!(collected.lookup(i), Some(&T::make(i)), "slot {i} value");
+        assert_eq!(collected.lookup(i), filled.lookup(i), "slot {i} differs");
+    }
+    assert_eq!(collected.lookup(n), None, "slot n must be absent");
+    assert_eq!(filled.lookup(n), None, "slot n must be absent");
+}
+
+#[test]
+fn collect_build_matches_fill_cell_a() {
+    collect_build_matches_fill::<[u8; 32], PackedArray<[u8; 32], Arity16>>(8);
+    collect_build_matches_fill::<[u8; 32], GappedArray<[u8; 32], Arity16>>(8);
+    collect_build_matches_fill::<[u8; 32], BTreeMap<usize, [u8; 32]>>(8);
+    collect_build_matches_fill::<[u8; 32], HashMap<usize, [u8; 32]>>(8);
+}
+
+#[test]
+fn collect_build_matches_fill_cell_b() {
+    collect_build_matches_fill::<u64, PackedArray<u64, Arity256>>(200);
+    collect_build_matches_fill::<u64, GappedArray<u64, Arity256>>(200);
+    collect_build_matches_fill::<u64, BTreeMap<usize, u64>>(200);
+    collect_build_matches_fill::<u64, HashMap<usize, u64>>(200);
 }
 
 #[test]

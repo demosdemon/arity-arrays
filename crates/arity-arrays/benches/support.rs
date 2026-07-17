@@ -220,6 +220,44 @@ impl<T: Payload> BenchContainer<T> for HashMap<usize, T> {
     }
 }
 
+/// The bulk `FromIterator`/`collect` construction path, for the representations
+/// that provide one. Kept separate from [`BenchContainer`] so `BoxArr` and
+/// `FixedArray<Option<T>>` — which have no bulk constructor — are not forced to
+/// implement an inapplicable method; the `build_collect` bench sweeps only the
+/// types that carry this impl. Every implementor must produce the same present
+/// set as [`BenchContainer::fill`] for the same `n`, so the `build` and
+/// `build_collect` benches measure two routes to the identical container.
+pub trait CollectBuild<T: Payload>: BenchContainer<T> {
+    /// Build slots `0..n` present, each holding `T::make(slot)`, via the type's
+    /// `FromIterator` fast path — the construction route the sparse types' docs
+    /// recommend over repeated `insert`.
+    fn build_collect(n: usize) -> Self;
+}
+
+impl<T: Payload, A: Arity> CollectBuild<T> for PackedArray<T, A> {
+    fn build_collect(n: usize) -> Self {
+        (0..n).map(|i| (masked_index::<A>(i), T::make(i))).collect()
+    }
+}
+
+impl<T: Payload, A: Arity> CollectBuild<T> for GappedArray<T, A> {
+    fn build_collect(n: usize) -> Self {
+        (0..n).map(|i| (masked_index::<A>(i), T::make(i))).collect()
+    }
+}
+
+impl<T: Payload> CollectBuild<T> for BTreeMap<usize, T> {
+    fn build_collect(n: usize) -> Self {
+        (0..n).map(|i| (i, T::make(i))).collect()
+    }
+}
+
+impl<T: Payload> CollectBuild<T> for HashMap<usize, T> {
+    fn build_collect(n: usize) -> Self {
+        (0..n).map(|i| (i, T::make(i))).collect()
+    }
+}
+
 /// A churn step: which mutation, and the slot it targets.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChurnOp {
