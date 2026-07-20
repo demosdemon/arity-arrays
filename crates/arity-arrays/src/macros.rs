@@ -60,15 +60,16 @@ macro_rules! impl_size_witness {
 
 /// Emits the gap-agnostic value impls (`PartialEq`/`Eq`/`Hash`/`Debug`) and the
 /// thread-safety impls (`Send`/`Sync`/`UnwindSafe`/`RefUnwindSafe` for the
-/// array, `Send`/`Sync` for its present-iterator `$Iter`). The array and
-/// present-iterator `Send`/`Sync` impls require `A::Bitmap: Send`/`Sync` (the
-/// heap block and the iterator's `BitIter` bit-cursor each hold an
-/// `A::Bitmap` by value), and that bound lets clippy prove the hand-written
-/// iterator impls sound, so no `#[expect(clippy::non_send_fields_in_send_ty)]`
-/// suppression is needed. Depends on `Arity` being in scope and on the
-/// inherent `bitmap()`, `count()`, and `iter_present()` methods of `$Ty`.
+/// array, `Send`/`Sync` for its present-iterator `$Iter` and its owning
+/// `$IntoIter`). The array, present-iterator, and owning-iterator `Send`/`Sync`
+/// impls require `A::Bitmap: Send`/`Sync` (the heap block and the iterators'
+/// `BitIter` bit-cursors each hold an `A::Bitmap` by value), and that bound
+/// lets clippy prove the hand-written iterator impls sound, so no
+/// `#[expect(clippy::non_send_fields_in_send_ty)]` suppression is needed.
+/// Depends on `Arity` being in scope and on the inherent `bitmap()`, `count()`,
+/// and `iter_present()` methods of `$Ty`.
 macro_rules! impl_dense_common {
-    ($Ty:ident, $Iter:ident) => {
+    ($Ty:ident, $Iter:ident, $IntoIter:ident) => {
         impl<T: PartialEq, A: Arity> PartialEq for $Ty<T, A> {
             fn eq(&self, other: &Self) -> bool {
                 self.bitmap() == other.bitmap()
@@ -136,6 +137,21 @@ macro_rules! impl_dense_common {
         unsafe impl<T: Sync, A: Arity> Send for $Iter<'_, T, A> where A::Bitmap: Send {}
         // SAFETY: shared, read-only access; no interior mutability.
         unsafe impl<T: Sync, A: Arity> Sync for $Iter<'_, T, A> where A::Bitmap: Sync {}
+
+        // The owning iterator takes the source array's block (the source is
+        // consumed via `ManuallyDrop`) and frees it in its own `Drop`, so it
+        // has the same exclusive ownership the array itself has — its bounds
+        // match the array's rather than the borrowing iterators'. The
+        // `NonNull` field suppresses the auto-impls, so these are spelled out;
+        // `alloc::vec::IntoIter` is `Send`/`Sync` on exactly these bounds.
+        //
+        // SAFETY: the iterator exclusively owns its allocation (yielding `T`
+        // by value) and holds `A::Bitmap` bit-cursors by value; sending it
+        // across threads is sound when both are `Send`.
+        unsafe impl<T: Send, A: Arity> Send for $IntoIter<T, A> where A::Bitmap: Send {}
+        // SAFETY: a shared reference yields only `&T` and `&A::Bitmap`; no
+        // interior mutability, so this holds when both are `Sync`.
+        unsafe impl<T: Sync, A: Arity> Sync for $IntoIter<T, A> where A::Bitmap: Sync {}
     };
 }
 

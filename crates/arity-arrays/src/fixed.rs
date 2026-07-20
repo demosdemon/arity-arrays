@@ -6,6 +6,7 @@ use core::ops::Index;
 use core::ops::IndexMut;
 
 use arity_index::Niche;
+use arity_index::NicheRangeInclusive;
 use hybrid_array::Array;
 
 use crate::Arity;
@@ -14,11 +15,11 @@ use crate::Arity;
 /// bounds checks.
 ///
 /// `hybrid_array::Array` is an implementation detail, kept out of the public
-/// surface for element access (the type exposes `Deref<Target = [T]>` /
-/// `AsRef<[T]>`). It is not fully hidden: the owned `IntoIterator` impl below
-/// names `hybrid-array`'s iterator in its public `IntoIter` associated type, so
-/// retiring the `typenum` backing is low-impact but not strictly non-breaking.
-/// See [`Arity::Size`] for the full list of leak points.
+/// surface: element access goes through `Deref<Target = [T]>` / `AsRef<[T]>`,
+/// and every `IntoIterator` impl yields a type this crate names — the borrowing
+/// ones route through slices, the owned one through [`IntoIter`]. What remains
+/// is the `ArraySize` bound on [`Arity::Size`]; see it for what retiring the
+/// `typenum` backing would cost.
 pub struct FixedArray<T, A: Arity>(Array<T, A::Size>);
 
 impl<T, A: Arity> FixedArray<T, A> {
@@ -165,16 +166,81 @@ impl<'de, T: serde::Deserialize<'de>, A: Arity> serde::Deserialize<'de> for Fixe
     }
 }
 
+/// Owned iterator over a [`FixedArray`], yielding every slot as `(A::Index, T)`
+/// in ascending index order.
+///
+/// This is a named wrapper rather than the underlying [`Zip`](core::iter::Zip)
+/// projection because `hybrid-array` exposes no public name for `Array`'s owned
+/// iterator, so naming the projection directly would leak `hybrid-array` into
+/// this crate's public API. The borrowing `IntoIterator` impls avoid the leak
+/// by routing through slices; the owned one has no slice to route through, so
+/// it wraps instead. Keeping the wrapper means retiring `hybrid-array` (see
+/// [`Arity::Size`]) will not change this type's
+/// identity.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct IntoIter<T, A: Arity>(
+    core::iter::Zip<NicheRangeInclusive<A::Index>, ArrayIntoIter<T, A>>,
+);
+
+/// The element half of [`IntoIter`]: `Array`'s own associated `IntoIter`.
+///
+/// `ArraySize` constrains `ArrayType<T>` only as `IntoIterator<Item = T>`, so
+/// the reverse and exact-size properties of this iterator are not provable for
+/// a generic `A: Arity` — only at a concrete arity, where it resolves to
+/// [`core::array::IntoIter`]. That is why the impls below that need those
+/// properties carry a `where` clause; it mirrors the bounds
+/// [`Zip`](core::iter::Zip) itself imposes, so this type is exactly as capable
+/// as the bare `Zip` this wrapper replaced.
+type ArrayIntoIter<T, A> = <hybrid_array::Array<T, <A as Arity>::Size> as IntoIterator>::IntoIter;
+
+impl<T, A: Arity> Iterator for IntoIter<T, A> {
+    type Item = (A::Index, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    fn fold<B, F: FnMut(B, Self::Item) -> B>(self, init: B, f: F) -> B {
+        self.0.fold(init, f)
+    }
+}
+
+impl<T, A: Arity> DoubleEndedIterator for IntoIter<T, A>
+where
+    ArrayIntoIter<T, A>: DoubleEndedIterator + ExactSizeIterator,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back()
+    }
+
+    fn rfold<B, F: FnMut(B, Self::Item) -> B>(self, init: B, f: F) -> B {
+        self.0.rfold(init, f)
+    }
+}
+
+impl<T, A: Arity> ExactSizeIterator for IntoIter<T, A>
+where
+    ArrayIntoIter<T, A>: ExactSizeIterator,
+{
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<T, A: Arity> core::iter::FusedIterator for IntoIter<T, A> where
+    ArrayIntoIter<T, A>: core::iter::FusedIterator
+{
+}
+
 impl<T, A: Arity> IntoIterator for FixedArray<T, A> {
     type Item = (A::Index, T);
-    // `hybrid-array` has no public `IntoIter<T, N>` name; the owned iterator type
-    // is the associated `IntoIter` of `Array`'s own `IntoIterator` impl.
-    type IntoIter = core::iter::Zip<
-        arity_index::NicheRangeInclusive<A::Index>,
-        <hybrid_array::Array<T, A::Size> as IntoIterator>::IntoIter,
-    >;
+    type IntoIter = IntoIter<T, A>;
     fn into_iter(self) -> Self::IntoIter {
-        A::Index::all().zip(self.0)
+        IntoIter(A::Index::all().zip(self.0))
     }
 }
 
@@ -346,6 +412,30 @@ mod tests {
         // value iterator is double-ended
         let last = a.into_iter().next_back().map(|(i, v)| (i.as_u8(), v));
         assert_eq!(last, Some((7, 14)));
+    }
+
+    /// The owned iterator is a nameable crate type, so `hybrid-array` names do
+    /// not leak through `<FixedArray<_, _> as IntoIterator>::IntoIter`. Storing
+    /// it in an explicitly typed binding is the whole point: it is what
+    /// downstream code cannot do while the type is an unnameable projection.
+    #[test]
+    fn owned_into_iter_is_nameable_and_preserves_iterator_traits() {
+        let a = FixedArray::<u8, Arity8>::from_fn(|i| i.as_u8() * 2);
+        let mut it: IntoIter<u8, Arity8> = a.into_iter();
+
+        assert_eq!(it.len(), 8);
+        assert_eq!(it.next().map(|(i, v)| (i.as_u8(), v)), Some((0, 0)));
+        assert_eq!(it.next_back().map(|(i, v)| (i.as_u8(), v)), Some((7, 14)));
+        assert_eq!(it.len(), 6);
+
+        let rest: Vec<u8> = it.map(|(_, v)| v).collect();
+        assert_eq!(rest, alloc::vec![2, 4, 6, 8, 10, 12]);
+
+        // Fused: a drained iterator keeps returning `None`.
+        let mut drained = FixedArray::<u8, Arity8>::from_fn(|_| 0).into_iter();
+        for _ in drained.by_ref() {}
+        assert!(drained.next().is_none());
+        assert!(drained.next_back().is_none());
     }
 
     #[test]

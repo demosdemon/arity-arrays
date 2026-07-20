@@ -375,6 +375,32 @@ impl<T, A: Arity> GappedArray<T, A> {
         Some(unsafe { &mut *data_ptr(ptr).add(p) })
     }
 
+    /// If exactly one entry is present, removes and returns it with its index;
+    /// otherwise returns `None` and leaves the array unchanged.
+    ///
+    /// This is the branch-collapse step of a trie: a node that has been reduced
+    /// to a single child is replaced by that child. The occupancy test reads
+    /// the header bitmap alone, so the common "more than one child" case
+    /// costs a popcount and never touches the heap block. Like
+    /// [`remove`](Self::remove), a successful take is move-free and retains
+    /// capacity.
+    ///
+    /// Mirrors [`FixedArray::take_only_child`](crate::FixedArray::take_only_child).
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same violated-invariant condition as
+    /// [`remove`](Self::remove), which it delegates to. This cannot happen
+    /// through the public API.
+    pub fn take_only_child(&mut self) -> Option<(A::Index, T)> {
+        let bitmap = self.bitmap();
+        if bitmap.count_ones() != 1 {
+            return None;
+        }
+        let only = bitmap.bits().next()?;
+        self.remove(only).map(|value| (only, value))
+    }
+
     /// Removes and returns the element at `index`, or `None` if absent.
     ///
     /// Move-free: clears the membership/live bits and reads the value out,
@@ -1796,7 +1822,7 @@ impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
     }
 }
 
-impl_dense_common!(GappedArray, PresentIter);
+impl_dense_common!(GappedArray, PresentIter, IntoIter);
 
 impl_logical_serde!(GappedArray, "GappedArray");
 
@@ -2104,6 +2130,52 @@ mod tests {
         assert_eq!(got.len(), 16);
         assert_eq!(got[5], (5, Some(50)));
         assert_eq!(got[14], (14, Some(140)));
+    }
+
+    #[test]
+    fn take_only_child_takes_the_sole_entry() {
+        let mut g = GappedArray::<u8, Arity16>::new();
+        g.insert(U4::new_masked(7), 70);
+
+        assert_eq!(g.take_only_child(), Some((U4::new_masked(7), 70)));
+        assert!(g.is_empty());
+        assert_eq!(g.count(), 0);
+    }
+
+    #[test]
+    fn take_only_child_is_none_when_empty() {
+        let mut g = GappedArray::<u8, Arity16>::new();
+        assert_eq!(g.take_only_child(), None);
+        assert!(g.is_empty());
+    }
+
+    #[test]
+    fn take_only_child_leaves_multi_entry_array_unchanged() {
+        let mut g = GappedArray::<u8, Arity16>::new();
+        g.insert(U4::new_masked(1), 10);
+        g.insert(U4::new_masked(9), 90);
+
+        assert_eq!(g.take_only_child(), None);
+        assert_eq!(g.count(), 2);
+        assert_eq!(g.get(U4::new_masked(1)), Some(&10));
+        assert_eq!(g.get(U4::new_masked(9)), Some(&90));
+    }
+
+    /// The sole survivor of a series of removes sits at an arbitrary *physical*
+    /// slot, so this exercises the logical/physical split that distinguishes
+    /// this representation from [`PackedArray`](crate::PackedArray).
+    #[test]
+    fn take_only_child_finds_sole_survivor_at_a_gapped_slot() {
+        let mut g = GappedArray::<u8, Arity16>::new();
+        for i in [1u8, 4, 7, 11, 14] {
+            g.insert(U4::new_masked(i), i * 10);
+        }
+        for i in [1u8, 4, 11, 14] {
+            assert_eq!(g.remove(U4::new_masked(i)), Some(i * 10));
+        }
+
+        assert_eq!(g.take_only_child(), Some((U4::new_masked(7), 70)));
+        assert!(g.is_empty());
     }
 
     #[test]
@@ -2501,6 +2573,7 @@ mod tests {
         assert_send_sync::<GappedArray<u16, Arity16>>();
         assert_send_sync::<PresentIter<'static, u16, Arity16>>();
         assert_send_sync::<Iter<'static, u16, Arity16>>();
+        assert_send_sync::<IntoIter<u16, Arity16>>();
 
         // `Arity256`'s bitmap is `U256`, the only non-primitive backing; it
         // exercises the `A::Bitmap: Send + Sync` bound that primitive
@@ -2510,6 +2583,7 @@ mod tests {
             assert_send_sync::<GappedArray<u16, Arity256>>();
             assert_send_sync::<PresentIter<'static, u16, Arity256>>();
             assert_send_sync::<Iter<'static, u16, Arity256>>();
+            assert_send_sync::<IntoIter<u16, Arity256>>();
         }
     }
 

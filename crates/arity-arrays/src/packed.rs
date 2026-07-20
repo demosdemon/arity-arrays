@@ -435,6 +435,24 @@ impl<T, A: Arity> PackedArray<T, A> {
         }
     }
 
+    /// If exactly one entry is present, removes and returns it with its index;
+    /// otherwise returns `None` and leaves the array unchanged.
+    ///
+    /// This is the branch-collapse step of a trie: a node that has been reduced
+    /// to a single child is replaced by that child. The occupancy test reads
+    /// the header bitmap alone, so the common "more than one child" case
+    /// costs a popcount and never touches the heap block.
+    ///
+    /// Mirrors [`FixedArray::take_only_child`](crate::FixedArray::take_only_child).
+    pub fn take_only_child(&mut self) -> Option<(A::Index, T)> {
+        let bitmap = self.bitmap();
+        if bitmap.count_ones() != 1 {
+            return None;
+        }
+        let only = bitmap.bits().next()?;
+        self.remove(only).map(|value| (only, value))
+    }
+
     /// Removes and returns the element at `index`, or `None` if absent.
     ///
     /// Reallocates to exactly hold one fewer element (`O(count)` move);
@@ -1250,7 +1268,7 @@ impl<T: Clone, A: Arity> Clone for PackedArray<T, A> {
     }
 }
 
-impl_dense_common!(PackedArray, PresentIter);
+impl_dense_common!(PackedArray, PresentIter, IntoIter);
 
 impl_logical_serde!(PackedArray, "PackedArray");
 
@@ -1760,6 +1778,35 @@ mod tests {
     }
 
     #[test]
+    fn take_only_child_takes_the_sole_entry() {
+        let mut p = PackedArray::<u8, Arity16>::new();
+        p.insert(U4::new_masked(7), 70);
+
+        assert_eq!(p.take_only_child(), Some((U4::new_masked(7), 70)));
+        assert!(p.is_empty());
+        assert_eq!(p.count(), 0);
+    }
+
+    #[test]
+    fn take_only_child_is_none_when_empty() {
+        let mut p = PackedArray::<u8, Arity16>::new();
+        assert_eq!(p.take_only_child(), None);
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn take_only_child_leaves_multi_entry_array_unchanged() {
+        let mut p = PackedArray::<u8, Arity16>::new();
+        p.insert(U4::new_masked(1), 10);
+        p.insert(U4::new_masked(9), 90);
+
+        assert_eq!(p.take_only_child(), None);
+        assert_eq!(p.count(), 2);
+        assert_eq!(p.get(U4::new_masked(1)), Some(&10));
+        assert_eq!(p.get(U4::new_masked(9)), Some(&90));
+    }
+
+    #[test]
     fn remove_present_absent_and_to_empty() {
         let mut src = FixedArray::<Option<u8>, Arity16>::new();
         src[U4::new_masked(1)] = Some(10);
@@ -1861,6 +1908,7 @@ mod tests {
         assert_send_sync::<PackedArray<u16, Arity16>>();
         assert_send_sync::<PresentIter<'static, u16, Arity16>>();
         assert_send_sync::<Iter<'static, u16, Arity16>>();
+        assert_send_sync::<IntoIter<u16, Arity16>>();
 
         // `Arity256`'s bitmap is `U256`, the only non-primitive backing; it
         // exercises the `A::Bitmap: Send + Sync` bound that primitive
@@ -1870,6 +1918,7 @@ mod tests {
             assert_send_sync::<PackedArray<u16, Arity256>>();
             assert_send_sync::<PresentIter<'static, u16, Arity256>>();
             assert_send_sync::<Iter<'static, u16, Arity256>>();
+            assert_send_sync::<IntoIter<u16, Arity256>>();
         }
     }
 

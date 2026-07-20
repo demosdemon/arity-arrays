@@ -50,17 +50,16 @@ pub trait Arity: crate::Sealed {
     /// `[T; A::LEN]` with `LEN` a trait associated `const`
     /// (`generic_const_exprs` is unstable). Its public exposure is kept small —
     /// [`FixedArray`](crate::FixedArray) exposes `Deref<Target = [T]>` /
-    /// `AsRef<[T]>` for element access rather than naming `Array` — but it is
-    /// not fully contained. `hybrid-array`/`typenum` names still leak through
-    /// two public points, so retiring the dependency (once
-    /// `generic_const_exprs` lets the storage become `[T; A::LEN]`) is
-    /// low-impact but **not** strictly non-breaking:
+    /// `AsRef<[T]>` for element access rather than naming `Array`, and its
+    /// iterators are all named crate types — leaving the `ArraySize` bound on
+    /// this associated type (`type Size: ArraySize`) as the one point where a
+    /// `hybrid-array`/`typenum` name reaches the public surface.
     ///
-    /// - the `ArraySize` bound on this associated type (`type Size:
-    ///   ArraySize`), and
-    /// - [`FixedArray`](crate::FixedArray)'s owned `IntoIterator::IntoIter`,
-    ///   whose type names `<hybrid_array::Array<T, A::Size> as
-    ///   IntoIterator>::IntoIter`.
+    /// [`Arity`] is sealed, so no downstream impl can name `Size` to satisfy
+    /// it; the residual exposure is code that names `<A as Arity>::Size`
+    /// explicitly. Retiring the dependency (once `generic_const_exprs` lets the
+    /// storage become `[T; A::LEN]`) is therefore low-impact, though removing
+    /// this associated type would still be a breaking change.
     type Size: ArraySize;
 }
 

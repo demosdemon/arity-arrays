@@ -95,6 +95,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 
   Which slots are present is unchanged — these hand out `&mut T` to the existing
   elements and never insert or remove.
+- `take_only_child(&mut self) -> Option<(A::Index, T)>` on `PackedArray` and
+  `GappedArray`, mirroring the existing `FixedArray::take_only_child`. If exactly
+  one entry is present it is removed and returned with its index; otherwise the
+  array is left unchanged. This is the branch-collapse step of a trie — a node
+  reduced to a single child is replaced by that child. The occupancy test reads
+  the header bitmap alone, so the common "more than one child" case costs a
+  popcount and never touches the heap block.
+
+### Fixed
+
+- `packed::IntoIter` and `gapped::IntoIter` are now `Send`/`Sync` (on the same
+  `T` and `A::Bitmap` bounds as the arrays themselves, matching
+  `alloc::vec::IntoIter`). Both own their heap block outright, but the raw
+  pointer they hold suppressed the auto-impls, so consuming an array *lost* the
+  thread-safety the array itself had: `PackedArray<T, A>` could be sent to
+  another thread while `array.into_iter()` could not. The omission was invisible
+  because the crate's thread-safety tests covered the arrays and the borrowing
+  iterators but never the owning ones; they now cover both.
 
 ### Changed
 
@@ -111,6 +129,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `std::vec::IntoIter` and `hash_map::Iter`. The module path is the
   disambiguator, so the type names stay short and unprefixed. (The new mutable
   iterators above ship with idiomatic names from the start.)
+- **Breaking:** `<FixedArray<T, A> as IntoIterator>::IntoIter` is now the named
+  type `fixed::IntoIter<T, A>` instead of the bare
+  `Zip<NicheRangeInclusive<_>, <hybrid_array::Array<_, _> as IntoIterator>::IntoIter>`
+  projection it was spelled as before. Behavior and item type are unchanged, and
+  the new type carries the same iterator impls under the same bounds, so code
+  that consumes the iterator generically is unaffected; only code that *names*
+  the associated type must change.
+
+  This closes the larger of the two points where `hybrid-array` leaks into the
+  public API. The borrowing `IntoIterator` impls already avoided the leak by
+  routing through slices, but the owned one had no slice to route through and
+  `hybrid-array` exports no public name for `Array`'s owned iterator. Naming it
+  here means retiring that dependency — see `Arity::Size`, which documents it as
+  a sunset dependency pending `generic_const_exprs` — will no longer change this
+  type's identity. The remaining leak is the `ArraySize` bound on `Arity::Size`
+  itself, which `Arity` being sealed keeps out of reach of downstream impls.
 - Marked every iterator type `#[must_use]` — `packed::Iter`, `PresentIter`,
   `IntoIter`, `IterMut`, `PresentIterMut` and the `gapped::` counterparts — so
   building an iterator and discarding it without consuming it now warns
