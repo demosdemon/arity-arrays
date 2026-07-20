@@ -301,7 +301,7 @@ crate's README for the full table.
 ## Versioning and MSRV
 
 These crates are not at a uniform version: `arity-arrays` and `arity-bitmap` are
-**`0.2.0-alpha.2`**, `arity-index` is **`0.1.2`** — production-*worthy*, but
+**`0.2.0-alpha.2`**, `arity-index` is **`0.1.3`** — production-*worthy*, but
 reserving the right to refine the API with real downstream use before a `1.0`
 commitment. Under Cargo semver, each crate's `0.y.z` version means a breaking
 change to that crate bumps its minor (`y`) version.

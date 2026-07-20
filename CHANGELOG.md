@@ -5,7 +5,7 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
-## [arity-index Unreleased]
+## [arity-index 0.1.3] - 2026-07-20
 
 ### Changed
 
@@ -290,6 +290,7 @@ to power-of-two arities 8–256.
 
 [arity-arrays 0.2.0-alpha.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0-alpha.2
 [arity-bitmap 0.2.0-alpha.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.2
+[arity-index 0.1.3]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.3
 [arity-index 0.1.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.2
 [arity-index 0.1.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.1
 [arity-bitmap 0.2.0-alpha.1]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.1
