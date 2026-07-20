@@ -5,78 +5,7 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
-## [arity-index 0.1.3] - 2026-07-20
-
-### Changed
-
-- Marked the range iterators `NicheRange` and `NicheRangeInclusive`
-  `#[must_use]`, so constructing one and discarding it without consuming it now
-  warns ("iterators are lazy and do nothing unless consumed"). The redundant
-  method-level `#[must_use]` on their `new` constructors and on `Niche::all` is
-  dropped in favor of the type-level attribute.
-
-## [arity-index 0.1.2] - 2026-07-15
-
-### Added
-
-- Zero-copy slice conversions between `&[u8]` and `&[U{n}]`, as inherent
-  `const fn`s on `U3`–`U7` and as `Niche` trait methods (which also cover the
-  arity-256 `u8` index, where all three are the identity):
-  - `try_from_slice(&[u8]) -> Option<&[Self]>` scans every byte and returns the
-    reinterpreted slice only if all are `< COUNT`.
-  - `from_slice_unchecked(&[u8]) -> &[Self]` (`unsafe`) skips the scan. It
-    debug-asserts the range and panics on violation when `debug_assertions` are
-    enabled; without them the same call is undefined behavior.
-  - `as_u8_slice(&[Self]) -> &[u8]` is safe and infallible — every niche value
-    is a valid `u8`. There is deliberately no `&mut [Self] -> &mut [u8]`
-    counterpart: it would let a caller store an out-of-range byte and leave an
-    invalid value behind.
-
-### Changed
-
-- Mark `U3`–`U7` `#[repr(transparent)]`, promoting their `u8` size and
-  alignment from an implementation detail to a documented guarantee. This is
-  what makes the slice conversions above sound; the layout is now also asserted
-  at compile time alongside the existing `size_of::<Option<U{n}>>() == 1` check.
-
-### Documentation
-
-- Document `Niche::as_usize`'s `< COUNT` contract as safety-critical:
-  `arity-arrays` relies on it for its internal `slice::get_unchecked` calls.
-
-## [arity-bitmap Unreleased]
-
-### Changed
-
-- Marked the set-bit iterator `BitIter` `#[must_use]`, so constructing it (via
-  `Bitmap::bits`) and discarding it without consuming it now warns ("iterators
-  are lazy and do nothing unless consumed").
-- `BitIter` overrides `fold`/`rfold` to scan the bitmap snapshot in a single
-  loop (clearing the lowest/highest set bit each step) instead of the default
-  `next()`-per-item drive, so internal-iteration consumers — `.fold()`,
-  `.sum()`, `.for_each()`, `.collect()`, and `GappedArray`'s present iteration,
-  which delegates here — avoid the per-item `Option` round-trip. (`try_fold`/
-  `try_rfold` cannot be overridden on stable — the `Try` trait is unstable — so
-  short-circuiting consumers keep the default.)
-
-## [arity-bitmap 0.2.0-alpha.2] - 2026-07-15
-
-### Changed
-
-- Make the crate-internal `Raw` supertrait an `unsafe trait`, so a bitmap
-  backing must assert its bit-position contract through an explicit
-  `unsafe impl`. The crate's `unsafe_code` lint moves from
-  `#![forbid(unsafe_code)]` to `#![deny(unsafe_code)]`; the crate still
-  performs no unsafe operations (the only `unsafe` is the audited contract
-  marker).
-
-### Documentation
-
-- Mark the safety-critical `Bitmap`/`Raw` methods (`select`, `rank`,
-  `count_ones`, `bits`, and the raw scan primitives) whose results feed
-  `arity-arrays`'s unchecked pointer arithmetic.
-
-## [arity-arrays Unreleased]
+## [arity-arrays 0.2.0] - 2026-07-20
 
 ### Added
 
@@ -168,6 +97,77 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   — with its dense contiguous storage the compiler already lowers it to the same
   code, so a custom fold showed no gain. `packed::PresentIterMut` forwards
   `fold`/`rfold` to its inner `Zip`.
+
+## [arity-bitmap 0.2.0] - 2026-07-20
+
+### Changed
+
+- Marked the set-bit iterator `BitIter` `#[must_use]`, so constructing it (via
+  `Bitmap::bits`) and discarding it without consuming it now warns ("iterators
+  are lazy and do nothing unless consumed").
+- `BitIter` overrides `fold`/`rfold` to scan the bitmap snapshot in a single
+  loop (clearing the lowest/highest set bit each step) instead of the default
+  `next()`-per-item drive, so internal-iteration consumers — `.fold()`,
+  `.sum()`, `.for_each()`, `.collect()`, and `GappedArray`'s present iteration,
+  which delegates here — avoid the per-item `Option` round-trip. (`try_fold`/
+  `try_rfold` cannot be overridden on stable — the `Try` trait is unstable — so
+  short-circuiting consumers keep the default.)
+
+## [arity-index 0.1.3] - 2026-07-20
+
+### Changed
+
+- Marked the range iterators `NicheRange` and `NicheRangeInclusive`
+  `#[must_use]`, so constructing one and discarding it without consuming it now
+  warns ("iterators are lazy and do nothing unless consumed"). The redundant
+  method-level `#[must_use]` on their `new` constructors and on `Niche::all` is
+  dropped in favor of the type-level attribute.
+
+## [arity-index 0.1.2] - 2026-07-15
+
+### Added
+
+- Zero-copy slice conversions between `&[u8]` and `&[U{n}]`, as inherent
+  `const fn`s on `U3`–`U7` and as `Niche` trait methods (which also cover the
+  arity-256 `u8` index, where all three are the identity):
+  - `try_from_slice(&[u8]) -> Option<&[Self]>` scans every byte and returns the
+    reinterpreted slice only if all are `< COUNT`.
+  - `from_slice_unchecked(&[u8]) -> &[Self]` (`unsafe`) skips the scan. It
+    debug-asserts the range and panics on violation when `debug_assertions` are
+    enabled; without them the same call is undefined behavior.
+  - `as_u8_slice(&[Self]) -> &[u8]` is safe and infallible — every niche value
+    is a valid `u8`. There is deliberately no `&mut [Self] -> &mut [u8]`
+    counterpart: it would let a caller store an out-of-range byte and leave an
+    invalid value behind.
+
+### Changed
+
+- Mark `U3`–`U7` `#[repr(transparent)]`, promoting their `u8` size and
+  alignment from an implementation detail to a documented guarantee. This is
+  what makes the slice conversions above sound; the layout is now also asserted
+  at compile time alongside the existing `size_of::<Option<U{n}>>() == 1` check.
+
+### Documentation
+
+- Document `Niche::as_usize`'s `< COUNT` contract as safety-critical:
+  `arity-arrays` relies on it for its internal `slice::get_unchecked` calls.
+
+## [arity-bitmap 0.2.0-alpha.2] - 2026-07-15
+
+### Changed
+
+- Make the crate-internal `Raw` supertrait an `unsafe trait`, so a bitmap
+  backing must assert its bit-position contract through an explicit
+  `unsafe impl`. The crate's `unsafe_code` lint moves from
+  `#![forbid(unsafe_code)]` to `#![deny(unsafe_code)]`; the crate still
+  performs no unsafe operations (the only `unsafe` is the audited contract
+  marker).
+
+### Documentation
+
+- Mark the safety-critical `Bitmap`/`Raw` methods (`select`, `rank`,
+  `count_ones`, `bits`, and the raw scan primitives) whose results feed
+  `arity-arrays`'s unchecked pointer arithmetic.
 
 ## [arity-arrays 0.2.0-alpha.2] - 2026-07-15
 
@@ -322,6 +322,8 @@ to power-of-two arities 8–256.
 - Per-arity cargo features; optional `serde` (logical form) and a
   `serde_with::Compact` adapter; an `ethnum` backing passthrough; `std`.
 
+[arity-arrays 0.2.0]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0
+[arity-bitmap 0.2.0]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0
 [arity-arrays 0.2.0-alpha.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-arrays-v0.2.0-alpha.2
 [arity-bitmap 0.2.0-alpha.2]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-bitmap-v0.2.0-alpha.2
 [arity-index 0.1.3]: https://github.com/demosdemon/arity-arrays/releases/tag/arity-index-v0.1.3

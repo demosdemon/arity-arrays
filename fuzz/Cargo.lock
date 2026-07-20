@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "arity-arrays"
-version = "0.2.0-alpha.2"
+version = "0.2.0"
 dependencies = [
  "arity-bitmap",
  "arity-index",
@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "arity-bitmap"
-version = "0.2.0-alpha.2"
+version = "0.2.0"
 dependencies = [
  "arity-index",
  "ethnum",
