@@ -60,7 +60,7 @@ jobs:
         with:
           toolchain: nightly
           components: miri
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-nextest
       - run: cargo +nightly miri nextest run ${{ matrix.args }}
