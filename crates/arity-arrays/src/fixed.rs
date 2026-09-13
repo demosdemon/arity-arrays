@@ -149,9 +149,10 @@ impl<T, A: Arity> AsRef<[T]> for FixedArray<T, A> {
 #[cfg(feature = "serde")]
 impl<T: serde::Serialize, A: Arity> serde::Serialize for FixedArray<T, A> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // The inner `Array<T, A::Size>` serializes as a fixed-length sequence of
-        // exactly `LEN` elements (hybrid-array's `serde` impl). UFCS because the
-        // `Serialize` trait is not otherwise in method-call scope here.
+        // The inner `Array<T, A::Size>` serializes as a fixed-length sequence
+        // of exactly `LEN` elements (hybrid-array's `serde` impl). UFCS
+        // because the `Serialize` trait is not otherwise in method-call
+        // scope here.
         serde::Serialize::serialize(&self.0, serializer)
     }
 }

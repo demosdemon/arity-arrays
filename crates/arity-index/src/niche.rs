@@ -494,8 +494,8 @@ impl Niche for u8 {
     }
 
     // `Self` is `u8`, so all three conversions are the identity: every byte is
-    // already a valid arity-256 index. No scan, no transmute, and `try_from_slice`
-    // cannot fail.
+    // already a valid arity-256 index. No scan, no transmute, and
+    // `try_from_slice` cannot fail.
     #[inline]
     fn try_from_slice(slice: &[u8]) -> Option<&[Self]> {
         Some(slice)
@@ -714,21 +714,23 @@ mod tests {
 
     #[test]
     fn slice_conversions_work_generically() {
-        // Exercises the trait forwarding impls. If `Self::try_from_slice` in the
-        // macro resolved to the trait method rather than the inherent one, these
-        // would recurse until the stack overflowed.
+        // Exercises the trait forwarding impls. If `Self::try_from_slice` in
+        // the macro resolved to the trait method rather than the
+        // inherent one, these would recurse until the stack overflowed.
         fn round_trip<N: Niche + core::fmt::Debug>(bytes: &[u8], expect_ok: bool) {
             match N::try_from_slice(bytes) {
                 Some(idx) => {
                     assert!(expect_ok, "expected rejection, got {idx:?}");
                     assert_eq!(N::as_u8_slice(idx), bytes);
-                    // SAFETY: `try_from_slice` just proved every byte is < COUNT.
+                    // SAFETY: `try_from_slice` just proved every byte is <
+                    // COUNT.
                     let unchecked = unsafe { N::from_slice_unchecked(bytes) };
                     assert_eq!(N::as_u8_slice(unchecked), bytes);
-                    // Load every element by value. Miri validates an enum tag on
-                    // load, not when the slice reference is formed, so a test that
-                    // only inspects lengths or converts back to bytes would let an
-                    // invalid discriminant slip past it.
+                    // Load every element by value. Miri validates an enum tag
+                    // on load, not when the slice reference
+                    // is formed, so a test that
+                    // only inspects lengths or converts back to bytes would let
+                    // an invalid discriminant slip past it.
                     for (v, &b) in idx.iter().zip(bytes) {
                         assert_eq!(v.as_usize(), usize::from(b));
                     }
@@ -752,14 +754,15 @@ mod tests {
     }
 
     // Only compiled with debug assertions on. In a release build the call below
-    // is undefined behavior rather than a panic, so the test must not exist there.
+    // is undefined behavior rather than a panic, so the test must not exist
+    // there.
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "bytes_in_range")]
     fn from_slice_unchecked_debug_asserts_on_out_of_range() {
-        // SAFETY: none — this deliberately violates the precondition to prove the
-        // debug assertion catches it. It panics before reaching the transmute, so
-        // no invalid `U4` is ever created.
+        // SAFETY: none — this deliberately violates the precondition to prove
+        // the debug assertion catches it. It panics before reaching the
+        // transmute, so no invalid `U4` is ever created.
         let _ = unsafe { U4::from_slice_unchecked(&[0, 1, 16]) };
     }
 

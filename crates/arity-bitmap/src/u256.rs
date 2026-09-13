@@ -114,7 +114,8 @@ mod ethnum_backed {
             if holes == Self::ZERO {
                 None
             } else {
-                // 255 - leading_zeros = highest set bit = greatest clear <= from.
+                // 255 - leading_zeros = highest set bit = greatest clear <=
+                // from.
                 Some(255 - holes.leading_zeros() as usize)
             }
         }
@@ -198,7 +199,8 @@ mod tests {
         assert!(U256::ZERO.is_zero());
         assert_eq!(U256::ZERO.count_ones(), 0);
 
-        // bits spanning both limbs: 0 (lo), 127 (lo top), 128 (hi bottom), 255 (hi top)
+        // bits spanning both limbs: 0 (lo), 127 (lo top), 128 (hi bottom), 255
+        // (hi top)
         let bm = U256::ZERO
             .with_bit(0)
             .with_bit(127)
@@ -286,7 +288,8 @@ mod tests {
             .with_bit(128)
             .with_bit(254);
         let bytes = <U256 as Bitmap>::to_bytes(bm);
-        // bit 128 is the lowest bit of the high limb -> first byte of the second half.
+        // bit 128 is the lowest bit of the high limb -> first byte of the
+        // second half.
         assert_eq!(bytes[16], 0b0000_0001);
         assert_eq!(<U256 as Bitmap>::from_bytes(bytes), bm);
     }
@@ -294,7 +297,8 @@ mod tests {
     #[test]
     fn try_from_bytes_checks_length_u256() {
         let bm = U256::ZERO.with_bit(3).with_bit(128).with_bit(254);
-        // Exact length round-trips; every other length is rejected (U256 wants 32).
+        // Exact length round-trips; every other length is rejected (U256 wants
+        // 32).
         assert_eq!(
             <U256 as Bitmap>::try_from_bytes(bm.to_bytes().as_ref()),
             Some(bm)

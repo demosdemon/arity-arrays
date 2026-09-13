@@ -313,8 +313,9 @@ fn alloc_node<A: Arity, S: ChildStore<A>>(shape: Shape, depth: usize) -> Box<Tri
 fn build_node<A: Arity, S: ChildStore<A>>(shape: Shape, depth: usize) -> Box<Trie<A, S>> {
     let fanout = shape.fanout::<A>(depth);
     // INVARIANT: insert children one at a time into an empty map. This is what
-    // gives each Gapped/Packed node its minimal power-of-two capacity; switching
-    // to batch / From-based construction would change the clone-cost profile.
+    // gives each Gapped/Packed node its minimal power-of-two capacity;
+    // switching to batch / From-based construction would change the
+    // clone-cost profile.
     let mut node = alloc_node::<A, S>(shape, depth);
     for k in 0..fanout {
         let index = child_index::<A>(k, fanout);

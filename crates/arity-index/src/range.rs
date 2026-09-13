@@ -46,8 +46,8 @@ impl<N: Niche> Iterator for NicheRange<N> {
         if self.lo >= self.hi {
             return None;
         }
-        // SAFETY: `lo < hi <= COUNT-1 < COUNT`, so `lo < COUNT` and `try_from_usize` is
-        // `Some`.
+        // SAFETY: `lo < hi <= COUNT-1 < COUNT`, so `lo < COUNT` and
+        // `try_from_usize` is `Some`.
         let v = unsafe { N::try_from_usize(self.lo).unwrap_unchecked() };
         self.lo += 1;
         Some(v)

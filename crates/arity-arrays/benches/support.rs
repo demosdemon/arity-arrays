@@ -342,7 +342,8 @@ pub fn churn_ops<A: Arity>() -> Vec<(ChurnOp, usize)> {
     let mut want_remove = true;
     while ops.len() < len {
         let want = want_remove;
-        // Draw masked slots until one matches the required present/absent state.
+        // Draw masked slots until one matches the required present/absent
+        // state.
         let slot = loop {
             let candidate = usize::try_from(xorshift64(&mut state) & ((n as u64) - 1))
                 .expect("masked value is < n <= 256, fits usize");

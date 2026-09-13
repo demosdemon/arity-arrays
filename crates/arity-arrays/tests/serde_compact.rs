@@ -24,8 +24,8 @@ fn compact_round_trip() {
     let node = Node { children };
 
     let json = serde_json::to_string(&node).expect("ser");
-    // bitmap = bits 2 and 9 set = 0x0204, little-endian bytes [4, 2]; values [20,
-    // 90].
+    // bitmap = bits 2 and 9 set = 0x0204, little-endian bytes [4, 2]; values
+    // [20, 90].
     assert_eq!(json, r#"{"children":[[4,2],[20,90]]}"#);
     let back: Node = serde_json::from_str(&json).expect("de");
     assert_eq!(node, back);
@@ -57,7 +57,8 @@ fn compact_arity256_round_trip_stable_bytes() {
     let node = Node256 { children };
     let json = serde_json::to_string(&node).expect("ser");
     // 32-byte LE bitmap with bits 0,128,255 set, then values [1,2,3].
-    // Byte 0 bit0 -> 1; byte 16 bit0 (bit 128) -> 1; byte 31 bit7 (bit 255) -> 128.
+    // Byte 0 bit0 -> 1; byte 16 bit0 (bit 128) -> 1; byte 31 bit7 (bit 255) ->
+    // 128.
     assert!(json.contains("[1,2,3]"));
     let back: Node256 = serde_json::from_str(&json).expect("de");
     assert_eq!(node, back);
@@ -77,7 +78,8 @@ fn compact_gapped_round_trip() {
     children.insert(U4::new_masked(9), 90);
     let node = GappedNode { children };
     let json = serde_json::to_string(&node).expect("ser");
-    // Same wire form as PackedArray: bitmap bits 2,9 = 0x0204 -> LE [4,2]; values.
+    // Same wire form as PackedArray: bitmap bits 2,9 = 0x0204 -> LE [4,2];
+    // values.
     assert_eq!(json, r#"{"children":[[4,2],[20,90]]}"#);
     let back: GappedNode = serde_json::from_str(&json).expect("de");
     assert_eq!(node, back);

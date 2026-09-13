@@ -181,8 +181,8 @@ mod tests {
 
     #[test]
     fn errors_when_median_missing() {
-        // A benchmark-complete line with no `median` object is a hard error, not
-        // a silently dropped measurement.
+        // A benchmark-complete line with no `median` object is a hard error,
+        // not a silently dropped measurement.
         let no_median = r#"{"reason":"benchmark-complete","id":"throughput/cell_a/build/PackedArray","typical":{"estimate":1.0,"lower_bound":1.0,"upper_bound":1.0,"unit":"ns"}}"#;
         let err = parse_run(no_median).expect_err("a missing median is an error");
         assert!(

@@ -119,7 +119,8 @@ where
     // Root-level child is present in the clone.
     assert!(matches!(clone.children.child(i0), Some(Edge::Mutable(_))));
 
-    // Grandchild is present in the clone (exercises recursive clone at depth 2).
+    // Grandchild is present in the clone (exercises recursive clone at depth
+    // 2).
     let grandchild_present = match clone.children.child(i0) {
         Some(Edge::Mutable(c)) => matches!(c.children.child(i0), Some(Edge::Mutable(_))),
         _ => false,

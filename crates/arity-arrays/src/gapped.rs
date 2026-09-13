@@ -250,10 +250,11 @@ unsafe fn alloc_block<A: Arity, T>(
         (&raw mut (*inner.as_ptr()).live).write(live);
         (&raw mut (*inner.as_ptr()).cap_exp).write(cap_exp);
     }
-    // Forward guard (debug-only): all element access goes through `data_ptr`, so
-    // the block must cover `offset_of!(Inner, data) + cap * size_of::<T>()`.
-    // `alloc_layout` already bounded `cap * size_of::<T>()` by `isize::MAX` via
-    // `Layout::array`, so the product cannot overflow here.
+    // Forward guard (debug-only): all element access goes through `data_ptr`,
+    // so the block must cover `offset_of!(Inner, data) + cap *
+    // size_of::<T>()`. `alloc_layout` already bounded `cap *
+    // size_of::<T>()` by `isize::MAX` via `Layout::array`, so the product
+    // cannot overflow here.
     debug_assert!(
         core::mem::offset_of!(Inner<A, T>, data) + cap * core::mem::size_of::<T>() <= layout.size(),
         "data_ptr region must fit within the alloc_layout block",
@@ -436,7 +437,8 @@ impl<T, A: Arity> GappedArray<T, A> {
         }
         // SAFETY: `p` was a set live bit; `read` moves the element out without
         // dropping it (returned to the caller). The slot is now logically
-        // uninitialised and its live bit is clear, so it is never touched again.
+        // uninitialised and its live bit is clear, so it is never touched
+        // again.
         Some(unsafe { data_ptr(ptr).add(p).read() })
     }
 
@@ -525,16 +527,19 @@ impl<T, A: Arity> GappedArray<T, A> {
             let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < new_cap <= N");
             new_live = new_live.with_bit(p_idx);
         }
-        // SAFETY: `new_cap >= 1` in every caller. `rebuild_to` is reached only with
-        // an allocated block, and both callers pass `pow2_cap_for(k)` for some
-        // `k >= 1`: `reserve` reaches here only when its target exceeds the current
-        // capacity (`>= 1`), forcing `k = want >= 1`; `shrink_to_fit` reaches here
-        // only when `count >= 1`, so `k = count >= 1`. `pow2_cap_for` of a positive
-        // input is a power of two `>= 1`. (The earlier "callers only pass
-        // `new_cap > capacity`" premise was wrong: `shrink_to_fit` passes a *smaller*
-        // cap.) The `0..count` copy loops degenerate harmlessly when `count == 0`
-        // (an allocated-but-empty block, e.g. after `clear` then `reserve`); the copy
-        // initialises exactly the `new_live` slots before any read.
+        // SAFETY: `new_cap >= 1` in every caller. `rebuild_to` is reached only
+        // with an allocated block, and both callers pass
+        // `pow2_cap_for(k)` for some `k >= 1`: `reserve` reaches here
+        // only when its target exceeds the current capacity (`>= 1`),
+        // forcing `k = want >= 1`; `shrink_to_fit` reaches here
+        // only when `count >= 1`, so `k = count >= 1`. `pow2_cap_for` of a
+        // positive input is a power of two `>= 1`. (The earlier
+        // "callers only pass `new_cap > capacity`" premise was wrong:
+        // `shrink_to_fit` passes a *smaller* cap.) The `0..count` copy
+        // loops degenerate harmlessly when `count == 0`
+        // (an allocated-but-empty block, e.g. after `clear` then `reserve`);
+        // the copy initialises exactly the `new_live` slots before any
+        // read.
         let new_ptr = unsafe { alloc_block::<A, T>(occ, new_live, new_cap_exp, new_cap) };
         // SAFETY: `old_ptr` valid per the invariant; distinct from `new_ptr`.
         let src = unsafe { data_ptr(old_ptr) };
@@ -547,8 +552,8 @@ impl<T, A: Arity> GappedArray<T, A> {
             let op = old_i.as_usize();
             let np = new_i.as_usize();
             // SAFETY: `op` is a set old-live slot (initialised); `np` is a set
-            // new-live slot (`< new_cap`). Distinct allocations ⇒ non-overlapping
-            // bitwise move (no drop, no user code).
+            // new-live slot (`< new_cap`). Distinct allocations ⇒
+            // non-overlapping bitwise move (no drop, no user code).
             unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
         }
         self.0 = Some(new_ptr);
@@ -592,24 +597,26 @@ impl<T, A: Arity> GappedArray<T, A> {
             let p_idx = <A::Index as Niche>::try_from_usize(p).expect("p < new_cap <= N");
             new_live = new_live.with_bit(p_idx);
         }
-        // SAFETY: `new_cap > 0`; the copies + the write below initialise exactly
-        // the `new_live` slots before any read.
+        // SAFETY: `new_cap > 0`; the copies + the write below initialise
+        // exactly the `new_live` slots before any read.
         let new_ptr = unsafe { alloc_block::<A, T>(new_occ, new_live, new_cap_exp, new_cap) };
         // SAFETY: `old_ptr` valid per the invariant; distinct from `new_ptr`.
         let src = unsafe { data_ptr(old_ptr) };
         // SAFETY: `new_ptr` is the freshly allocated block above.
         let dst = unsafe { data_ptr(new_ptr) };
-        // Fill each new slot in rank order, reading destinations from `new_live`
-        // (its r-th set bit is the rank-r spread position) instead of recomputing
-        // `spread_pos`. The inserted rank takes the new value by move; every
-        // other rank takes the next old element in order.
+        // Fill each new slot in rank order, reading destinations from
+        // `new_live` (its r-th set bit is the rank-r spread position)
+        // instead of recomputing `spread_pos`. The inserted rank takes
+        // the new value by move; every other rank takes the next old
+        // element in order.
         let mut value = Some(value);
         let mut old_slots = old_live.bits();
         for (nr, new_i) in new_live.bits().enumerate() {
             let np = new_i.as_usize();
             if nr == new_rank {
-                // SAFETY: `np < new_cap` is the fresh slot for the inserted rank,
-                // visited exactly once (so `take` yields the value).
+                // SAFETY: `np < new_cap` is the fresh slot for the inserted
+                // rank, visited exactly once (so `take` yields
+                // the value).
                 unsafe {
                     dst.add(np)
                         .write(value.take().expect("inserted rank visited once"));
@@ -619,13 +626,15 @@ impl<T, A: Arity> GappedArray<T, A> {
                     .next()
                     .expect("an old element for each non-inserted rank")
                     .as_usize();
-                // SAFETY: `op` is a set old-live slot (initialised); `np < new_cap`
-                // is a fresh slot in a distinct allocation; bitwise move, no drop.
+                // SAFETY: `op` is a set old-live slot (initialised); `np <
+                // new_cap` is a fresh slot in a distinct
+                // allocation; bitwise move, no drop.
                 unsafe { core::ptr::copy_nonoverlapping(src.add(op), dst.add(np), 1) };
             }
         }
         self.0 = Some(new_ptr);
-        // SAFETY: all old elements moved out; old block from `alloc_layout(old_cap)`.
+        // SAFETY: all old elements moved out; old block from
+        // `alloc_layout(old_cap)`.
         unsafe {
             dealloc(
                 old_ptr.as_ptr().cast(),
@@ -654,8 +663,8 @@ impl<T, A: Arity> GappedArray<T, A> {
             let occ = A::Bitmap::ZERO.with_bit(index);
             let live =
                 A::Bitmap::ZERO.with_bit(<A::Index as Niche>::try_from_usize(0).expect("0 < N"));
-            // SAFETY: cap == 1 > 0; the write below initialises slot 0 (the sole
-            // live bit) before any read.
+            // SAFETY: cap == 1 > 0; the write below initialises slot 0 (the
+            // sole live bit) before any read.
             let inner = unsafe { alloc_block::<A, T>(occ, live, 0, 1) };
             // SAFETY: `inner` valid; slot 0 is the sole uninitialised element.
             unsafe { data_ptr(inner).write(value) };
@@ -695,18 +704,19 @@ impl<T, A: Arity> GappedArray<T, A> {
     fn place_absent(&mut self, index: A::Index, value: T) {
         let ptr = self.0.expect("place_absent requires an allocation");
         // Read the header snapshot once and thread it into the bounds/hole
-        // searches below, which would otherwise re-read it. The shared reference
-        // is dropped here, before the later mutations through `ptr`.
-        // SAFETY: `ptr` valid per the invariant.
+        // searches below, which would otherwise re-read it. The shared
+        // reference is dropped here, before the later mutations through
+        // `ptr`. SAFETY: `ptr` valid per the invariant.
         let (occ, live, cap) = unsafe {
             let inner = ptr.as_ref();
             (inner.occupancy, inner.live, 1usize << inner.cap_exp)
         };
         let count = occ.count_ones() as usize;
         let (p_lo, p_hi) = Self::neighbor_bounds(occ, live, cap, count, index);
-        // Hole strictly between the neighbors → place with no move. The probe is
-        // the least clear bit in `[p_lo + 1, p_hi)`; `p_lo >= -1` (sentinel) so
-        // `p_lo + 1 >= 0` and cast_unsigned is safe. O(log W), not O(p_hi - p_lo).
+        // Hole strictly between the neighbors → place with no move. The probe
+        // is the least clear bit in `[p_lo + 1, p_hi)`; `p_lo >= -1`
+        // (sentinel) so `p_lo + 1 >= 0` and cast_unsigned is safe.
+        // O(log W), not O(p_hi - p_lo).
         let lo = (p_lo + 1).cast_unsigned();
         if let Some(hole) = live.nearest_clear_in(lo, p_hi) {
             self.write_into_hole(index, hole.as_usize(), value);
@@ -730,7 +740,8 @@ impl<T, A: Arity> GappedArray<T, A> {
             self.shift_right_and_write(index, p_hi, hpos, value);
         } else {
             // Reachable only if both shifts are None, which cannot happen for
-            // `count < cap`; kept as a safe fallback (cap unchanged, count+1 ≤ cap).
+            // `count < cap`; kept as a safe fallback (cap unchanged, count+1 ≤
+            // cap).
             self.rebuild_with_insert(index, value, cap);
         }
     }
@@ -769,15 +780,17 @@ impl<T, A: Arity> GappedArray<T, A> {
     fn shift_left_and_write(&mut self, index: A::Index, hole: usize, p_hi: usize, value: T) {
         let ptr = self.0.expect("allocation present");
         let n = p_hi - hole - 1; // elements in (hole, p_hi) to shift down by one
-        // SAFETY: slots (hole, p_hi) are initialised live elements; copying them
-        // one slot toward `hole` is an overlap-safe bitwise move (no drop/user
-        // code runs). The vacated slot is `p_hi - 1`, where `value` is written
-        // via `ptr::write` (not `replace`): this is not a double-drop because the
-        // `ptr::copy` bitwise-moved the run down by one, so the former occupant of
+        // SAFETY: slots (hole, p_hi) are initialised live elements; copying
+        // them one slot toward `hole` is an overlap-safe bitwise move
+        // (no drop/user code runs). The vacated slot is `p_hi - 1`,
+        // where `value` is written via `ptr::write` (not `replace`):
+        // this is not a double-drop because the `ptr::copy`
+        // bitwise-moved the run down by one, so the former occupant of
         // `p_hi - 1` now lives at `p_hi - 2`; slot `p_hi - 1` holds a bitwise
         // duplicate that is overwritten (correct — it was moved, not cloned).
         // After the copy, exactly one new physical slot is live — the former
-        // hole — so the live bitmap gains `hole_idx` and is otherwise unchanged.
+        // hole — so the live bitmap gains `hole_idx` and is otherwise
+        // unchanged.
         unsafe {
             let base = data_ptr(ptr);
             core::ptr::copy(base.add(hole + 1), base.add(hole), n);
@@ -802,11 +815,12 @@ impl<T, A: Arity> GappedArray<T, A> {
     fn shift_right_and_write(&mut self, index: A::Index, p_hi: usize, hole: usize, value: T) {
         let ptr = self.0.expect("allocation present");
         let n = hole - p_hi; // elements in [p_hi, hole) to shift up by one
-        // SAFETY: slots [p_hi, hole) are initialised live elements; copying them
-        // up by one is an overlap-safe bitwise move (no drop/user code runs).
-        // The vacated slot is `p_hi`, where `value` is written. After the copy,
-        // exactly one new physical slot is live — the former hole — so the live
-        // bitmap gains `hole_idx` and is otherwise unchanged.
+        // SAFETY: slots [p_hi, hole) are initialised live elements; copying
+        // them up by one is an overlap-safe bitwise move (no drop/user
+        // code runs). The vacated slot is `p_hi`, where `value` is
+        // written. After the copy, exactly one new physical slot is
+        // live — the former hole — so the live bitmap gains `hole_idx`
+        // and is otherwise unchanged.
         unsafe {
             let base = data_ptr(ptr);
             core::ptr::copy(base.add(p_hi), base.add(p_hi + 1), n);
@@ -833,7 +847,8 @@ impl<T, A: Arity> GappedArray<T, A> {
         index: A::Index,
     ) -> (isize, usize) {
         let r = occ.rank(index) as usize; // target rank in [0, count]
-        // Physical slots are < cap <= N <= 256, so they fit in isize without wrap.
+        // Physical slots are < cap <= N <= 256, so they fit in isize without
+        // wrap.
         let p_lo: isize = if r == 0 {
             -1
         } else {
@@ -866,8 +881,8 @@ impl<T, A: Arity> GappedArray<T, A> {
         let live = unsafe { ptr.as_ref().live };
         let hp_idx = <A::Index as Niche>::try_from_usize(hp).expect("hp < cap <= N");
         debug_assert!(!live.test(hp_idx));
-        // SAFETY: `hp` is a hole (uninitialised slot < cap); `write` initialises
-        // it. Header fields are initialised and `Copy`.
+        // SAFETY: `hp` is a hole (uninitialised slot < cap); `write`
+        // initialises it. Header fields are initialised and `Copy`.
         unsafe {
             data_ptr(ptr).add(hp).write(value);
             (*ptr.as_ptr()).occupancy = occ.with_bit(index);
@@ -945,9 +960,9 @@ impl<T, A: Arity> GappedArray<T, A> {
             (*ptr.as_ptr()).occupancy = A::Bitmap::ZERO;
             (*ptr.as_ptr()).live = A::Bitmap::ZERO;
         }
-        // SAFETY: `live` are the initialised slots; `drop_live_elems` drops them
-        // all (re-arm drops the rest on a panicking destructor). The header is
-        // already cleared, so no double-drop is possible.
+        // SAFETY: `live` are the initialised slots; `drop_live_elems` drops
+        // them all (re-arm drops the rest on a panicking destructor).
+        // The header is already cleared, so no double-drop is possible.
         unsafe { drop_live_elems::<A, T>(dp, live) };
     }
 
@@ -1150,8 +1165,9 @@ impl<T, A: Arity> Drop for GappedArray<T, A> {
         // SAFETY: `ptr` valid; `data_ptr` is the element base.
         let dp = unsafe { data_ptr(ptr) };
         let _free = FreeOnDrop::<A, T> { ptr, cap };
-        // SAFETY: `live` marks the initialised slots; drop them all (re-arm drops
-        // the rest on panic), then `_free` deallocs as this scope unwinds/returns.
+        // SAFETY: `live` marks the initialised slots; drop them all (re-arm
+        // drops the rest on panic), then `_free` deallocs as this scope
+        // unwinds/returns.
         unsafe { drop_live_elems::<A, T>(dp, live) };
     }
 }
@@ -1209,9 +1225,10 @@ impl<T: Clone, A: Arity> Clone for GappedArray<T, A> {
         };
         for i in live.bits() {
             let p = i.as_usize();
-            // SAFETY: `p` is a set live slot in `src` (initialised); `dst.add(p)`
-            // is the matching uninitialised slot; `write` initialises it. On a
-            // `T::clone` panic the guard drops exactly `initialized`.
+            // SAFETY: `p` is a set live slot in `src` (initialised);
+            // `dst.add(p)` is the matching uninitialised slot;
+            // `write` initialises it. On a `T::clone` panic the
+            // guard drops exactly `initialized`.
             unsafe { dst.add(p).write((*src.add(p)).clone()) };
             guard.initialized = guard.initialized.with_bit(i);
         }
@@ -1335,7 +1352,8 @@ impl<T, A: Arity> From<GappedArray<T, A>> for PackedArray<T, A> {
 /// Clones a `&GappedArray` into an exactly-sized `PackedArray`.
 impl<T: Clone, A: Arity> From<&GappedArray<T, A>> for PackedArray<T, A> {
     fn from(src: &GappedArray<T, A>) -> Self {
-        // Clone once into FixedArray, then move into the exact-fit packed block.
+        // Clone once into FixedArray, then move into the exact-fit packed
+        // block.
         let fixed: FixedArray<Option<T>, A> = src.into();
         fixed.into()
     }
@@ -1385,7 +1403,8 @@ impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
             .as_usize();
         // SAFETY: `p` is a set live bit (physical slot < cap) with an
         // initialised element; the reference is bounded by `'a` (the
-        // originating `&'a GappedArray` borrow, carried via `PhantomData<&'a T>`).
+        // originating `&'a GappedArray` borrow, carried via `PhantomData<&'a
+        // T>`).
         Some((i, unsafe { &*self.data.add(p) }))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1396,9 +1415,10 @@ impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
     where
         F: FnMut(Acc, Self::Item) -> Acc,
     {
-        // Drive the logical-index walk with `BitIter::fold`, pulling the matching
-        // physical slot from the live cursor in lockstep — the two cursors hold
-        // the same remaining count, so `next` is always `Some`.
+        // Drive the logical-index walk with `BitIter::fold`, pulling the
+        // matching physical slot from the live cursor in lockstep — the
+        // two cursors hold the same remaining count, so `next` is
+        // always `Some`.
         let data = self.data;
         let mut live = self.live_bits;
         self.occ_bits.fold(init, move |acc, i| {
@@ -1407,7 +1427,8 @@ impl<'a, T, A: Arity> Iterator for PresentIter<'a, T, A> {
                 .expect("live and occupancy have equal count")
                 .as_usize();
             // SAFETY: `p` is a set live bit (physical slot < cap) with an
-            // initialised element; bounded by `'a` via the struct's `PhantomData`.
+            // initialised element; bounded by `'a` via the struct's
+            // `PhantomData`.
             let v = unsafe { &*data.add(p) };
             f(acc, (i, v))
         })
@@ -1473,10 +1494,11 @@ impl<'a, T, A: Arity> Iterator for PresentIterMut<'a, T, A> {
             .next()
             .expect("live and occupancy have equal count")
             .as_usize();
-        // SAFETY: `p` is a set live bit (physical slot < cap) with an initialised
-        // element. Each live bit is yielded once, so this `&mut` aliases no other
-        // yielded reference; it is bounded by `'a` (the originating `&'a mut
-        // GappedArray` borrow, carried via `PhantomData<&'a mut T>`).
+        // SAFETY: `p` is a set live bit (physical slot < cap) with an
+        // initialised element. Each live bit is yielded once, so this
+        // `&mut` aliases no other yielded reference; it is bounded by
+        // `'a` (the originating `&'a mut GappedArray` borrow, carried
+        // via `PhantomData<&'a mut T>`).
         Some((i, unsafe { &mut *self.data.add(p) }))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1804,7 +1826,8 @@ impl<T, A: Arity> IntoIterator for GappedArray<T, A> {
                 cap: 0,
             },
             |ptr| {
-                // SAFETY: `ptr` valid per the type invariant; header initialised.
+                // SAFETY: `ptr` valid per the type invariant; header
+                // initialised.
                 let occ = unsafe { ptr.as_ref().occupancy };
                 // SAFETY: as above.
                 let live = unsafe { ptr.as_ref().live };
@@ -1895,8 +1918,8 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::AtomicUsize;
         use std::sync::atomic::Ordering;
-        // The 2nd element to drop panics; all four must still be dropped and the
-        // block freed (Miri/ASAN would flag a leak otherwise).
+        // The 2nd element to drop panics; all four must still be dropped and
+        // the block freed (Miri/ASAN would flag a leak otherwise).
         struct Bomb {
             drops: Arc<AtomicUsize>,
             boom_at: usize,
@@ -1997,11 +2020,12 @@ mod tests {
 
     #[test]
     fn iter_present_mut_skips_physical_gaps() {
-        // Build a layout with real physical gaps: inserts fill contiguous slots,
-        // then removes punch holes that "never move" the survivors. The mutable
-        // present iterator must co-advance occupancy and live cursors so each
-        // `&mut T` lands on the surviving element's own physical slot, skipping
-        // the gap slots (whose memory is dead).
+        // Build a layout with real physical gaps: inserts fill contiguous
+        // slots, then removes punch holes that "never move" the
+        // survivors. The mutable present iterator must co-advance
+        // occupancy and live cursors so each `&mut T` lands on the
+        // surviving element's own physical slot, skipping the gap slots
+        // (whose memory is dead).
         let mut g = GappedArray::<u8, Arity16>::new();
         for s in 0u8..6 {
             g.insert(U4::new_masked(s), s * 10);
@@ -2100,7 +2124,8 @@ mod tests {
         }
         let g = GappedArray::from(src);
         // Forward-only must surface every present element (regression guard: an
-        // earlier design lost trailing present elements on forward-only traversal).
+        // earlier design lost trailing present elements on forward-only
+        // traversal).
         let fwd: std::vec::Vec<(u8, Option<u8>)> = (&g)
             .into_iter()
             .map(|(i, o)| (i.as_u8(), o.copied()))
@@ -2186,8 +2211,8 @@ mod tests {
         }
         let mut g = GappedArray::from(src);
         let cap_before = g.capacity();
-        // Capture the physical slot of slot 9 via its address; removing slot 5 must
-        // not move slot 9 (its &T address is unchanged).
+        // Capture the physical slot of slot 9 via its address; removing slot 5
+        // must not move slot 9 (its &T address is unchanged).
         let addr9 =
             core::ptr::from_ref::<u16>(g.get(U4::new_masked(9)).expect("slot 9 present")) as usize;
         assert_eq!(g.remove(U4::new_masked(5)), Some(50));
@@ -2243,11 +2268,12 @@ mod tests {
     #[test]
     fn insert_shifts_to_nearest_hole_without_full_respread() {
         use std::collections::BTreeMap;
-        // Build a small dense run with a single trailing hole, then insert in the
-        // middle: the element should shift toward the near hole, not respread.
-        // Slots 0,1,2 present at cap 4 (one hole at the spread gap). Insert slot 3
-        // (logical back) lands directly in a hole — no move. Then a middle insert
-        // shifts only the minimal run.
+        // Build a small dense run with a single trailing hole, then insert in
+        // the middle: the element should shift toward the near hole,
+        // not respread. Slots 0,1,2 present at cap 4 (one hole at the
+        // spread gap). Insert slot 3 (logical back) lands directly in a
+        // hole — no move. Then a middle insert shifts only the minimal
+        // run.
         let mut src = FixedArray::<Option<u16>, Arity16>::new();
         for s in [0u8, 1, 2] {
             src[U4::new_masked(s)] = Some(u16::from(s));

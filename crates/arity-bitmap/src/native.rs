@@ -329,8 +329,8 @@ mod tests {
 
     #[test]
     fn select_in_word_all_widths() {
-        // Exhaustive single-limb check: for every set bit, select(rank(i)) == i,
-        // and select past the popcount is None.
+        // Exhaustive single-limb check: for every set bit, select(rank(i)) ==
+        // i, and select past the popcount is None.
         let bm = u8::ZERO
             .with_bit(U3::new_masked(0))
             .with_bit(U3::new_masked(3))
@@ -419,7 +419,8 @@ mod tests {
     #[test]
     fn try_from_bytes_checks_length_native() {
         let bm = u16::ZERO.with_bit(u4(1)).with_bit(u4(9));
-        // Exact length round-trips; every other length is rejected (u16 wants 2).
+        // Exact length round-trips; every other length is rejected (u16 wants
+        // 2).
         assert_eq!(<u16 as Bitmap>::try_from_bytes(&bm.to_bytes()), Some(bm));
         assert_eq!(<u16 as Bitmap>::try_from_bytes(&[0u8; 1]), None);
         assert_eq!(<u16 as Bitmap>::try_from_bytes(&[0u8; 3]), None);

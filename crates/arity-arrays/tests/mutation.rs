@@ -96,7 +96,8 @@ fn mutation_drops_each_element_exactly_once() {
     drop(r);
     assert_eq!(drops.load(Ordering::SeqCst), 2);
 
-    // Drop the array: the remaining 3 elements (slots 1, 4, 14) drop exactly once.
+    // Drop the array: the remaining 3 elements (slots 1, 4, 14) drop exactly
+    // once.
     drop(p);
     assert_eq!(drops.load(Ordering::SeqCst), 5);
 }
