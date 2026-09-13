@@ -8,7 +8,7 @@ Fixed, pointer-sized heap-packed, and gapped arrays over a generic arity, indexe
 
 ```rust
 use arity_arrays::{Arity16, FixedArray, PackedArray};
-use arity_arrays::index::{Niche, U4};
+use arity_arrays::index::U4;
 
 let mut full = FixedArray::<Option<u32>, Arity16>::new();
 full[U4::new_masked(1)] = Some(10);
@@ -89,7 +89,7 @@ The arity features are **additive**. The test suite runs only under the default
 The serde wire formats (the logical `(index, value)` form and the `Compact`
 form) are locked by snapshot tests so any drift is a reviewable diff, but they
 are **not yet guaranteed stable**: they may change before `1.0` if a production
-consumer's encoding needs differ. The `Compact` form is a canonical
+consumer needs a different encoding. The `Compact` form is a canonical
 little-endian encoding, independent of the in-memory representation.
 
 [`Compact`]: https://docs.rs/arity-arrays/latest/arity_arrays/struct.Compact.html

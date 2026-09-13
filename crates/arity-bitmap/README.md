@@ -2,7 +2,7 @@
 
 Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by [`arity-index`] niche integers, with a double-ended iterator over the set bits.
 
-The [`Bitmap`] trait is implemented for `u8`, `u16`, `u32`, `u64`, `u128` (indexed by `U3`–`U7`) and the 256-bit `U256` type (indexed by `u8`). The crate performs no `unsafe` operations: every bit position is reconstructed through the statically-bounded niche index.
+The [`Bitmap`] trait is implemented for `u8`, `u16`, `u32`, `u64`, `u128` (indexed by `U3`–`U7`), and the 256-bit `U256` type (indexed by `u8`). The crate performs no `unsafe` operations: every bit position is reconstructed through the statically-bounded niche index.
 
 ## Usage
 
@@ -25,8 +25,9 @@ assert_eq!(set, vec![1, 4, 9]);
 
 ### Safety-critical query methods
 
-Two methods locate a **clear** bit in `O(1)` per limb (a *limb* is one 64-bit
-word of the bitmap's backing integer):
+Two methods locate a **clear** bit in `O(1)` per limb (a *limb* is one word of
+the bitmap's backing integer: the whole integer for `u8`–`u128`, one of the two
+128-bit halves for `U256`):
 
 - `Bitmap::nearest_clear_at_or_below(self, from: usize)` returns the greatest
   clear index at or below `from`, searching toward index `0`; `None` if every
@@ -36,12 +37,12 @@ word of the bitmap's backing integer):
   `limit`; `None` if that range is fully set.
 
 `arity-arrays` (a downstream crate in this workspace that consumes `Bitmap`
-for unchecked array indexing) uses their result for unchecked pointer
-arithmetic, so their contract — a returned position always names a clear bit
-`< WIDTH` — is
-safety-load-bearing for that crate. This crate performs no unsafe operations
-of its own; its only `unsafe` is the private `unsafe impl Raw` contract marker
-(`#![deny(unsafe_code)]`).
+for unchecked array indexing) uses each method's result for unchecked pointer
+arithmetic, so the contract — a returned position always names a clear bit
+`< WIDTH` — is safety-load-bearing for that crate. This crate performs no
+unsafe operations of its own; its only `unsafe` is a private `Raw` trait
+declaration and its per-type `unsafe impl` markers, each an explicit override
+of the crate's `#![deny(unsafe_code)]`.
 
 ## Cargo features
 
@@ -51,7 +52,8 @@ of its own; its only `unsafe` is the private `unsafe impl Raw` contract marker
 | `std` | | Forwards `std`; the crate is `no_std`-first. |
 
 The arity features are **additive**. The test suite runs only under the default
-(all-arity) feature set — run `cargo test`, not a per-arity `cargo test`.
+(all-arity) feature set — run `cargo test`, not a single-arity invocation such as
+`cargo test --no-default-features --features 16`.
 
 ### The 256-bit backing
 
@@ -65,8 +67,9 @@ guarantee. `ethnum` is a public dependency, pulled in by the `256` feature.
 This crate is `#![no_std]`. With default features it also depends on `ethnum`
 for the 256-bit backing (pulled in by the `256` feature); with only the
 `≤128` arities enabled (`default-features = false`, opting back into `8`
-through `128` as needed), its only dependencies are [`arity-index`] and
-`core`.
+through `128` as needed), its only runtime dependencies are [`arity-index`]
+and `core`. Each of the `8`–`128` features also enables `arity-index`'s
+`seq-macro` proc-macro, a compile-time-only dependency.
 
 ## MSRV
 

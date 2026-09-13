@@ -3,9 +3,11 @@
 Fixed-arity array storage indexed by bounds-check-free niche integers, with a
 compact heap-packed sparse representation. Three small, `no_std` crates.
 
-This workspace generalizes the hexary (16-ary) trie child-storage layout from
-[`ava-labs/firewood#2100`](https://github.com/ava-labs/firewood/pull/2100) from a
-single 16-wide layout to arbitrary power-of-two arities `N ∈ {8, 16, 32, 64, 128, 256}`.
+This workspace generalizes the hexary (16-ary) trie child-storage layout
+introduced in [`ava-labs/firewood#2100`](https://github.com/ava-labs/firewood/pull/2100),
+extending its single 16-wide layout to arbitrary power-of-two arities `N ∈ {8, 16, 32, 64, 128, 256}`.
+Firewood's `main` branch now depends on `arity-arrays` directly (at `Arity16`)
+in place of that in-tree implementation.
 
 ## Three representations
 
@@ -19,8 +21,8 @@ Three layouts are provided:
   proportional to occupancy.
 - **Gapped** (`GappedArray<T, A>`) — heap-backed with spare capacity kept at a
   geometric (power-of-two) size and gaps between elements so deletes are always
-  move-free and inserts minimize moves. The write-throughput corner: trades
-  memory for lower mutation cost.
+  move-free and inserts minimize moves. It is the write-throughput corner: it
+  trades memory for lower mutation cost.
 
 The packed form is the memory-amplification mitigation from firewood#2100: a
 16-slot `FixedArray<Option<[u8; 32]>>` occupies a constant **528 bytes**
@@ -114,8 +116,7 @@ trie shapes are Chain (deep), Bushy (broad), and Realistic (tapered).
 > [!NOTE]
 > `get_hit`/`get_miss` probe a fixed slot every iteration, so their numbers
 > reflect a fully branch-predicted, L1-resident load — best case. The
-> `get_hit_rand`/`get_miss_rand` variants (in the bench harness; they populate
-> the tables at the next capture refresh) probe a pseudo-random slot each
+> `get_hit_rand`/`get_miss_rand` variants probe a pseudo-random slot each
 > iteration; the accessed working set is small enough to stay L1-resident
 > regardless of access order, so their higher latency isolates the realistic
 > branch-unfavorable cost — a mispredicted branch and a serialized dependent
@@ -215,8 +216,8 @@ trie shapes are Chain (deep), Bushy (broad), and Realistic (tapered).
 never move elements, and an insert fills a nearby gap — at the cost of reads and
 memory. Against `PackedArray`: `remove` is ~4× faster and `insert_new` ~2.4×
 faster at Arity16 (`remove` ~2× faster, `insert_new` about even at Arity256).
-But `get_hit` is ~18× slower (it scans past gaps), and on the aggregate
-build/churn workloads it runs ~15-50% slower. Reach for it when deletes
+But `get_hit` is ~6× slower at Arity16 and ~7× slower at Arity256 (it scans
+past gaps), and on the aggregate build/churn workloads it runs ~15-70% slower. Reach for it when deletes
 dominate; `PackedArray` is the better default.
 
 > [!NOTE]
@@ -301,7 +302,7 @@ crate's README for the full table.
 ## Versioning and MSRV
 
 These crates are not at a uniform version: `arity-arrays` and `arity-bitmap` are
-**`0.2.0-alpha.2`**, `arity-index` is **`0.1.3`** — production-*worthy*, but
+**`0.2.0`**, `arity-index` is **`0.1.3`** — production-*worthy*, but
 reserving the right to refine the API with real downstream use before a `1.0`
 commitment. Under Cargo semver, each crate's `0.y.z` version means a breaking
 change to that crate bumps its minor (`y`) version.
