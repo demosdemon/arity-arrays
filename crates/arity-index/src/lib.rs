@@ -56,3 +56,17 @@ trait Sealed {}
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
+
+#[doc(hidden)]
+#[cfg(feature = "serde")]
+pub mod __private {
+    //! Private module for serde imports.
+    //!
+    //! This also resolves the unused dependency warning for serde when non of
+    //! the arities are included or when only the `256` arity is enabled.
+    pub use serde::Deserialize;
+    pub use serde::Deserializer;
+    pub use serde::Serialize;
+    pub use serde::Serializer;
+    pub use serde::de;
+}

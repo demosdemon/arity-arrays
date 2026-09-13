@@ -20,101 +20,101 @@ arbitrary = { version = "1", features = ["derive"] }
 # format and can invalidate accumulated corpus (corpus is not committed).
 postcard = { version = "1.1.3", features = ["use-std"] }
 serde_with = "3.21.0"
-arity-arrays= { version = "0.2.0-alpha.1", path = "../crates/arity-arrays", features = ["serde_with"] }
+arity-arrays = { version = "0.2.0-alpha.1", path = "../crates/arity-arrays", features = [ "serde_with" ] }
 
 [[bin]]
-name = "mutation_16"
+name = "mutation-16"
 path = "fuzz_targets/mutation_16.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "mutation_8"
+name = "mutation-8"
 path = "fuzz_targets/mutation_8.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "mutation_32"
+name = "mutation-32"
 path = "fuzz_targets/mutation_32.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "mutation_64"
+name = "mutation-64"
 path = "fuzz_targets/mutation_64.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "mutation_128"
+name = "mutation-128"
 path = "fuzz_targets/mutation_128.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "mutation_256"
+name = "mutation-256"
 path = "fuzz_targets/mutation_256.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "gapped_16"
+name = "gapped-16"
 path = "fuzz_targets/gapped_16.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "gapped_8"
+name = "gapped-8"
 path = "fuzz_targets/gapped_8.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "gapped_32"
+name = "gapped-32"
 path = "fuzz_targets/gapped_32.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "gapped_64"
+name = "gapped-64"
 path = "fuzz_targets/gapped_64.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "gapped_128"
+name = "gapped-128"
 path = "fuzz_targets/gapped_128.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "gapped_256"
+name = "gapped-256"
 path = "fuzz_targets/gapped_256.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "compact_decode"
+name = "compact-decode"
 path = "fuzz_targets/compact_decode.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "bitmap_roundtrip"
+name = "bitmap-roundtrip"
 path = "fuzz_targets/bitmap_roundtrip.rs"
 test = false
 doc = false

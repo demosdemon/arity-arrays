@@ -398,19 +398,19 @@ macro_rules! niche_int {
         }
 
         #[cfg(feature = "serde")]
-        impl ::serde::Serialize for $name {
-            fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
+        impl $crate::__private::Serialize for $name {
+            fn serialize<S: $crate::__private::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
                 serializer.serialize_u8(self.as_u8())
             }
         }
 
         #[cfg(feature = "serde")]
-        impl<'de> ::serde::Deserialize<'de> for $name {
-            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::core::result::Result<Self, D::Error> {
-                let v = <u8 as ::serde::Deserialize>::deserialize(deserializer)?;
+        impl<'de> $crate::__private::Deserialize<'de> for $name {
+            fn deserialize<D: $crate::__private::Deserializer<'de>>(deserializer: D) -> ::core::result::Result<Self, D::Error> {
+                let v = <u8 as $crate::__private::Deserialize>::deserialize(deserializer)?;
                 Self::try_new(v).ok_or_else(|| {
-                    ::serde::de::Error::invalid_value(
-                        ::serde::de::Unexpected::Unsigned(::core::primitive::u64::from(v)),
+                    $crate::__private::de::Error::invalid_value(
+                        $crate::__private::de::Unexpected::Unsigned(::core::primitive::u64::from(v)),
                         &concat!("an integer in 0..", stringify!($count)),
                     )
                 })

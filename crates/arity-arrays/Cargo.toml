@@ -8,7 +8,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Fixed and pointer-sized heap-packed arrays over a generic arity, indexed without bounds checks"
-readme = "README.md"
 autobenches = false
 keywords = ["array", "sparse", "packed", "trie", "no-std"]
 categories = ["no-std", "data-structures", "memory-management"]

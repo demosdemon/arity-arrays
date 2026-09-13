@@ -158,6 +158,10 @@ mod tests {
 
     #[test]
     #[expect(
+        clippy::allow_attributes,
+        reason = "clippy::float_cmp no longer triggers on rust 1.100"
+    )]
+    #[allow(
         clippy::float_cmp,
         reason = "values parsed from JSON then multiplied by 1.0 round-trip exactly"
     )]
@@ -193,6 +197,10 @@ mod tests {
 
     #[test]
     #[expect(
+        clippy::allow_attributes,
+        reason = "clippy::float_cmp no longer triggers on rust 1.100"
+    )]
+    #[allow(
         clippy::float_cmp,
         reason = "small integers averaged/enveloped are exact in f64"
     )]

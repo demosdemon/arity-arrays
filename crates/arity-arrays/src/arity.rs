@@ -74,7 +74,7 @@ pub trait Arity: crate::Sealed {
 macro_rules! arity {
     ($name:ident, $len:literal, $index:ty, $bitmap:ty, $size:ty) => {
         #[doc = concat!("Arity ", stringify!($len), ".")]
-        pub enum $name {}
+        pub struct $name(::core::convert::Infallible);
 
         impl crate::Sealed for $name {}
 

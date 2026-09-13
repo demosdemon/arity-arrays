@@ -8,12 +8,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Bounds-check-free niche integer index types (U3-U7) with double-ended range iterators"
-readme = "README.md"
 keywords = ["niche", "integer", "index", "no-std", "bitfield"]
 categories = ["no-std", "data-structures", "rust-patterns"]
 
 [dependencies]
-seq-macro = "0.3.6"
+seq-macro = { version = "0.3.6", optional = true }
 serde = { version = "1", optional = true, default-features = false }
 
 [lints]
@@ -21,11 +20,11 @@ workspace = true
 
 [features]
 default = ["8", "16", "32", "64", "128", "256"]
-"8" = []
-"16" = []
-"32" = []
-"64" = []
-"128" = []
+"8" = ["dep:seq-macro"]
+"16" = ["dep:seq-macro"]
+"32" = ["dep:seq-macro"]
+"64" = ["dep:seq-macro"]
+"128" = ["dep:seq-macro"]
 "256" = []
 serde = ["dep:serde"]
 std = ["serde?/std"]

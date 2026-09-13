@@ -33,7 +33,7 @@ const fn cell_slug(cell: Cell) -> &'static str {
 fn bar_span(_oi: usize, si: usize, n_sub: usize) -> (f64, f64) {
     let n = n_sub.max(1) as f64;
     let slot = 0.8 / n; // 0.1 padding on each side of the slot
-    let x0 = 0.1 + slot * si as f64;
+    let x0 = slot.mul_add(si as f64, 0.1);
     (x0, x0 + slot)
 }
 
