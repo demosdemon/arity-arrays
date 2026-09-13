@@ -126,20 +126,20 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - mutation_8
-          - mutation_16
-          - mutation_32
-          - mutation_64
-          - mutation_128
-          - mutation_256
-          - gapped_8
-          - gapped_16
-          - gapped_32
-          - gapped_64
-          - gapped_128
-          - gapped_256
-          - compact_decode
-          - bitmap_roundtrip
+          - mutation-8
+          - mutation-16
+          - mutation-32
+          - mutation-64
+          - mutation-128
+          - mutation-256
+          - gapped-8
+          - gapped-16
+          - gapped-32
+          - gapped-64
+          - gapped-128
+          - gapped-256
+          - compact-decode
+          - bitmap-roundtrip
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
