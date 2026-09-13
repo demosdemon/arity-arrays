@@ -16,7 +16,7 @@
 //! ```
 //! # extern crate alloc;
 //! use arity_bitmap::Bitmap;
-//! use arity_index::{Niche, U4};
+//! use arity_index::U4;
 //!
 //! let bm = u16::ZERO
 //!     .with_bit(U4::new_masked(1))
@@ -50,8 +50,9 @@ pub use u256::U256;
 /// Seals [`Bitmap`](crate::Bitmap) against downstream implementations.
 trait Sealed {}
 
-/// Crate-internal bit-scanning mechanics used by
-/// [`BitIter`](crate::BitIter).
+/// Crate-internal bit-scanning mechanics used by [`BitIter`](crate::BitIter)
+/// and by `Bitmap`'s own default methods (`select`,
+/// `nearest_clear_at_or_below`, `nearest_clear_in`).
 ///
 /// Declared as a crate-private item (not exported, not `pub`) so it is
 /// unnameable/uncallable outside the crate. It is a *supertrait* of
@@ -278,7 +279,7 @@ pub trait Bitmap: Copy + Eq + Raw {
     /// The fallible counterpart to [`from_bytes`](Bitmap::from_bytes) for a
     /// runtime-length buffer (e.g. a decoded wire form): it validates the
     /// length and copies into [`Bytes`](Bitmap::Bytes), so callers do not
-    /// open-code the check-and-copy dance around the statically-sized
+    /// open-code the length check and copy around the statically-sized
     /// `from_bytes`.
     #[must_use]
     fn try_from_bytes(buf: &[u8]) -> Option<Self> {

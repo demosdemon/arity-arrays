@@ -59,7 +59,10 @@ fn compact_arity256_round_trip_stable_bytes() {
     // 32-byte LE bitmap with bits 0,128,255 set, then values [1,2,3].
     // Byte 0 bit0 -> 1; byte 16 bit0 (bit 128) -> 1; byte 31 bit7 (bit 255) ->
     // 128.
-    assert!(json.contains("[1,2,3]"));
+    assert_eq!(
+        json,
+        r#"{"children":[[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,128],[1,2,3]]}"#
+    );
     let back: Node256 = serde_json::from_str(&json).expect("de");
     assert_eq!(node, back);
 }

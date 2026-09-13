@@ -2,7 +2,7 @@
 
 Bounds-check-free niche integer index types (`U3`–`U7`) with double-ended range iterators.
 
-Each `U{n}` is a newtype over a fieldless enum with `2ⁿ` variants, so `Option<U{n}>` is one byte (niche optimization) and indexing a `2ⁿ`-length array can elide the bounds check. The [`Niche`] trait unifies the index types (including the native `u8` for arity 256); iteration over a type's whole domain is via `NicheRange` / `NicheRangeInclusive`.
+Each `U{n}` is a newtype over a fieldless enum with `2ⁿ` variants, so `Option<U{n}>` is one byte (niche optimization) and indexing a `2ⁿ`-length array can elide the bounds check. The [`Niche`] trait unifies the index types (including the native `u8` for arity 256); `NicheRange` / `NicheRangeInclusive` iterate sub-ranges, and `Niche::all` (a full `NicheRangeInclusive`) iterates a type's whole domain.
 
 Each `U{n}` is also `#[repr(transparent)]` over that enum, so it has the size and alignment of `u8` and a `&[u8]` can be reinterpreted as a `&[U{n}]` in place.
 

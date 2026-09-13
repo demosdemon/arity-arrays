@@ -15,8 +15,10 @@ use criterion::Criterion;
 /// more than `sample_size`/`measurement_time` do: `sample_size(10)` is
 /// already criterion's enforced floor, but the default `nresamples` of
 /// `100_000` still ran a multi-second bootstrap after every point, which is
-/// what actually timed out CI. `1_000` is criterion's own documented minimum
-/// before it warns.
+/// what actually timed out CI. `1_000` sits exactly at criterion's warning
+/// threshold: the `nresamples` setter warns for any `n <= 1000`, so each
+/// `quick_criterion()` call under `BENCH_QUICK` prints "It is not recommended
+/// to reduce nresamples below 1000" once — an accepted trade-off for CI speed.
 ///
 /// This must feed `criterion_group!`'s `config = ...` (the long form), not
 /// just a `Criterion` built in `main`: the short form `criterion_group!(

@@ -1,5 +1,6 @@
 //! Property tests: each `Bitmap` backing must agree with a `BTreeSet<usize>`
-//! reference model for membership, rank, popcount, and ordered iteration.
+//! reference model for membership, rank, select, popcount, ordered iteration,
+//! and nearest-clear queries.
 
 use std::collections::BTreeSet;
 

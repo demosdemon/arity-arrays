@@ -67,9 +67,10 @@ pub fn masked_index<A: Arity>(i: usize) -> A::Index {
 /// (`PackedArray`, `GappedArray`, `FixedArray`) via [`masked_index`], `BoxArr`
 /// inline — while map-backed implementations use the raw value directly. A new
 /// representation implements this trait and adds its concrete types to each
-/// `single_op_benches!` and `workload_benches!` invocation (two cells × two
-/// macro families = four call sites); to also appear in the conversion table
-/// (`mod convert` in `throughput.rs`) or the memory-report table
+/// `single_op_benches!`, `single_op_rand_benches!`, and `workload_benches!`
+/// invocation (two cells × three macro families = six call sites); to also
+/// appear in the conversion table (`fn convert` in `throughput.rs`) or the
+/// memory-report table
 /// (`memory_table` in `tests/memory_report.rs`), it must be wired into those
 /// call sites too.
 pub trait BenchContainer<T: Payload> {

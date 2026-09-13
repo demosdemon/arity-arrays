@@ -8,7 +8,7 @@ The [`Bitmap`] trait is implemented for `u8`, `u16`, `u32`, `u64`, `u128` (index
 
 ```rust
 use arity_bitmap::Bitmap;
-use arity_index::{Niche, U4};
+use arity_index::U4;
 
 let bm = u16::ZERO
     .with_bit(U4::new_masked(1))

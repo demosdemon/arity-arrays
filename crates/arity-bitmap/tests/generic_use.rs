@@ -1,6 +1,6 @@
 //! Regression guard: `Bitmap::bits()` (and the other methods) must be callable
 //! from generic code through only the public `Bitmap` bound — this is how
-//! `arity-arrays` uses it (`PackedArray<A: Arity>` over `A::Bitmap`). An
+//! `arity-arrays` uses it (`PackedArray<T, A: Arity>` over `A::Bitmap`). An
 //! earlier sealed-trait design compiled for concrete receivers but failed in a
 //! generic context; this test locks in the fix.
 

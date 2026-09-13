@@ -55,20 +55,16 @@ impl<T, A: Arity> FixedArray<T, A> {
     #[must_use]
     pub fn get(&self, index: A::Index) -> &T {
         // SAFETY: `A::Index::as_usize()` is always `< Index::COUNT == A::LEN`,
-        // which equals the array length, so `index` is in bounds. On this
-        // machine's toolchain (rustc 1.98.0-nightly (f46ec5218 2026-06-30),
-        // aarch64-apple-darwin) `cargo asm` on a release build shows the safe
-        // form `&self.0.as_slice()[index.as_usize()]` compiles identically to
-        // `get_unchecked` — a bare `add`/`ret`, no bounds-check branch, no
-        // `panic_bounds_check` call — because the optimizer here propagates
-        // the niche index's value-range metadata through `as_usize()` to the
-        // index site. That elision is an optimizer behavior, not a language
-        // guarantee: whether LLVM proves the bound depends on the rustc/LLVM
-        // version, opt-level, and target, and this machine's toolchain is not
-        // representative of every MSRV-1.92-compatible configuration this
-        // crate supports. `get_unchecked` is retained so the branch-free
-        // access holds unconditionally instead of depending on the optimizer
-        // reproducing this elision everywhere.
+        // which equals the array length, so `index` is in bounds. The safe
+        // form `&self.0.as_slice()[index.as_usize()]` can compile to the same
+        // branch-free access when the optimizer carries the index enum's
+        // value range through `as_usize()` to the index site, but that
+        // elision is an optimizer behavior, not a language guarantee: whether
+        // LLVM proves the bound depends on the rustc/LLVM version, opt-level,
+        // and target across the MSRV-1.92-compatible configurations this crate
+        // supports. `get_unchecked` is retained so the branch-free access
+        // holds unconditionally instead of depending on the optimizer
+        // reproducing that elision everywhere.
         unsafe { self.0.as_slice().get_unchecked(index.as_usize()) }
     }
 
@@ -82,12 +78,10 @@ impl<T, A: Arity> FixedArray<T, A> {
     #[must_use]
     pub fn get_mut(&mut self, index: A::Index) -> &mut T {
         // SAFETY: as in `get` — `index.as_usize() < A::LEN == array length`.
-        // By the same reasoning as `get` (above): the safe form compiles
-        // identically for the same reason `get`'s does (`get_mut` was not
-        // probed separately), and that elision is an optimizer behavior, not a
-        // guarantee across the MSRV/opt-levels/targets this crate supports,
-        // so `get_unchecked_mut` is retained to guarantee the branch-free
-        // access unconditionally, as in `get`.
+        // `get_unchecked_mut` is retained for the same reason `get` keeps
+        // `get_unchecked`: the safe form's bounds-check elision is an
+        // optimizer behavior, not a guarantee across the MSRV/opt-levels/
+        // targets this crate supports.
         unsafe { self.0.as_mut_slice().get_unchecked_mut(index.as_usize()) }
     }
 
@@ -247,8 +241,10 @@ impl<T, A: Arity> IntoIterator for FixedArray<T, A> {
 
 impl<'a, T, A: Arity> IntoIterator for &'a FixedArray<T, A> {
     type Item = (A::Index, &'a T);
-    // Route through the slice so the iterator is the std `slice::Iter` (not
-    // `Array::iter`'s inherent `hybrid_array::Iter`), matching the named type.
+    // Route through the slice so the iterator is the `core::slice::Iter` the
+    // named type spells out. `Array::iter` returns the same type today, but
+    // going through `as_slice()` keeps this impl off `hybrid-array`'s inherent
+    // API, matching the other borrowing paths in this file.
     type IntoIter =
         core::iter::Zip<arity_index::NicheRangeInclusive<A::Index>, core::slice::Iter<'a, T>>;
     fn into_iter(self) -> Self::IntoIter {

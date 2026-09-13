@@ -99,18 +99,22 @@ unsafe fn data_ptr<A: Arity, T>(inner: NonNull<Inner<A, T>>) -> *mut T {
 /// Allocates a heap block for `count` elements and writes the header `bitmap`,
 /// leaving the `count` element slots uninitialised. Returns the base `Inner`.
 ///
-/// This is the single definition of the layout/header protocol shared by the
-/// three constructors (`From<FixedArray>`, `From<&FixedArray>`, `Clone`).
+/// This is the single definition of the layout/header protocol shared by every
+/// block-allocating operation: the three constructors (`From<FixedArray>`,
+/// `From<&FixedArray>`, `Clone`), plus `insert`'s grow path and `remove`'s
+/// shrink path.
 ///
 /// # Safety
-/// `count` must be `> 0` (so the layout is non-zero-sized) and equal to
-/// `bitmap.count_ones()`. The caller must initialise all `count` element slots
-/// before any read, and owns the allocation thereafter (dropping the elements
-/// and deallocating with `alloc_layout::<Inner<A, T>, T>(count)`).
+/// `count` must be `> 0` (an allocated `PackedArray` is never empty; see the
+/// type-level `bitmap != ZERO` invariant) and equal to `bitmap.count_ones()`.
+/// The caller must initialise all `count` element slots before any read, and
+/// owns the allocation thereafter (dropping the elements and deallocating with
+/// `alloc_layout::<Inner<A, T>, T>(count)`).
 unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<Inner<A, T>> {
     let layout = alloc_layout::<Inner<A, T>, T>(count);
-    // SAFETY: `count > 0` so `layout.size() > 0`; `alloc` returns null on
-    // failure, handled below.
+    // SAFETY: `layout.size() > 0` unconditionally (the `Inner<A, T>` header
+    // alone is non-zero-sized); `alloc` returns null on failure, handled
+    // below.
     let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
         handle_alloc_error(layout)
     };
@@ -135,12 +139,14 @@ unsafe fn alloc_block<A: Arity, T>(bitmap: A::Bitmap, count: usize) -> NonNull<I
 /// unwind it drops the `initialized` leading elements and frees the block;
 /// callers `core::mem::forget` it once the fill completes.
 ///
-/// Only the `Clone` and owned `From<FixedArray<Option<T>, A>>` paths need this
-/// guard: they run user code (`T::clone`) or move owned values mid-fill, which
-/// can panic and leave a partially-initialised block. The in-place mutators
-/// (`insert`/`remove`) need no such guard — their element relocation is
-/// `ptr::copy` of bits, which runs no user code and so cannot panic mid-way,
-/// and their only fallible step (allocation) happens before any moves occur.
+/// Only the `Clone` impl and `From<&FixedArray<Option<T>, A>>` need this
+/// guard: both run user code (`T::clone`) mid-fill, which can panic and leave
+/// a partially-initialised block. The owned `From<FixedArray<Option<T>, A>>`
+/// only moves values out of `Some` and drops `None`s — neither runs user code
+/// — so it fills unguarded. The in-place mutators (`insert`/`remove`) need no
+/// such guard either — their element relocation is `ptr::copy` of bits, which
+/// runs no user code and so cannot panic mid-way, and their only fallible step
+/// (allocation) happens before any moves occur.
 struct FillGuard<A: Arity, T> {
     inner: NonNull<Inner<A, T>>,
     initialized: usize,
@@ -453,8 +459,8 @@ impl<T, A: Arity> PackedArray<T, A> {
     ///
     /// This is the branch-collapse step of a trie: a node that has been reduced
     /// to a single child is replaced by that child. The occupancy test reads
-    /// the header bitmap alone, so the common "more than one child" case
-    /// costs a popcount and never touches the heap block.
+    /// only the block's header bitmap, so the common "more than one child"
+    /// case costs a popcount and never touches the element storage.
     ///
     /// Mirrors [`FixedArray::take_only_child`](crate::FixedArray::take_only_child).
     pub fn take_only_child(&mut self) -> Option<(A::Index, T)> {
@@ -964,8 +970,12 @@ impl<'a, T, A: Arity> Iterator for PresentIterMut<'a, T, A> {
     where
         F: FnMut(Acc, Self::Item) -> Acc,
     {
-        // Forward to the inner `Zip`, whose `fold` drives the set-bit indices
-        // (`BitIter::fold`) against the contiguous `slice::IterMut` values.
+        // Forward to the inner `Zip`. This does not reach `BitIter::fold`:
+        // `Zip::fold` only specialises on std-internal traits
+        // (`TrustedRandomAccessNoCoerce`, `TrustedLen`) that `BitIter` cannot
+        // implement, so it is a `while let Some(x) = next()` loop over both
+        // sides — the same drive as the default `Iterator::fold`, which
+        // `PresentIter` measured as adequate for dense contiguous storage.
         self.inner.fold(init, f)
     }
 }
@@ -1083,7 +1093,8 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut PackedArray<T, A> {
 /// and frees the block.
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IntoIter<T, A: Arity> {
-    /// `Some` while a block is owned; `None` for a drained-empty source. The
+    /// `Some` while a block is owned; `None` only when the source `PackedArray`
+    /// was already empty (no allocation) at construction. The
     /// block is freed by this iterator's `Drop`, never by `PackedArray::drop`
     /// (the source was consumed via `ManuallyDrop`).
     ptr: Option<NonNull<Inner<A, T>>>,

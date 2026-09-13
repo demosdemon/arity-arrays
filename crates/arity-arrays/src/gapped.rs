@@ -238,7 +238,8 @@ unsafe fn alloc_block<A: Arity, T>(
     cap: usize,
 ) -> NonNull<Inner<A, T>> {
     let layout = alloc_layout::<Inner<A, T>, T>(cap);
-    // SAFETY: `cap > 0` so `layout.size() > 0`; null is handled below.
+    // SAFETY: `layout.size() > 0` unconditionally (the `Inner<A, T>` header
+    // alone is non-zero-sized); null is handled below.
     let Some(raw) = NonNull::new(unsafe { alloc(layout) }) else {
         handle_alloc_error(layout)
     };
@@ -381,8 +382,8 @@ impl<T, A: Arity> GappedArray<T, A> {
     ///
     /// This is the branch-collapse step of a trie: a node that has been reduced
     /// to a single child is replaced by that child. The occupancy test reads
-    /// the header bitmap alone, so the common "more than one child" case
-    /// costs a popcount and never touches the heap block. Like
+    /// only the block's header bitmap, so the common "more than one child"
+    /// case costs a popcount and never touches the element storage. Like
     /// [`remove`](Self::remove), a successful take is move-free and retains
     /// capacity.
     ///
@@ -506,10 +507,14 @@ impl<T, A: Arity> GappedArray<T, A> {
     }
 
     /// Reallocates to a fresh `new_cap`-slot block with all live elements
-    /// re-laid at even spread positions, then frees the old block. Used by grow
-    /// and respread. `new_cap` must be a power of two `≥ count`. No-op shape
-    /// when unallocated with `new_cap` chosen for `count == 0` is not allowed;
-    /// callers handle the empty case separately.
+    /// re-laid at even spread positions, then frees the old block. Used by
+    /// `reserve` (grow) and `shrink_to_fit` (shrink). `new_cap` must be a
+    /// power of two `≥ max(count, 1)`; `0` — what `pow2_cap_for` yields for
+    /// zero elements — is never passed, because `reserve` on an unallocated
+    /// array routes through `with_capacity` and `shrink_to_fit` on an empty
+    /// one resets to `new()`. No-op when unallocated. An allocated-but-empty
+    /// block (`count == 0`, e.g. after `clear`) is fine: the copy loop is
+    /// empty.
     fn rebuild_to(&mut self, new_cap: usize) {
         let Some(old_ptr) = self.0 else { return };
         // SAFETY: `old_ptr` valid per the invariant.
@@ -533,9 +538,7 @@ impl<T, A: Arity> GappedArray<T, A> {
         // only when its target exceeds the current capacity (`>= 1`),
         // forcing `k = want >= 1`; `shrink_to_fit` reaches here
         // only when `count >= 1`, so `k = count >= 1`. `pow2_cap_for` of a
-        // positive input is a power of two `>= 1`. (The earlier
-        // "callers only pass `new_cap > capacity`" premise was wrong:
-        // `shrink_to_fit` passes a *smaller* cap.) The `0..count` copy
+        // positive input is a power of two `>= 1`. The `0..count` copy
         // loops degenerate harmlessly when `count == 0`
         // (an allocated-but-empty block, e.g. after `clear` then `reserve`);
         // the copy initialises exactly the `new_live` slots before any
@@ -570,9 +573,11 @@ impl<T, A: Arity> GappedArray<T, A> {
     /// Replaces the block with a fresh `new_cap`-slot block holding all current
     /// elements **plus** the new `(index, value)`, each at its spread position
     /// for the new count. This is "full respread including the new element": it
-    /// always succeeds (no hole search), so it is the correct fallback when no
-    /// between-neighbors hole exists and the grow path's placement. Requires
-    /// `index` absent and `count + 1 <= new_cap`, `new_cap` a power of two.
+    /// always succeeds (no hole search), so it serves two callers: `insert`'s
+    /// full-block grow path (`new_cap == 2 * cap`) and `place_absent`'s
+    /// respread tie-break arm (`new_cap == cap`), which the shift costs never
+    /// let win in practice. Requires `index` absent and `count + 1 <= new_cap`,
+    /// `new_cap` a power of two.
     ///
     /// Panic-safe: the only fallible step is `alloc_block` (before any move);
     /// element relocation is `copy_nonoverlapping` (bitwise, no drop/user code)
@@ -716,7 +721,7 @@ impl<T, A: Arity> GappedArray<T, A> {
         // Hole strictly between the neighbors → place with no move. The probe
         // is the least clear bit in `[p_lo + 1, p_hi)`; `p_lo >= -1`
         // (sentinel) so `p_lo + 1 >= 0` and cast_unsigned is safe.
-        // O(log W), not O(p_hi - p_lo).
+        // O(1) per limb via `nearest_clear_in`, not O(p_hi - p_lo).
         let lo = (p_lo + 1).cast_unsigned();
         if let Some(hole) = live.nearest_clear_in(lo, p_hi) {
             self.write_into_hole(index, hole.as_usize(), value);
@@ -748,7 +753,8 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Nearest hole at a physical slot `<= from` (scanning toward 0). Returns
     /// `(hole_pos, live_elements_crossed)`. Pure over `live` so the caller's
-    /// header snapshot is reused. O(log W) via the bitmap, not O(from). When
+    /// header snapshot is reused. O(1) per limb via
+    /// `nearest_clear_at_or_below`, not O(from). When
     /// reached from `place_absent`, `from == p_lo` is a live slot, so the hole
     /// is strictly below it and `crossed == from - hole_pos >= 1`.
     fn nearest_hole_left(live: A::Bitmap, from: isize) -> Option<(usize, usize)> {
@@ -760,8 +766,9 @@ impl<T, A: Arity> GappedArray<T, A> {
 
     /// Nearest hole at a physical slot `>= from` (scanning up to `cap`).
     /// Returns `(hole_pos, live_elements_crossed)`. Pure over `live` so the
-    /// caller's header snapshot is reused. O(log W) via the bitmap, not
-    /// O(cap - from). When reached from `place_absent`, `from == p_hi` is a
+    /// caller's header snapshot is reused. O(1) per limb via
+    /// `nearest_clear_in`, not O(cap - from). When reached from
+    /// `place_absent`, `from == p_hi` is a
     /// live slot (or `cap`), so the hole is strictly above it and
     /// `crossed == hole_pos - from >= 1` (or `None` when `from == cap`).
     fn nearest_hole_right(live: A::Bitmap, from: usize, cap: usize) -> Option<(usize, usize)> {
@@ -1709,7 +1716,9 @@ impl<'a, T, A: Arity> IntoIterator for &'a mut GappedArray<T, A> {
 /// tracked in `remaining_live` and frees the block.
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IntoIter<T, A: Arity> {
-    /// `Some` while a block is owned; `None` for a drained-empty source.
+    /// `Some` while a block is owned; `None` only when the source
+    /// `GappedArray` was unallocated at construction (an allocated-but-empty
+    /// source still owns its block).
     ptr: Option<NonNull<Inner<A, T>>>,
     /// Logical indices not yet yielded, ascending. Drives the index half.
     occ_bits: arity_bitmap::BitIter<A::Bitmap>,
