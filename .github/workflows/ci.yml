@@ -17,7 +17,7 @@ jobs:
         with:
           toolchain: nightly
           components: rustfmt
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just
       - run: just fmt-check
@@ -29,7 +29,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just
       - run: just lint
@@ -43,7 +43,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           targets: thumbv7em-none-eabihf
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just
       - run: just nostd
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just
       - run: just doc
@@ -78,7 +78,7 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just,cargo-hack
       - run: just features
@@ -101,7 +101,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just,cargo-nextest
       - run: just ci-test ${{ matrix.toolchain }}
@@ -149,7 +149,7 @@ jobs:
       # taiki-e/install-action verifies the binary is actually present each run,
       # so it is not fooled by the cargo install ledger (.crates2.json) that
       # rust-cache round-trips while cleaning the binary out of ~/.cargo/bin.
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just,cargo-fuzz
       # Persist + grow each target's corpus across runs so later runs explore
@@ -177,7 +177,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: nightly
-      - uses: taiki-e/install-action@v2.85.9
+      - uses: taiki-e/install-action@v2.87.10
         with:
           tool: just
       # Pull requests run quick benches (assert they execute on every platform
