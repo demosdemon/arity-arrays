@@ -28,6 +28,20 @@ use crate::children::Packed;
 /// not check it and [`children_mut`](Self::children_mut) is public because
 /// adopters build structures those operations would not (a valueless
 /// single-child root under a parallel inserter, proof nodes).
+///
+/// # Hash-validity contract
+///
+/// An edge is *sealed* once the hash walk ([`hash`](crate::hash())) has
+/// recorded its node's hash on it, and *inline* before that. A sealed edge's
+/// cached hash is the hash of its node at the full path where it was sealed,
+/// next to the siblings it had then, under the hasher that sealed it. The
+/// walk trusts every sealed edge it does not rehash, so a caller building
+/// structure through `children_mut` must not attach a sealed edge at a
+/// different full path, next to different siblings under a sibling-sensitive
+/// hasher, or under a different hasher.
+/// [`materialize_subtree`](crate::materialize_subtree) is how a caller makes
+/// a subtree safe to move or rehash: it turns every edge in it inline, and
+/// the next walk rehashes all of it.
 pub struct Node<V, E, A: Arity, S: ChildStore<A> = Packed> {
     partial_path: Path<A>,
     value: Option<V>,
@@ -90,6 +104,18 @@ impl<V, E, A: Arity, S: ChildStore<A>> Node<V, E, A, S> {
     #[must_use]
     pub const fn children_mut(&mut self) -> &mut S::Map<E> {
         &mut self.children
+    }
+
+    /// The three parts borrowed at once: the partial path, the value slot,
+    /// and the children map. For code that must read the path and the map
+    /// while rewriting the value, such as a hasher's `update_value`.
+    #[must_use]
+    pub const fn parts_mut(&mut self) -> (&[A::Index], &mut Option<V>, &mut S::Map<E>) {
+        (
+            self.partial_path.as_slice(),
+            &mut self.value,
+            &mut self.children,
+        )
     }
 
     /// `true` if the node has no children.
@@ -222,6 +248,16 @@ mod tests {
         assert_eq!(&*p, &[u4(9), u4(9)]);
         assert_eq!(v, Some(5));
         assert_eq!(children.count(), 1);
+    }
+
+    #[test]
+    fn parts_mut_borrows_the_three_parts_disjointly() {
+        let mut node = Node::<u32, BoxEdge, Arity16>::leaf(path(&[1]), 5);
+        let (partial_path, value, children) = node.parts_mut();
+        assert_eq!(partial_path, &[u4(1)]);
+        children.insert(u4(2), BoxEdge(Box::new(Node::leaf(Path::new(), 1))));
+        *value.as_mut().expect("valued") += u32::try_from(children.count()).expect("small");
+        assert_eq!(node.value(), Some(&6));
     }
 
     #[test]

@@ -32,6 +32,13 @@ impl<A: Arity> Path<A> {
         A::Index::try_from_slice(bytes).map(Self::from)
     }
 
+    /// The indices as a slice; the `Deref` target, usable in `const`
+    /// contexts.
+    #[must_use]
+    pub const fn as_slice(&self) -> &[A::Index] {
+        &self.0
+    }
+
     /// The path as bytes, one per index. A free reinterpretation.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {

@@ -14,9 +14,10 @@ use crate::children::ChildStore;
 /// The application's node store: how edges resolve to nodes, and how nodes
 /// move between the inline and sealed states.
 ///
-/// This trait, [`ChildMap`](crate::ChildMap), and the shape of [`Node`] are
-/// the crate's hard-to-reverse surface: while the crate is at `0.x`, any
-/// change to them bumps the minor version.
+/// This trait, [`ChildMap`](crate::ChildMap),
+/// [`TrieHasher`](crate::TrieHasher), and the shape of [`Node`] are the
+/// crate's hard-to-reverse surface: while the crate is at `0.x`, any change
+/// to them bumps the minor version.
 ///
 /// # Edge states
 ///
@@ -25,13 +26,14 @@ use crate::children::ChildStore;
 /// inline edges; [`materialize`](Self::materialize) turns a sealed edge
 /// inline and [`seal`](Self::seal) turns an inline edge sealed. The mutation
 /// operations in [`ops`](crate::ops) leave every node on a mutated path
-/// inline.
+/// inline; the hash walk ([`hash`](crate::hash())) seals inline edges on its
+/// way up.
 ///
 /// # Why `materialize` and `as_inline` are safe to implement
 ///
-/// The mutation walks derive raw pointers from the `&mut Node` these two
-/// return. The property those pointers rely on, that the reference is the
-/// only live one to that node for as long as the edge borrow lasts, is what
+/// The mutation and hash walks derive raw pointers from the `&mut Node`
+/// these two return. The property those pointers rely on, that the reference is
+/// the only live one to that node for as long as the edge borrow lasts, is what
 /// the type system guarantees of every safe implementation: a safe store
 /// cannot return an `&'e mut Node` that aliases anything else reachable while
 /// `'e` is live, and cannot return one that lives in its own state, because

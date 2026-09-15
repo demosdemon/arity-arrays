@@ -25,6 +25,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   module). Each descends over an explicit frame stack and performs every
   fallible store call before its first structural change, so on `Err` the
   trie's contents are unchanged.
+- `HashInput`, `TrieHasher`, `hash`, and `hash_sealed_node` (`hash` module):
+  the pluggable hash scheme every trie is hashed under. The walk is
+  post-order over a frame stack, seals inline edges on the way up, rehashes a
+  lone sealed child under a sibling-sensitive parent, and calls the hasher's
+  `update_value` before hashing each node that carries a value.
+- `Node::parts_mut` (`node` module) and `Path::as_slice` (`path` module).
 
 ## [arity-arrays Unreleased]
 

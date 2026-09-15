@@ -88,6 +88,16 @@ impl<'r, N, X> Frames<'r, N, X> {
         Ok(())
     }
 
+    /// Gives the top node one last time, then discards its frame. Unlike
+    /// [`pop`](Self::pop) this also serves the root frame, after which the
+    /// stack holds nothing and must not be used.
+    pub fn pop_with<R>(&mut self, f: impl FnOnce(&mut N, X) -> R) -> R {
+        let (node, extra) = self.frames.pop().expect("a stack is never empty");
+        // SAFETY: as in `top`: this frame was the top, so its pointer is
+        // valid, and it is used here for the last time.
+        f(unsafe { &mut *node }, extra)
+    }
+
     /// Discards the top frame and returns its data; `None` if only the root
     /// frame remains, which is never popped.
     pub fn pop(&mut self) -> Option<X> {
