@@ -21,6 +21,7 @@ arbitrary = { version = "1", features = ["derive"] }
 postcard = { version = "1.1.3", features = ["use-std"] }
 serde_with = "3.21.0"
 arity-arrays = { version = "0.2.0-alpha.1", path = "../crates/arity-arrays", features = [ "serde_with" ] }
+arity-tries = { version = "0.1.0-alpha.1", path = "../crates/arity-tries" }
 
 [[bin]]
 name = "mutation-16"
@@ -102,6 +103,34 @@ bench = false
 [[bin]]
 name = "gapped-256"
 path = "fuzz_targets/gapped_256.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tries-ops-16"
+path = "fuzz_targets/tries_ops_16.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tries-ops-256"
+path = "fuzz_targets/tries_ops_256.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tries-shape-16"
+path = "fuzz_targets/tries_shape_16.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tries-shape-256"
+path = "fuzz_targets/tries_shape_256.rs"
 test = false
 doc = false
 bench = false

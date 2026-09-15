@@ -37,6 +37,7 @@ version = "0.0.0"
 dependencies = [
  "arbitrary",
  "arity-arrays",
+ "arity-tries",
  "libfuzzer-sys",
  "postcard",
  "serde_with",
@@ -56,6 +57,14 @@ version = "0.1.3"
 dependencies = [
  "seq-macro",
  "serde",
+]
+
+[[package]]
+name = "arity-tries"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "arity-arrays",
+ "stable_deref_trait",
 ]
 
 [[package]]

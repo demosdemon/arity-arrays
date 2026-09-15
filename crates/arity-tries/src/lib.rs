@@ -1,6 +1,12 @@
 #![no_std]
 
 //! Path-compressed fixed-arity tries over `arity-arrays`.
+//!
+//! One node type, [`Node`], and the algorithms over it, each generic over an
+//! application-provided [`EdgeStore`] and, for hashing, a [`TrieHasher`]:
+//! [`get`], [`insert`], [`remove`], [`remove_prefix`], [`iter()`], [`visit`],
+//! [`validate()`], and [`hash()`]. No walk recurses on the call stack. See the
+//! crate README for the contracts an adopter relies on.
 
 extern crate alloc;
 
@@ -20,6 +26,18 @@ mod testing;
 pub mod validate;
 
 pub use arity_arrays::Arity;
+#[cfg(feature = "8")]
+pub use arity_arrays::Arity8;
+#[cfg(feature = "16")]
+pub use arity_arrays::Arity16;
+#[cfg(feature = "32")]
+pub use arity_arrays::Arity32;
+#[cfg(feature = "64")]
+pub use arity_arrays::Arity64;
+#[cfg(feature = "128")]
+pub use arity_arrays::Arity128;
+#[cfg(feature = "256")]
+pub use arity_arrays::Arity256;
 pub use children::ChildMap;
 pub use children::ChildStore;
 pub use children::Fixed;
@@ -52,3 +70,8 @@ pub use validate::ValidateError;
 pub use validate::Violation;
 pub use validate::ViolationKind;
 pub use validate::validate;
+
+/// The crate README's usage example, compiled as a doctest so it cannot rot.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

@@ -140,6 +140,10 @@ jobs:
           - gapped-256
           - compact-decode
           - bitmap-roundtrip
+          - tries-ops-16
+          - tries-ops-256
+          - tries-shape-16
+          - tries-shape-256
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust

@@ -43,6 +43,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   failures, early drop of `NodeRef` and `Iter`, and a deep chain through
   every entry point on a small stack. The Miri workflow gains a shard per
   new test binary.
+- Fuzz targets `tries-ops-16`, `tries-ops-256`, `tries-shape-16`, and
+  `tries-shape-256` in the `fuzz/` crate and the CI fuzz matrix; the
+  `benches/ops.rs` criterion bench (`insert`, `remove`, `remove_prefix`, and
+  `hash` per representation and shape), run by `just bench` and `just
+  ci-bench`.
 
 ## [arity-arrays Unreleased]
 

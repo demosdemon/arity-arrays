@@ -112,9 +112,10 @@ fuzz-linux target time="60":
       cargo fuzz run {{target}} -- -max_total_time={{time}} -rss_limit_mb=4096
 
 # Pass criterion args after `--`, e.g. `just bench -- --sample-size 50`.
-# Run both criterion benches via cargo-criterion.
+# Run the criterion benches of both crates via cargo-criterion.
 bench *args:
     cargo criterion -p arity-arrays {{ args }}
+    cargo criterion -p arity-tries {{ args }}
 
 # The separate build is a fail-fast compile check before the timed run (always
 # nightly, release profile). For the local charting workflow use `just bench`
@@ -128,6 +129,8 @@ bench *args:
 ci-bench *args:
     cargo build --release -p arity-arrays --all-features --bench throughput --bench trie
     cargo bench -p arity-arrays --all-features --bench throughput --bench trie -- {{ args }}
+    cargo build --release -p arity-tries --all-features --bench ops
+    cargo bench -p arity-tries --all-features --bench ops -- {{ args }}
 
 # Build+run the throughput bench under the opt-in `lto-probe` profile (fat
 # LTO, codegen-units=1). This measures the profile as a whole, NOT LTO: the

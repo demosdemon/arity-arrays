@@ -245,6 +245,7 @@ In dependency order:
 | [`arity-index`](crates/arity-index) | Bounds-check-free niche integer index types (`U3`–`U7`, and `u8` for arity-256) with double-ended range iterators. A small, contained `unsafe` surface (niche constructors and range-iterator internals). No `alloc`. |
 | [`arity-bitmap`](crates/arity-bitmap) | Fixed-width bitmaps (`u8`–`u128`, `U256`) indexed by the niche integers, with a double-ended set-bit iterator. **No `unsafe` operations** (`#![deny(unsafe_code)]`; its only `unsafe` is an audited private `unsafe impl` contract marker). No `alloc`. |
 | [`arity-arrays`](crates/arity-arrays) | `FixedArray`, `PackedArray`, and `GappedArray` over the sealed `Arity` trait. The only crate that needs `alloc`; carries `unsafe` for all three representations — bounds-check-elided indexing in `FixedArray`, and the heap layouts of `PackedArray` and `GappedArray` — as does `arity-index`, for its niche/range internals. |
+| [`arity-tries`](crates/arity-tries) | Path-compressed tries over the three arrays, generic over the node store and the hash scheme. No walk recurses on the call stack. Carries `unsafe` behind two invariants: the raw-pointer frame stack behind mutation and hashing, and the lifetime-erased handle chain behind lookup and iteration, each documented in its own module and both run under Miri. |
 
 Splitting this way keeps the primitive types reusable and lets their tests run
 without touching the allocator. `arity-bitmap` depends on `arity-index` so the
@@ -286,12 +287,13 @@ assert_eq!(pairs, vec![(1, 10), (9, 90)]);
 
 ## Cargo features
 
-All three crates expose per-arity features `8`, `16`, `32`, `64`, `128`, `256`
+All four crates expose per-arity features `8`, `16`, `32`, `64`, `128`, `256`
 (all default-on) so a consumer can compile only the widths it uses — e.g. the
 hexary (firewood) shape is `default-features = false, features = ["16"]`. The
 features are **additive** and safe to combine. The arrays crate additionally
-offers `serde`, `serde_with` (the `Compact` adapter), and `std`. See each
-crate's README for the full table.
+offers `serde`, `serde_with` (the `Compact` adapter), and `std`; the tries
+crate forwards each arity feature to the arrays crate and offers `std`. See
+each crate's README for the full table.
 
 > [!NOTE]
 > The test suite runs only under the default (all-arity) feature set — run
@@ -302,7 +304,8 @@ crate's README for the full table.
 ## Versioning and MSRV
 
 These crates are not at a uniform version: `arity-arrays` and `arity-bitmap` are
-**`0.2.0`**, `arity-index` is **`0.1.3`** — production-*worthy*, but
+**`0.2.0`**, `arity-index` is **`0.1.3`**, and `arity-tries` is an unpublished
+**`0.1.0-alpha.1`** — the first three production-*worthy*, but
 reserving the right to refine the API with real downstream use before a `1.0`
 commitment. Under Cargo semver, each crate's `0.y.z` version means a breaking
 change to that crate bumps its minor (`y`) version.
