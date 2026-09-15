@@ -5,6 +5,15 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
+## [arity-tries Unreleased]
+
+### Added
+
+- New crate (initial version `0.1.0-alpha.1`): path-compressed fixed-arity
+  tries over `arity-arrays`.
+- `Path<A>`, `join`, `PrefixOverlap`, and `common_prefix` (`path` module);
+  `key::nibbles` and `key::unnibble` for arity 16.
+
 ## [arity-arrays Unreleased]
 
 ### Fixed

@@ -1,0 +1,36 @@
+[package]
+name = "arity-tries"
+version = "0.1.0-alpha.1"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Path-compressed fixed-arity tries over arity-arrays, generic over the node store and the hash scheme"
+autobenches = false
+keywords = ["trie", "radix", "merkle", "no-std"]
+categories = ["no-std", "data-structures"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+arity-arrays = { workspace = true }
+
+[features]
+default = ["8", "16", "32", "64", "128", "256"]
+"8" = ["arity-arrays/8"]
+"16" = ["arity-arrays/16"]
+"32" = ["arity-arrays/32"]
+"64" = ["arity-arrays/64"]
+"128" = ["arity-arrays/128"]
+"256" = ["arity-arrays/256"]
+std = ["arity-arrays/std"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+criterion = "0.8.2"
+proptest = "1.11.0"

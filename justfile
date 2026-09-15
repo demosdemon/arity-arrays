@@ -52,9 +52,10 @@ doc pkg='':
 # Locks the #![no_std] discipline: if any selected feature transitively pulls std,
 # the build fails (no std in the sysroot). Requires the target first:
 # `rustup target add thumbv7em-none-eabihf`.
-# Build the crate for a bare-metal no_std target.
+# Build the published crates for a bare-metal no_std target.
 nostd:
     cargo build -p arity-arrays --no-default-features --features "16,serde" --target thumbv7em-none-eabihf
+    cargo build -p arity-tries --no-default-features --features "16" --target thumbv7em-none-eabihf
 
 # Every interpreted operation is far slower than native, so the proptests dominate;
 # scope to a package (`just miri arity-index`) or lower PROPTEST_CASES to iterate faster.
