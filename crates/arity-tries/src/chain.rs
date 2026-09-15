@@ -1,4 +1,4 @@
-//! The erased-lifetime handle chain behind lookup.
+//! The erased-lifetime handle chain behind lookup, iteration, and validation.
 //!
 //! # Invariant
 //!

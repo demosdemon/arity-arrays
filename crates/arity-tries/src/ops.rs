@@ -30,8 +30,9 @@
 //! [`remove_prefix`], whose all-or-nothing contract holds the deleted subtree
 //! resident until the whole of it is materialized. That is bounded by the
 //! caller's own data, not by anything a hostile key can supply. A caller that
-//! must cap the spike removes a large prefix in chunks, calling [`remove`]
-//! per key.
+//! must cap the spike removes a large prefix in chunks, walking the keys
+//! under it with [`iter`](crate::iter()) from a start key and calling
+//! [`remove`] per key.
 
 use core::ptr;
 

@@ -31,6 +31,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   lone sealed child under a sibling-sensitive parent, and calls the hasher's
   `update_value` before hashing each node that carries a value.
 - `Node::parts_mut` (`node` module) and `Path::as_slice` (`path` module).
+- `iter`, `Iter`, and `visit` (`iter` module): every valued node ascending
+  from an optional start key, over a handle chain. `validate`, `Violation`,
+  `ViolationKind`, and `ValidateError` (`validate` module) report the first
+  node that breaks the structural invariant.
 
 ## [arity-arrays Unreleased]
 

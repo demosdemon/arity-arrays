@@ -28,6 +28,7 @@ use crate::children::Packed;
 /// not check it and [`children_mut`](Self::children_mut) is public because
 /// adopters build structures those operations would not (a valueless
 /// single-child root under a parallel inserter, proof nodes).
+/// [`validate`](crate::validate()) reports violations.
 ///
 /// # Hash-validity contract
 ///
