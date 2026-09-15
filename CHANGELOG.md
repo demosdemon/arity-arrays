@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   tries over `arity-arrays`.
 - `Path<A>`, `join`, `PrefixOverlap`, and `common_prefix` (`path` module);
   `key::nibbles` and `key::unnibble` for arity 16.
+- `ChildStore` and `ChildMap` with the `Packed`, `Gapped`, and `Fixed` markers
+  (`children` module); `Node<V, E, A, S>` and the non-recursive `drop_subtree`
+  (`node` module).
 
 ## [arity-arrays Unreleased]
 
