@@ -5,7 +5,28 @@ loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), group
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 `0.x`, a breaking change bumps the minor version.
 
-## [arity-tries Unreleased]
+## [arity-arrays Unreleased]
+
+### Fixed
+
+- Documentation only. The `take_only_child` docs on `PackedArray` and
+  `GappedArray` said the occupancy test "never touches the heap block"; it reads
+  the block's header bitmap and never touches the element storage. The
+  `packed::IntoIter` / `gapped::IntoIter` field docs, `GappedArray`'s internal
+  hole-search comments (O(1) per limb, not O(log WIDTH)), and several other
+  internal comments were corrected to match the code.
+
+## [arity-index Unreleased]
+
+### Fixed
+
+- Documentation only. The crate-level docs said iteration over a type's whole
+  domain is via `NicheRange` / `NicheRangeInclusive`; `NicheRange` is half-open
+  with an exclusive end of the index type and so can never cover the whole
+  domain. The docs now point at `Niche::all` (a full `NicheRangeInclusive`) for
+  the whole domain and at the two range types for sub-ranges.
+
+## [arity-tries 0.1.0-alpha.1] - 2026-09-15
 
 ### Added
 
@@ -48,27 +69,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   `benches/ops.rs` criterion bench (`insert`, `remove`, `remove_prefix`, and
   `hash` per representation and shape), run by `just bench` and `just
   ci-bench`.
-
-## [arity-arrays Unreleased]
-
-### Fixed
-
-- Documentation only. The `take_only_child` docs on `PackedArray` and
-  `GappedArray` said the occupancy test "never touches the heap block"; it reads
-  the block's header bitmap and never touches the element storage. The
-  `packed::IntoIter` / `gapped::IntoIter` field docs, `GappedArray`'s internal
-  hole-search comments (O(1) per limb, not O(log WIDTH)), and several other
-  internal comments were corrected to match the code.
-
-## [arity-index Unreleased]
-
-### Fixed
-
-- Documentation only. The crate-level docs said iteration over a type's whole
-  domain is via `NicheRange` / `NicheRangeInclusive`; `NicheRange` is half-open
-  with an exclusive end of the index type and so can never cover the whole
-  domain. The docs now point at `Niche::all` (a full `NicheRangeInclusive`) for
-  the whole domain and at the two range types for sub-ranges.
 
 ## [arity-arrays 0.2.0] - 2026-07-20
 
