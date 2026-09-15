@@ -17,6 +17,7 @@ all-features = true
 
 [dependencies]
 arity-arrays = { workspace = true }
+stable_deref_trait = { version = "1.2.1", default-features = false, features = ["alloc"] }
 
 [features]
 default = ["8", "16", "32", "64", "128", "256"]
@@ -26,7 +27,7 @@ default = ["8", "16", "32", "64", "128", "256"]
 "64" = ["arity-arrays/64"]
 "128" = ["arity-arrays/128"]
 "256" = ["arity-arrays/256"]
-std = ["arity-arrays/std"]
+std = ["arity-arrays/std", "stable_deref_trait/std"]
 
 [lints]
 workspace = true

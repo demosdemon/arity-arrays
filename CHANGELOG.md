@@ -16,6 +16,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 - `ChildStore` and `ChildMap` with the `Packed`, `Gapped`, and `Fixed` markers
   (`children` module); `Node<V, E, A, S>` and the non-recursive `drop_subtree`
   (`node` module).
+- `EdgeStore`, the application-provided node store every algorithm is generic
+  over, and `NodeRef` (`store` module), the `InMemory` reference store
+  with its owning `MemEdge` (`memory` module), and `get_node` and `get`
+  (`ops` module). Lookup walks a handle chain in a loop, so a key of any
+  length is resolved on a bounded stack.
 
 ## [arity-arrays Unreleased]
 

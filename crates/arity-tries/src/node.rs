@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn drop_subtree_visits_every_node_without_recursion() {
-        let depth = 100_000;
+        let depth = if cfg!(miri) { 256 } else { 100_000 };
         let handle = std::thread::Builder::new()
             .stack_size(64 * 1024)
             .spawn(move || {
