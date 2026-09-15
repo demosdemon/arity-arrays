@@ -49,6 +49,16 @@ jobs:
             args: -p arity-arrays --test mutation -- _arity256
           - name: trie
             args: -p arity-arrays --test trie_internals
+          # arity-tries: the model binary is split by arity like `mutation`,
+          # since the arity-256 cases dominate.
+          - name: tries-model
+            args: -p arity-tries --test model -- --skip _arity256
+          - name: tries-model-256
+            args: -p arity-tries --test model -- _arity256
+          - name: tries-early-drop
+            args: -p arity-tries --test early_drop
+          - name: tries-shapes
+            args: -p arity-tries --test shapes
     env:
       # disable-isolation: the round-trip proptests read/write their regression
       # files on disk and seed from host entropy; strict-provenance stays on.

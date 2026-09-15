@@ -35,6 +35,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
   from an optional start key, over a handle chain. `validate`, `Violation`,
   `ViolationKind`, and `ValidateError` (`validate` module) report the first
   node that breaks the structural invariant.
+- Integration tests: model-based proptests over every arity and
+  representation against three stores (owning edges with reference handles,
+  Firewood-shaped `Box`/`Rc` edges with an enum handle, and edges holding
+  their node by value), hash properties under plain, sibling-sensitive, and
+  value-rewriting test hashers, failure atomicity under injected store
+  failures, early drop of `NodeRef` and `Iter`, and a deep chain through
+  every entry point on a small stack. The Miri workflow gains a shard per
+  new test binary.
 
 ## [arity-arrays Unreleased]
 
