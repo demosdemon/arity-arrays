@@ -6,6 +6,7 @@ extern crate alloc;
 
 mod chain;
 pub mod children;
+mod frames;
 pub mod key;
 pub mod memory;
 pub mod node;
@@ -25,6 +26,10 @@ pub use node::Node;
 pub use node::drop_subtree;
 pub use ops::get;
 pub use ops::get_node;
+pub use ops::insert;
+pub use ops::materialize_subtree;
+pub use ops::remove;
+pub use ops::remove_prefix;
 pub use path::Path;
 pub use path::PrefixOverlap;
 pub use path::common_prefix;

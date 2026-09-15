@@ -22,11 +22,12 @@ use crate::children::Packed;
 ///
 /// A settled trie has no valueless node with fewer than two children: a node
 /// with no value has at least two children and a node with no children has a
-/// value. The invariant is a property of tries the crate's own mutation
-/// operations produce, not of the type: constructors do not check it and
-/// [`children_mut`](Self::children_mut) is public because adopters build
-/// structures those operations would not (a valueless single-child root
-/// under a parallel inserter, proof nodes).
+/// value. The invariant is a property of tries reached only through
+/// [`insert`](crate::insert), [`remove`](crate::remove), and
+/// [`remove_prefix`](crate::remove_prefix), not of the type: constructors do
+/// not check it and [`children_mut`](Self::children_mut) is public because
+/// adopters build structures those operations would not (a valueless
+/// single-child root under a parallel inserter, proof nodes).
 pub struct Node<V, E, A: Arity, S: ChildStore<A> = Packed> {
     partial_path: Path<A>,
     value: Option<V>,

@@ -19,8 +19,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while at
 - `EdgeStore`, the application-provided node store every algorithm is generic
   over, and `NodeRef` (`store` module), the `InMemory` reference store
   with its owning `MemEdge` (`memory` module), and `get_node` and `get`
-  (`ops` module). Lookup walks a handle chain in a loop, so a key of any
-  length is resolved on a bounded stack.
+  (`ops` module). Lookup walks a handle chain in a loop, so it resolves a
+  key of any length on a bounded stack.
+- `insert`, `remove`, `remove_prefix`, and `materialize_subtree` (`ops`
+  module). Each descends over an explicit frame stack and performs every
+  fallible store call before its first structural change, so on `Err` the
+  trie's contents are unchanged.
 
 ## [arity-arrays Unreleased]
 

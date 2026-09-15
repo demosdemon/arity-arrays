@@ -23,12 +23,25 @@ use crate::children::ChildStore;
 /// An edge is *inline* when [`hash`](Self::hash) is `None` and *sealed* when
 /// it is `Some`. [`as_inline`](Self::as_inline) returns `Some` exactly for
 /// inline edges; [`materialize`](Self::materialize) turns a sealed edge
-/// inline and [`seal`](Self::seal) turns an inline edge sealed.
+/// inline and [`seal`](Self::seal) turns an inline edge sealed. The mutation
+/// operations in [`ops`](crate::ops) leave every node on a mutated path
+/// inline.
 ///
-/// [`StableDeref`] is an `unsafe` trait because no safe signature can say
-/// that a handle's pointee stays put when the handle moves, so an adopter
-/// whose handle is not a plain reference or a standard smart pointer writes
-/// `unsafe impl` for its [`Shared`](Self::Shared).
+/// # Why `materialize` and `as_inline` are safe to implement
+///
+/// The mutation walks derive raw pointers from the `&mut Node` these two
+/// return. The property those pointers rely on, that the reference is the
+/// only live one to that node for as long as the edge borrow lasts, is what
+/// the type system guarantees of every safe implementation: a safe store
+/// cannot return an `&'e mut Node` that aliases anything else reachable while
+/// `'e` is live, and cannot return one that lives in its own state, because
+/// the lifetime is the edge's, not the store's. A store that produces two
+/// live exclusive references to one node has written `unsafe` of its own and
+/// owns that bug. [`StableDeref`] is different: no safe signature can say
+/// that a handle's pointee stays put when the handle moves, so that trait is
+/// `unsafe` and an adopter whose handle is not a plain reference or a
+/// standard smart pointer writes `unsafe impl` for its
+/// [`Shared`](Self::Shared).
 pub trait EdgeStore<V, A: Arity, S: ChildStore<A>> {
     /// The edge type held in a node's children map.
     type Edge;
