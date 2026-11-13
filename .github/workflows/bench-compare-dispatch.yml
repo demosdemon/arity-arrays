@@ -35,7 +35,6 @@ jobs:
       base-ref: ${{ inputs.base }}
       head-ref: ${{ inputs.head }}
       quick: ${{ inputs.quick }}
-      post-comment: false
       pr-number: ${{ inputs.pr-number }}
       # Quick mode uses 90, matching bench-compare.yml's default (see that
       # input's description). Full precision (BENCH_MODE=ci) uses 330 for the

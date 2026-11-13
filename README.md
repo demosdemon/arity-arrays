@@ -88,9 +88,8 @@ contrasts — codegen-units alone, LTO's marginal effect, and the two combined �
 and `--update-docs` republishes the tables below and the `docs/bench/` SVGs from
 the default-profile arm. See `scripts/bench-ab.sh` for the full rationale.
 
-Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
-as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`
-on a PR for a full-precision on-demand re-run. Every push to `main` runs the same
+Pull requests get an automatic quick A/B comparison (base vs head, same runner) in the
+job summary of their "Bench compare (PR)" check. Every push to `main` runs a
 full-precision comparison against the previous commit, and the "Bench compare (manual)"
 workflow's `workflow_dispatch` inputs trigger an ad-hoc comparison between any two refs.
 None of these commit anything — see `.github/workflows/bench-compare.yml`. Compare two

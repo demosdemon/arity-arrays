@@ -21,7 +21,6 @@ jobs:
       base-ref: ${{ github.event.before }}
       head-ref: ${{ github.sha }}
       quick: false
-      post-comment: false
       # Full precision (BENCH_MODE=ci) runs four interleaved captures in
       # ~4-4.5h; see bench-compare.yml's timeout-minutes input for the budget.
       # 330 is GitHub's 360-minute hosted-runner ceiling minus a 30 min margin.
