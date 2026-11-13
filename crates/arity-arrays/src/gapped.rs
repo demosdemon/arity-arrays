@@ -494,7 +494,8 @@ impl<T, A: Arity> GappedArray<T, A> {
                 data: core::ptr::null_mut(),
                 _marker: PhantomData,
             },
-            // SAFETY: `Some` ↔ a valid allocation with initialised header/elements.
+            // SAFETY: `Some` ↔ a valid allocation with initialised
+            // header/elements.
             |ptr| unsafe {
                 PresentIterMut {
                     occ_bits: ptr.as_ref().occupancy.bits(),
@@ -983,7 +984,8 @@ impl<T, A: Arity> GappedArray<T, A> {
                 data: core::ptr::null(),
                 _marker: PhantomData,
             },
-            // SAFETY: `Some` ↔ a valid allocation with initialised header/elements.
+            // SAFETY: `Some` ↔ a valid allocation with initialised
+            // header/elements.
             |ptr| unsafe {
                 PresentIter {
                     occ_bits: ptr.as_ref().occupancy.bits(),

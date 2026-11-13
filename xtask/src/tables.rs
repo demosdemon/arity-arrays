@@ -354,7 +354,8 @@ mod tests {
                 },
                 1.1,
             ),
-            // Cell B single-op exercises the second arm of `for cell in [A, B]`.
+            // Cell B single-op exercises the second arm of
+            // `for cell in [A, B]`.
             Measurement::point(
                 BenchId::Single {
                     cell: Cell::B,
