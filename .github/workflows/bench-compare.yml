@@ -33,13 +33,14 @@ on:
         required: true
       quick:
         description: >-
-          Reduce sample count/timing for a faster, noisier comparison. Passed
-          to the bench harness via BENCH_QUICK, not a Criterion CLI flag:
-          cargo-criterion (needed for --message-format=json) does not forward
-          --quick, --sample-size, or any other criterion CLI flag to the
-          harness the way plain `cargo bench` does, and criterion.toml has no
-          sample-size knob either — so the harness itself (benches/throughput.rs,
-          benches/trie.rs) reads this env var directly.
+          Reduce sample count/timing for a faster, noisier comparison. Selects
+          the bench harness's BENCH_MODE (`quick` when true, `ci` when false),
+          not a Criterion CLI flag: cargo-criterion (needed for
+          --message-format=json) does not forward --quick, --sample-size, or
+          any other criterion CLI flag to the harness the way plain
+          `cargo bench` does, and criterion.toml has no sample-size knob
+          either, so the harness reads the env var directly. See
+          crates/arity-arrays/benches/bench_mode.rs for each mode's settings.
         type: boolean
         required: true
       post-comment:
@@ -58,28 +59,22 @@ on:
         required: false
       timeout-minutes:
         description: >-
-          Per-run guardrail, in minutes. Default (90) covers quick mode:
-          quick runs stay single-pass (base once, head once) at this
-          default; measured at ~5.6s/point x ~498 points x 2 captures (base,
-          head) with criterion's default nresamples (100_000, pre-dating the
-          BENCH_QUICK/nresamples fix below); nresamples(1000) cuts CPU-time
-          ~61% but wall-clock savings depend on the runner's core count,
-          which the 60-minute prior default didn't leave enough margin for.
-          Point count is up from ~390 (+108, roughly +28%) since the
-          BENCH-03 get_hit_rand/get_miss_rand benches were added (4x6+4x6 for
-          cell_a, 5x6+5x6 for cell_b); re-check this estimate the next time
-          bench point count grows materially.
+          Per-run guardrail, in minutes. Default (90) covers quick mode,
+          which stays single-pass (base once, head once). Budget: ~1050
+          benchmark points per capture (the throughput and trie benches; count
+          the `benchmark-complete` records in a capture's JSON) at
+          ~1.4s/point with plotting disabled, so ~25 min per capture and
+          ~55 min per run with setup. Before plotting was disabled the same
+          run needed ~5s/point and outgrew this default. Re-check the
+          estimate when the point count grows materially.
           Full-precision callers (bench-compare-push.yml,
           bench-compare-comment.yml, bench-compare-dispatch.yml with
           quick=false) override this to 330 for the interleaved
-          base/head/head/base run — four captures instead of quick's two
-          (~2x the two-capture budget), capped 30 min under GitHub's
-          360-minute hosted-runner ceiling (full precision is also ~9x
-          slower per point: 100 samples/3s warm-up/5s measurement vs
-          quick's 10/100ms/500ms). The same point-count growth applies to the
-          full-precision run, so the margin under the ceiling is now
-          materially thinner than when 330 was set — and 330 was already the
-          last raise available under the 360-minute ceiling.
+          base/head/head/base run (four captures instead of two), capped
+          30 min under GitHub's 360-minute hosted-runner ceiling.
+          BENCH_MODE=ci is sized to fit that: ~3.3s/point (0.5s warm-up, 1.5s
+          or more of measurement, then analysis overhead), so ~1h per capture
+          and ~4-4.5h for the run. Criterion's own defaults would need ~12h.
         type: number
         required: false
         default: 90
@@ -93,9 +88,16 @@ jobs:
       BASE_REF: ${{ inputs.base-ref }}
       HEAD_REF: ${{ inputs.head-ref }}
       PR_NUMBER: ${{ inputs.pr-number }}
-      # Read directly by benches/throughput.rs and benches/trie.rs, not by
-      # Criterion's own CLI parsing — see the `quick` input's description above.
-      BENCH_QUICK: ${{ inputs.quick && '1' || '' }}
+      # Read directly by the bench harness, not by Criterion's own CLI parsing;
+      # see the `quick` input's description above.
+      BENCH_MODE: ${{ inputs.quick && 'quick' || 'ci' }}
+      # Read only by base/head refs whose harness predates BENCH_MODE: it
+      # treated any set BENCH_QUICK, even an empty one, as quick mode, and
+      # ignores BENCH_MODE. Setting it keeps such a capture in quick mode
+      # rather than criterion's defaults, which would overrun the timeout.
+      # Current harnesses ignore it. Remove it once no comparison needs a ref
+      # older than the BENCH_MODE harness.
+      BENCH_QUICK: "1"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -130,7 +132,16 @@ jobs:
       # No --all-features here (unlike ci.yml's `bench` smoke-test job): none of the
       # optional features (serde, serde_with, std) gate any bench code (no
       # `#[cfg(feature = ...)]` in benches/), so --all-features would only add compile
-      # time, not comparison coverage. Matches the existing local `bench-export` recipe.
+      # time, not comparison coverage. The local `bench-export` recipe omits it too.
+      #
+      # --plotting-backend disabled: nothing consumes cargo-criterion's HTML/SVG
+      # reports here (only the JSON on stdout feeds `xtask compare`), and on a
+      # Linux runner the plotters backend dominates the run: a quick capture on
+      # ubuntu-26.04 spent ~4.3s of every ~5.1s benchmark point (~83% of its
+      # wall-clock time) after the point's result printed, and a 4-CPU Linux
+      # reproduction measured ~4.9s/point with plots against ~1.4s without. The
+      # flag belongs to the installed cargo-criterion, not the checked-out
+      # tree, so it works at any base ref.
       #
       # Interleave base/head/head/base on one runner (FULL-PRECISION runs only)
       # so each ref's two captures straddle the run's midpoint symmetrically
@@ -140,31 +151,31 @@ jobs:
       # are evenly spaced in wall-clock time; the back-to-back head pair skips a
       # rebuild, a second-order asymmetry dwarfed by the multi-minute capture
       # cost. `xtask compare` averages the two captures per ref (point = mean,
-      # interval = envelope). Quick PR runs
-      # skip the second pair and stay single-pass. These capture steps still
+      # interval = envelope). Quick runs skip the second pair and stay
+      # single-pass. These capture steps still
       # invoke only cargo/cargo-criterion — never just/xtask — so they work at an
       # older base-ref that predates the repo-tracked tools.
       - name: Capture base
         run: |
           git checkout "$BASE_REF"
-          cargo criterion -p arity-arrays --message-format=json > base1.json
+          cargo criterion -p arity-arrays --plotting-backend disabled --message-format=json > base1.json
 
       - name: Capture head
         run: |
           git checkout "$HEAD_REF"
-          cargo criterion -p arity-arrays --message-format=json > head1.json
+          cargo criterion -p arity-arrays --plotting-backend disabled --message-format=json > head1.json
 
       - name: Capture head (interleave replicate)
         if: ${{ !inputs.quick }}
         run: |
           git checkout "$HEAD_REF"
-          cargo criterion -p arity-arrays --message-format=json > head2.json
+          cargo criterion -p arity-arrays --plotting-backend disabled --message-format=json > head2.json
 
       - name: Capture base (interleave replicate)
         if: ${{ !inputs.quick }}
         run: |
           git checkout "$BASE_REF"
-          cargo criterion -p arity-arrays --message-format=json > base2.json
+          cargo criterion -p arity-arrays --plotting-backend disabled --message-format=json > base2.json
 
       - name: Render comparison
         run: |

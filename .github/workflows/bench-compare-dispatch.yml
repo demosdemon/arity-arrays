@@ -15,7 +15,7 @@ on:
         type: string
         required: true
       quick:
-        description: Reduce Criterion's sample count for a faster, noisier comparison.
+        description: Run in quick mode (fewer samples, shorter timing) for a faster, noisier comparison.
         type: boolean
         default: false
       pr-number:
@@ -37,8 +37,8 @@ jobs:
       quick: ${{ inputs.quick }}
       post-comment: false
       pr-number: ${{ inputs.pr-number }}
-      # quick keeps bench-compare.yml's default (see that input's
-      # description); full precision covers the interleaved four-capture run
-      # (~2x the two-capture budget), capped 30 min under GitHub's
-      # 360-minute hosted-runner ceiling.
+      # Quick mode uses 90, matching bench-compare.yml's default (see that
+      # input's description). Full precision (BENCH_MODE=ci) uses 330 for the
+      # interleaved four-capture run (~4-4.5h): GitHub's 360-minute
+      # hosted-runner ceiling minus a 30 min margin.
       timeout-minutes: ${{ inputs.quick && 90 || 330 }}

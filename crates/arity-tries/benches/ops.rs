@@ -4,8 +4,8 @@
 //! and the hash walk per node, and it is what confirms that no representation
 //! pays a per-level reallocation on write.
 
-#[path = "../../arity-arrays/benches/quick_criterion.rs"]
-mod quick;
+#[path = "../../arity-arrays/benches/bench_mode.rs"]
+mod mode;
 
 use std::hint::black_box;
 
@@ -30,7 +30,7 @@ use criterion::BatchSize;
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::criterion_group;
-use quick::quick_criterion;
+use mode::configured_criterion;
 
 type Store = InMemory<u64>;
 type N<A, S> = Node<u32, MemEdge<u32, A, S, u64>, A, S>;
@@ -193,7 +193,7 @@ fn arity256(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = quick_criterion();
+    config = configured_criterion();
     targets = arity16, arity256
 );
 

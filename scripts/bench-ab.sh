@@ -66,9 +66,9 @@
 # * No `--all-features`: no bench code is feature-gated, so it would add
 #   compile time and no coverage. Matches `just bench-export` and the CI
 #   capture step.
-# * Quick mode sets `BENCH_QUICK=1` rather than passing `--quick`:
+# * Quick mode sets `BENCH_MODE=quick` rather than passing `--quick`:
 #   cargo-criterion forwards no criterion CLI flag to the harness. See
-#   crates/arity-arrays/benches/quick_criterion.rs.
+#   crates/arity-arrays/benches/bench_mode.rs.
 # * `--update-docs` regenerates the README tables and docs/bench SVGs from arm
 #   **A** only. The published numbers describe what a downstream consumer gets,
 #   and a consumer picks its own profile -- the default one is the honest
@@ -91,7 +91,7 @@ Interleaved multi-profile benchmark: default vs lto-probe vs codegen-units-only.
 
 usage: scripts/bench-ab.sh [--quick] [--label NAME] [--update-docs]
 
-  --quick         BENCH_QUICK=1 and a single pass (A B C). Directional only.
+  --quick         BENCH_MODE=quick and a single pass (A B C). Directional only.
   --label NAME    capture prefix under bench-data/ (default: ab).
   --update-docs   republish README tables + docs/bench SVGs from arm A.
                   Refused on --quick runs.
@@ -158,7 +158,7 @@ if [ "$QUICK" -eq 1 ]; then
   # quick mode's noise level. Mirrors the CI workflow skipping its second
   # pair on quick runs.
   ORDER=(A B C)
-  export BENCH_QUICK=1
+  export BENCH_MODE=quick
 else
   ORDER=(A B C C B A)
 fi
