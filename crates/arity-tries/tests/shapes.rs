@@ -44,7 +44,8 @@ where
             Op::Hash,
             Op::Remove(vec![1, 2]),
         ],
-        // Root with an empty partial path and a value, valued node with children.
+        // Root with an empty partial path and a value, valued node with
+        // children.
         &[
             Op::Insert(vec![], 0),
             Op::Insert(vec![1], 1),

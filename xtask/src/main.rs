@@ -33,8 +33,8 @@ fn main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        // Alternate Debug renders the whole context chain, plus a backtrace when
-        // RUST_BACKTRACE is set.
+        // Alternate Debug renders the whole context chain, plus a backtrace
+        // when RUST_BACKTRACE is set.
         Err(e) => {
             eprintln!("{e:?}");
             ExitCode::from(1)

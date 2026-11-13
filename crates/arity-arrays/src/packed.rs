@@ -270,7 +270,8 @@ impl<T, A: Arity> PackedArray<T, A> {
                 back_consumed: 0,
                 _marker: PhantomData,
             },
-            // SAFETY: `Some` ↔ a valid allocation with initialised bitmap/elements.
+            // SAFETY: `Some` ↔ a valid allocation with initialised
+            // bitmap/elements.
             |ptr| unsafe {
                 let bitmap = ptr.as_ref().bitmap;
                 PresentIter {
@@ -342,9 +343,9 @@ impl<T, A: Arity> PackedArray<T, A> {
     fn present_slice_mut(&mut self) -> (A::Bitmap, &mut [T]) {
         self.0.map_or_else(
             || (A::Bitmap::ZERO, &mut [][..]),
-            // SAFETY: `Some` ↔ a valid allocation with an initialised bitmap and
-            // `count` initialised, contiguous elements, exclusively borrowed
-            // through `&mut self`.
+            // SAFETY: `Some` ↔ a valid allocation with an initialised bitmap
+            // and `count` initialised, contiguous elements, exclusively
+            // borrowed through `&mut self`.
             |ptr| unsafe {
                 let bitmap = ptr.as_ref().bitmap;
                 let count = bitmap.count_ones() as usize;
