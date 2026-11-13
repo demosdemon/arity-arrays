@@ -95,13 +95,11 @@ jobs:
         with:
           fetch-depth: 0
           toolchain: nightly
+          tools: cargo-criterion
 
       - name: Fetch PR head
         if: inputs.pr-number != ''
         run: git fetch origin "refs/pull/$PR_NUMBER/head"
-
-      - name: Install cargo-criterion
-        run: cargo install --locked cargo-criterion
 
       # Build and stash xtask from this workflow's ref BEFORE the capture steps
       # check out other refs (see the file header). $RUNNER_TEMP is outside the
