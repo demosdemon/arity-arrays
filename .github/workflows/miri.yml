@@ -92,7 +92,7 @@ jobs:
         with:
           toolchain: nightly
           components: miri
-      - uses: taiki-e/install-action@v2.87.10
+      - uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-nextest
       - run: cargo +nightly miri nextest run ${{ matrix.args }}
