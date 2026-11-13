@@ -3,8 +3,8 @@
 //! module, which the `bench_internals` integration test also includes and
 //! unit-tests.
 
-#[path = "quick_criterion.rs"]
-mod quick;
+#[path = "bench_mode.rs"]
+mod mode;
 #[path = "support.rs"]
 mod support;
 
@@ -23,7 +23,7 @@ use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use quick::quick_criterion;
+use mode::configured_criterion;
 use support::BenchContainer;
 use support::BoxArr;
 use support::ChurnOp;
@@ -429,7 +429,7 @@ fn convert(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = quick_criterion();
+    config = configured_criterion();
     targets = single_cell_a, single_cell_b, rand_cell_a, rand_cell_b,
               workload_cell_a, workload_cell_b,
               build_collect_cell_a, build_collect_cell_b, convert

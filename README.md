@@ -106,8 +106,8 @@ trie shapes are Chain (deep), Bushy (broad), and Realistic (tapered).
 
 > [!NOTE]
 > Sub-10 ns single points sit near criterion's measurement floor, and the fast
-> `BENCH_QUICK` configuration used for quick CI comparisons (`sample_size = 10`)
-> widens their confidence intervals further. Do not gate a regression or make a
+> `BENCH_MODE=quick` configuration used for quick CI comparisons
+> (`sample_size = 10`) widens their confidence intervals further. Do not gate a regression or make a
 > fine-grained ranking claim on a single-digit-nanosecond delta without first
 > re-running that specific group at criterion defaults. The coarse multi-×
 > differences between representations sit well above this noise floor and are the

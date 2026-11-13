@@ -14,9 +14,12 @@ on:
 
 jobs:
   miri:
-    # Guardrail well under the 6h hard limit: the heaviest shard is ~2.7h, so a
-    # timeout there means a runaway, not normal growth.
     uses: ./.github/workflows/miri.yml
     with:
       proptest-cases: "256"
-      timeout-minutes: 720
+      # GitHub-hosted jobs are hard-capped at 6h whatever timeout-minutes
+      # says, so a larger value here is silently clamped. 350 keeps the failure
+      # an explicit timeout rather than a platform cancellation. Shards are
+      # sized at ~3.5-4h on the slowest observed runner (see miri.yml), so
+      # hitting this means a shard has outgrown its split, not normal noise.
+      timeout-minutes: 350

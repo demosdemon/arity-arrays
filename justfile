@@ -59,7 +59,12 @@ nostd:
 
 # Every interpreted operation is far slower than native, so the proptests dominate;
 # scope to a package (`just miri arity-index`) or lower PROPTEST_CASES to iterate faster.
-# Check unsafe code under Miri — SLOW: a full workspace run takes ~6-10 min.
+# Cost scales linearly with PROPTEST_CASES: the default 64 is roughly 10-15 CPU-hours
+# across the workspace, and the single slowest test (`rc_fixed_arity256` in
+# arity-tries' `model`) alone takes 30-60 min, a serial floor that extra cores
+# cannot reduce. PROPTEST_CASES=8 cuts the total and that floor by 8x. CI's
+# sharded daily run uses 256 cases.
+# Check unsafe code under Miri — SLOW: hours at the default proptest case count.
 miri pkg='':
     MIRIFLAGS="{{ miri_flags }}" PROPTEST_CASES={{ proptest_cases }} \
         cargo +nightly miri nextest run {{ if pkg == '' { '--workspace' } else { '--package ' + pkg } }}

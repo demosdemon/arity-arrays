@@ -8,10 +8,22 @@ name: Miri
 # --tests` under the default feature set: Miri runs with default features, so
 # the feature-gated `serde_*` test targets compile to no-ops and need no shard.
 # A new *ungated* `tests/*.rs` target is NOT picked up automatically — add a
-# shard here for it. The mutation binary dominates (~4h at 256 cases), so it is
-# split by arity: the `mutation-256` shard runs every `*_arity256` test
-# (packed and gapped) via the `_arity256` substring filter, and the `mutation`
-# shard runs the rest via `--skip _arity256` — an exhaustive, disjoint split.
+# shard here for it. The heavy binaries are split by test name so each shard
+# fits under GitHub's 6h hosted-job limit, and each split is exhaustive and
+# disjoint. The `mutation` binary splits by arity: the `mutation-256` shard runs
+# every `*_arity256` test (packed and gapped) via the `_arity256` substring
+# filter, and the `mutation` shard runs the rest via `--skip _arity256`.
+#
+# Size shards for the slowest hosted runner, not the typical one. Two 256-case
+# runs of the same commit (2026-11) found some ubuntu-26.04 instances ~1.7x
+# slower than others, consistently across every test in a shard. A shard's
+# wall-clock time is about max(longest test, total test time / 4): nextest
+# runs one single-threaded Miri test per vCPU, and these runners ran 4 at a
+# time. .config/nextest.toml starts the longest tests first so that bound
+# holds. On the slow runner `tries-model-256` measured 4.8h before
+# prioritization and projects to ~3.9h with it; `tries-model-in-memory` and
+# `tries-model-rc-value` project to ~3.5-3.7h from measured per-test times.
+# That leaves ~2h of headroom for test growth before a shard needs splitting.
 on:
   workflow_call:
     inputs:
@@ -49,12 +61,22 @@ jobs:
             args: -p arity-arrays --test mutation -- _arity256
           - name: trie
             args: -p arity-arrays --test trie_internals
-          # arity-tries: the model binary is split by arity like `mutation`,
-          # since the arity-256 cases dominate.
-          - name: tries-model
-            args: -p arity-tries --test model -- --skip _arity256
+          # arity-tries: the model binary is the heaviest (~45 CPU-hours of
+          # Miri at 256 cases on a slow runner, measured 2026-11), so it
+          # splits three ways. The
+          # arity-256 tests get their own shard; the rest split by test
+          # family, with the second filterset the exact complement of the
+          # first so a new test lands in one of them automatically.
           - name: tries-model-256
-            args: -p arity-tries --test model -- _arity256
+            args: -p arity-tries --test model -E 'test(/_arity256$/)'
+          - name: tries-model-in-memory
+            args: >-
+              -p arity-tries --test model
+              -E 'not test(/_arity256$/) and test(/^(in_memory|hash|atomic)_/)'
+          - name: tries-model-rc-value
+            args: >-
+              -p arity-tries --test model
+              -E 'not test(/_arity256$/) and not test(/^(in_memory|hash|atomic)_/)'
           - name: tries-early-drop
             args: -p arity-tries --test early_drop
           - name: tries-shapes

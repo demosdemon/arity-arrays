@@ -1,0 +1,27 @@
+# Schedule the longest-running tests first. Nextest otherwise starts tests in
+# lexicographic order, so a multi-hour test that sorts late starts after its
+# shard's short tests have finished. It then runs alone on one thread while the
+# others sit idle, which stretches the shard's wall-clock time well past
+# total-work / thread-count. Starting the long poles first lets the short tests
+# fill the remaining threads around them.
+#
+# Under Miri the `Fixed` representation dominates at high arity: every node is
+# an arity-wide child array, and Miri pays for every slot it initializes,
+# retags, and drops. In the daily 256-case Miri run (measured 2026-11 on
+# ubuntu-26.04), `*_fixed_arity256` took 2-3.5h per test, `*_fixed_arity128`
+# 1-2h, and `*_fixed_arity64` 40-75 min, against 15-60 min for most other model
+# tests. The priority values only need to descend in that order. Natively the
+# whole `model` binary runs in under a second at 256 cases, so the ordering
+# costs nothing outside Miri.
+
+[[profile.default.overrides]]
+filter = 'binary(model) and test(/_fixed_arity256$/)'
+priority = 100
+
+[[profile.default.overrides]]
+filter = 'binary(model) and test(/_fixed_arity128$/)'
+priority = 90
+
+[[profile.default.overrides]]
+filter = 'binary(model) and test(/_fixed_arity64$/)'
+priority = 80

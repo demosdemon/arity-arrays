@@ -7,8 +7,8 @@
 
 #[path = "trie_fixture.rs"]
 mod fixture;
-#[path = "quick_criterion.rs"]
-mod quick;
+#[path = "bench_mode.rs"]
+mod mode;
 
 use std::hint::black_box;
 
@@ -27,7 +27,7 @@ use fixture::PackedStore;
 use fixture::Shape;
 use fixture::Trie;
 use fixture::build;
-use quick::quick_criterion;
+use mode::configured_criterion;
 
 const SHAPES: &[Shape] = &[Shape::Chain, Shape::Bushy, Shape::Realistic];
 
@@ -113,7 +113,7 @@ trie_cell!(arity256, "arity256", [
 
 criterion_group!(
     name = benches;
-    config = quick_criterion();
+    config = configured_criterion();
     targets = arity16, arity256
 );
 
@@ -131,7 +131,7 @@ fn main() {
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
             benches();
-            quick_criterion().configure_from_args().final_summary();
+            configured_criterion().configure_from_args().final_summary();
         })
         .expect("spawn bench harness thread")
         .join()
