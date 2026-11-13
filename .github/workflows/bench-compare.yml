@@ -1,25 +1,22 @@
 name: Bench compare
 
 # Reusable A/B benchmark comparison, shared by the trigger-specific callers
-# (bench-compare-pr.yml, bench-compare-dispatch.yml, bench-compare-push.yml,
-# bench-compare-comment.yml). Runs base/head single-pass on quick runs, or
-# base/head/head/base (interleaved A/B/B/A) on full-precision runs, on one
-# runner so both captures share the same hardware/thermal noise floor, diffs
-# them via `xtask compare`, and always publishes to the job summary (plus a
-# sticky PR comment when the caller asks for one). No `permissions:` block
-# here — the reusable workflow inherits whatever the calling job grants,
-# mirroring miri.yml.
+# (bench-compare-pr.yml, bench-compare-dispatch.yml, bench-compare-push.yml).
+# Runs base/head single-pass on quick runs, or base/head/head/base
+# (interleaved A/B/B/A) on full-precision runs, on one runner so both captures
+# share the same hardware/thermal noise floor, diffs them via `xtask compare`,
+# and publishes to the job summary. No `permissions:` block here — the
+# reusable workflow inherits whatever the calling job grants, mirroring
+# miri.yml. Every caller grants only `contents: read`: the captures build and
+# run the compared refs' code, which for a PR may come from a fork.
 #
 # The base/head capture steps intentionally never invoke `just`/`xtask` — only
 # `cargo`/`cargo-criterion` directly. Those repo-tracked tools may not exist yet
 # at an older base-ref (notably the very first comparison run after this
 # workflow is added). `xtask` is built once up front from THIS workflow's ref
 # (before any capture checks out another ref) and stashed, so `Render
-# comparison` runs a tool whose CLI matches this workflow's invocation. Under
-# pull_request_target the workflow definition comes from the base branch, so a
-# tool built from the PR head — which may have changed the xtask CLI — would be
-# invoked with the wrong arguments; building from the workflow's own ref avoids
-# that skew.
+# comparison` runs a tool whose CLI matches this workflow's invocation even
+# when a compared ref has a different xtask CLI.
 on:
   workflow_call:
     inputs:
@@ -43,15 +40,11 @@ on:
           crates/arity-arrays/benches/bench_mode.rs for each mode's settings.
         type: boolean
         required: true
-      post-comment:
-        description: Whether to upsert a sticky PR comment.
-        type: boolean
-        required: true
       pr-number:
         description: >-
           PR head-ref belongs to, when it may be a fork commit. Required when
-          post-comment is true or head-ref is a fork commit not otherwise
-          reachable in this repository. Typed string, not number: a
+          head-ref is a fork commit not otherwise reachable in this
+          repository. Typed string, not number: a
           workflow_dispatch string input forwarded by expression into a
           number-typed workflow_call input fails Actions' template validation
           (actions/runner#2848).
@@ -67,9 +60,8 @@ on:
           ~55 min per run with setup. Before plotting was disabled the same
           run needed ~5s/point and outgrew this default. Re-check the
           estimate when the point count grows materially.
-          Full-precision callers (bench-compare-push.yml,
-          bench-compare-comment.yml, bench-compare-dispatch.yml with
-          quick=false) override this to 330 for the interleaved
+          Full-precision callers (bench-compare-push.yml, and
+          bench-compare-dispatch.yml with quick=false) override this to 330 for the interleaved
           base/head/head/base run (four captures instead of two), capped
           30 min under GitHub's 360-minute hosted-runner ceiling.
           BENCH_MODE=ci is sized to fit that: ~3.3s/point (0.5s warm-up, 1.5s
@@ -105,8 +97,7 @@ jobs:
           # This is a public repo, so subsequent git fetch/checkout only ever need
           # anonymous read access — no reason to leave GITHUB_TOKEN sitting in the
           # local git credential helper for a (possibly fork-controlled) build/bench
-          # step to find. The PR-comment write path goes through actions/github-script
-          # (step below), which gets its own token independently of this credential.
+          # step to find, even though callers grant it read access only.
           persist-credentials: false
 
       - name: Fetch PR head (fork-safe)
@@ -204,36 +195,3 @@ jobs:
 
       - name: Publish job summary
         run: cat compare.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upsert PR comment
-        if: inputs.post-comment
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('compare.md', 'utf8');
-            const marker = '<!-- bench-compare -->';
-            const tagged = `${marker}\n${body}`;
-            const prNumber = Number(process.env.PR_NUMBER);
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              per_page: 100,
-            });
-            const existing = comments.find((c) => c.body.startsWith(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: tagged,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: tagged,
-              });
-            }

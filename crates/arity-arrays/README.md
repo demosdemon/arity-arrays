@@ -128,9 +128,8 @@ probe_packed_get`) confirms that on the hot `get` path, the `release` and
 inlining there. Consumers who enable LTO in their own builds may still see
 whole-program gains this narrow probe does not capture.
 
-Pull requests get an automatic quick A/B comparison (base vs head, same runner) posted
-as a sticky comment and in the job summary; comment `@exec-complete-benchmark-comparison`
-on a PR for a full-precision on-demand re-run. Every push to `main` runs the same
+Pull requests get an automatic quick A/B comparison (base vs head, same runner) in the
+job summary of their "Bench compare (PR)" check. Every push to `main` runs a
 full-precision comparison against the previous commit. Compare two local captures the
 same way with `just bench-compare <run> <baseline>`.
 

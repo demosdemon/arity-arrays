@@ -186,7 +186,7 @@ bench-ab *args:
 
 # Unlike `bench-charts`, both labels are required: `xtask compare` always needs two
 # captures (there is no useful single-run mode). Prints the markdown table CI posts to
-# the job summary / PR comment, e.g. `just bench-compare branch main`.
+# the job summary, e.g. `just bench-compare branch main`.
 # Print the A/B delta table (run vs baseline) for two captures.
 bench-compare run baseline:
     cargo run -p xtask -- compare --head bench-data/{{ run }}.json --base bench-data/{{ baseline }}.json
