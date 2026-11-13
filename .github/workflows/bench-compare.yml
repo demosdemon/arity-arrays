@@ -91,22 +91,14 @@ jobs:
       # older than the BENCH_MODE harness.
       BENCH_QUICK: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: $/.github/actions/setup-rust
         with:
           fetch-depth: 0
-          # This is a public repo, so subsequent git fetch/checkout only ever need
-          # anonymous read access — no reason to leave GITHUB_TOKEN sitting in the
-          # local git credential helper for a (possibly fork-controlled) build/bench
-          # step to find, even though callers grant it read access only.
-          persist-credentials: false
+          toolchain: nightly
 
-      - name: Fetch PR head (fork-safe)
+      - name: Fetch PR head
         if: inputs.pr-number != ''
         run: git fetch origin "refs/pull/$PR_NUMBER/head"
-
-      - uses: ./.github/actions/setup-rust
-        with:
-          toolchain: nightly
 
       - name: Install cargo-criterion
         run: cargo install --locked cargo-criterion

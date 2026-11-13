@@ -1,5 +1,7 @@
 name: Set up Rust
-description: Install a Rust toolchain (dtolnay/rust-toolchain) and enable the shared build cache.
+description: >-
+  Check out the repository, install a Rust toolchain (dtolnay/rust-toolchain)
+  with the shared build cache, and install `just` plus any extra prebuilt tools.
 inputs:
   toolchain:
     description: Toolchain to install (e.g. stable, nightly, beta, 1.92.0).
@@ -13,12 +15,41 @@ inputs:
     description: Comma-separated target triples to add.
     required: false
     default: ""
+  fetch-depth:
+    description: Commits of history to fetch (0 fetches all history and tags).
+    required: false
+    default: 1
+  persist-credentials:
+    description: >-
+      Leave GITHUB_TOKEN in the local git config after checkout. Off by
+      default: this is a public repo, so later git fetch/checkout steps need
+      only anonymous read access, and a build or bench step running
+      (possibly fork-controlled) code has no token to find.
+    required: false
+    default: false
+  tools:
+    description: >-
+      Comma-separated taiki-e/install-action tools to install in addition to
+      `just`, which is always installed (e.g. cargo-nextest, cargo-hack).
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: ${{ inputs.persist-credentials }}
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ case(inputs.toolchain == 'msrv', '1.92.0', inputs.toolchain) }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
     - uses: Swatinem/rust-cache@v2
+    # Install prebuilt binaries instead of compiling tools from source.
+    # taiki-e/install-action verifies each binary is actually present on every
+    # run, so it is not fooled by the cargo install ledger (.crates2.json) that
+    # rust-cache round-trips while cleaning the binaries out of ~/.cargo/bin.
+    - uses: taiki-e/install-action@v2.87.10
+      with:
+        tool: just${{ inputs.tools && format(',{0}', inputs.tools) || '' }}

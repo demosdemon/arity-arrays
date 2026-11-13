@@ -30,7 +30,7 @@ jobs:
   compare:
     permissions:
       contents: read
-    uses: ./.github/workflows/bench-compare.yml
+    uses: $/.github/workflows/bench-compare.yml
     with:
       base-ref: ${{ inputs.base }}
       head-ref: ${{ inputs.head }}
