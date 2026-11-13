@@ -87,12 +87,9 @@ jobs:
       MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
       PROPTEST_CASES: ${{ inputs.proptest-cases }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           toolchain: nightly
           components: miri
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: cargo-nextest
+          tools: cargo-nextest
       - run: cargo +nightly miri nextest run ${{ matrix.args }}

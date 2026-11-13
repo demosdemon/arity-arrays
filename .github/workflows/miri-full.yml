@@ -14,7 +14,7 @@ on:
 
 jobs:
   miri:
-    uses: ./.github/workflows/miri.yml
+    uses: $/.github/workflows/miri.yml
     with:
       proptest-cases: "256"
       # GitHub-hosted jobs are hard-capped at 6h whatever timeout-minutes

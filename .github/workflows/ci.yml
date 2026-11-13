@@ -12,26 +12,18 @@ jobs:
   fmt:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           toolchain: nightly
           components: rustfmt
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just
       - run: just fmt-check
 
   lint:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           components: clippy
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just
       - run: just lint
 
   nostd:
@@ -39,24 +31,16 @@ jobs:
     needs: [fmt, lint]
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           targets: thumbv7em-none-eabihf
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just
       - run: just nostd
 
   docs:
     needs: [fmt, lint]
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just
+      - uses: $/.github/actions/setup-rust
       - run: just doc
 
   features:
@@ -73,14 +57,11 @@ jobs:
       matrix:
         toolchain: [msrv, stable, nightly]
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just,cargo-hack
+          tools: cargo-hack
       - run: just features
 
   test:
@@ -97,13 +78,10 @@ jobs:
           - beta
           - nightly
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just,cargo-nextest
+          tools: cargo-nextest
       - run: just ci-test ${{ matrix.toolchain }}
 
   # Per-PR Miri smoke: the shared reusable workflow (miri.yml) at a reduced
@@ -113,7 +91,7 @@ jobs:
   # covers the full 256-case spread.
   miri:
     needs: [test]
-    uses: ./.github/workflows/miri.yml
+    uses: $/.github/workflows/miri.yml
     with:
       proptest-cases: "8"
       timeout-minutes: 30
@@ -145,17 +123,10 @@ jobs:
           - tries-shape-16
           - tries-shape-256
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           toolchain: nightly
-      # Install a prebuilt cargo-fuzz instead of compiling it from source.
-      # taiki-e/install-action verifies the binary is actually present each run,
-      # so it is not fooled by the cargo install ledger (.crates2.json) that
-      # rust-cache round-trips while cleaning the binary out of ~/.cargo/bin.
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just,cargo-fuzz
+          tools: cargo-fuzz
       # Persist + grow each target's corpus across runs so later runs explore
       # deeper. Keyed per target so corpora do not collide.
       - uses: actions/cache@v6
@@ -177,13 +148,9 @@ jobs:
       matrix:
         os: [windows-2025-vs2026, macos-26, ubuntu-26.04, ubuntu-26.04-arm]
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-rust
+      - uses: $/.github/actions/setup-rust
         with:
           toolchain: nightly
-      - uses: taiki-e/install-action@v2.90.3
-        with:
-          tool: just
       # Pull requests run quick benches (assert they execute on every platform
       # without paying for full-precision sampling); merges to main run the full
       # suite.

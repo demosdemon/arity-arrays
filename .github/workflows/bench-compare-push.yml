@@ -16,7 +16,7 @@ jobs:
     if: github.event.before != '0000000000000000000000000000000000000000'
     permissions:
       contents: read
-    uses: ./.github/workflows/bench-compare.yml
+    uses: $/.github/workflows/bench-compare.yml
     with:
       base-ref: ${{ github.event.before }}
       head-ref: ${{ github.sha }}

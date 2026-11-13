@@ -24,7 +24,7 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-    uses: ./.github/workflows/bench-compare.yml
+    uses: $/.github/workflows/bench-compare.yml
     with:
       base-ref: ${{ github.event.pull_request.base.sha }}
       head-ref: ${{ github.event.pull_request.head.sha }}
