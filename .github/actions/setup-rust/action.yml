@@ -50,6 +50,6 @@ runs:
     # taiki-e/install-action verifies each binary is actually present on every
     # run, so it is not fooled by the cargo install ledger (.crates2.json) that
     # rust-cache round-trips while cleaning the binaries out of ~/.cargo/bin.
-    - uses: taiki-e/install-action@v2.87.10
+    - uses: taiki-e/install-action@v2.90.3
       with:
         tool: just${{ inputs.tools && format(',{0}', inputs.tools) || '' }}
